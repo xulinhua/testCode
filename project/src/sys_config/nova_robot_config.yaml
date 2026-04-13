@@ -1,0 +1,34 @@
+robot_config:
+  ip: 192.168.5.1
+  tool_0:
+    x_min: -400
+    x_max: 275
+    y_min: -500
+    y_max: -165
+    z_min: 240
+    z_max: 525
+  tool_1:
+    x_min: -390
+    x_max: 270
+    y_min: -510
+    y_max: -195
+    z_min: 44
+    z_max: 350
+  tool_2:
+    x_min: -390
+    x_max: 270
+    y_min: -510
+    y_max: -195
+    z_min: 44
+    z_max: 350
+gripper_config:
+  enable: true
+  serial_port: /dev/ttyUSB0
+  id: 21
+  servo_params:
+    pos_min: 2000
+    pos_max: 3000
+    speed_min: 0
+    speed_max: 4096
+    force_min: 0
+    force_max: 100

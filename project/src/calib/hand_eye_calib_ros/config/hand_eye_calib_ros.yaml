@@ -1,0 +1,30 @@
+/**:
+  ros__parameters:
+    camID: 0
+    armID: 0 #机械臂ID/场景ID
+    eye_on_hand: false
+    # 配置文件路径
+    config_file: "config/calib_config.yaml"
+    
+    # 话题名称配置
+    aruco_marker_topic: "/aruco_detection/result"
+    robot_pose_topic: "/right_arm_cartesian_pose"
+    robot_ready_state_topic: "/robot_ready_state"
+    robot_run_state_topic: "/robot_run_state"
+    robot_target_pos_topic: "/robot_target_pose"
+    
+    # 服务名称配置
+    robot_control_service: "/robot_control"
+    detect_res_service: "/aruco_detection/get_result"
+    start_calib_service: "/start_calibration"
+    calib_src_img_service: "/aruco_detection/get_aruco_src_img"
+    get_calibration_points_service: "/get_calibration_points"
+    get_robot_pose_service: "/get_robot_pose"
+    
+    # 已移除自动启动标定参数，节点启动后会自动开始标定流程
+    
+    # 定时器周期（毫秒）
+    timer_period_ms: 100
+    
+    # 标定点获取方式（true表示通过服务通讯获取，false表示从本地文件加载）
+    use_service_for_points: true

@@ -1,0 +1,27 @@
+s][INFO][cam_mgr::get_cam_image_topics:2673]相机 0 的彩色图像话题名: /csi_camera_0/color/image_raw
+[cam_mgr_ros][INFO][cam_mgr::get_cam_image_topics:2679]相机 0 的深度图像话题名: /csi_camera_0/depth/image_raw
+[cam_mgr_ros][INFO][cam_mgr::get_cam_image_topics:2684]相机 0 的点云图像话题名: 
+[cam_mgr_ros][INFO][cam_mgr::get_cam_info_topics:2724]开始获取并保存所有相机内参话题名
+[cam_mgr_ros][INFO][cam_mgr::get_cam_info_topics:2751]相机 0 的内参话题名: /csi_camera_0/color/camera_info
+[cam_mgr_ros][INFO][cam_mgr::CamMgrRos: 106]相机节点初始化完成
+[cam_mgr_ros][INFO][cam_mgr::CamMgrRos: 107]=========================
+[cam_mgr_ros][INFO][cam_mgr::CamMgrRos: 118]相机控制服务已创建: camera_control
+[cam_mgr_ros][INFO][cam_mgr::CamMgrRos: 126]相机内参获取服务已创建: cam_/get_intrinsics
+[cam_mgr_ros][INFO][cam_mgr::CamMgrRos: 132]设置图像保存服务已创建: set_image_save
+[cam_mgr_ros][INFO][cam_mgr::CamMgrRos: 137]图像订阅定时器已创建
+[cam_mgr_ros][INFO][cam_mgr::start_background_threads:3023]启动后台监视与重试线程
+[cam_mgr_ros][INFO][cam_mgr::start_background_threads:3026][cam_mgr_ros][INFO][cam_mgr::monitor_opened_cameras_loop:3139]后台线程已创建: monitor_thread joinable, retry_thread joinable
+monitor_opened_cameras_loop 启动
+[cam_mgr_ros][INFO][cam_mgr::retry_open_failed_cameras_loop:3247]retry_open_failed_cameras_loop 启动
+[cam_mgr_ros][WARN][cam_mgr::monitor_opened_cameras_loop:3159]监测到相机 0 进程 218862 已终止或为僵尸，稍后执行清理
+[cam_mgr_ros][INFO][cam_mgr::init_save_threads:3057]图像保存线程池已初始化，线程数: 2
+[cam_mgr_ros][INFO][cam_csi::close_cam_single: 160]CSI相机 0进程已停止，PID: 218862
+[cam_mgr_ros][INFO][cam_mgr::init_display_threads:3106]图像显示线程池已初始化，线程数: 1
+[cam_mgr_ros][INFO][cam_mgr::close_cam_single: 673]通过CamBase接口成功关闭相机 0
+^C[INFO] [1773311323.323892331] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[cam_mgr_ros][INFO][cam_mgr::stop_background_threads:3040]停止后台线程，等待 join
+[cam_mgr_ros][INFO][cam_mgr::stop_background_threads:3045]后台线程已停止
+[cam_mgr_ros][INFO][cam_mgr::close_cam_single: 673]通过CamBase接口成功关闭相机 0
+free(): invalid pointer
+[ros2run]: Aborted
+

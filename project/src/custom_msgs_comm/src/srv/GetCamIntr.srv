@@ -1,0 +1,5 @@
+int32 cam_id
+---
+sensor_msgs/CameraInfo camera_info
+bool success
+string message

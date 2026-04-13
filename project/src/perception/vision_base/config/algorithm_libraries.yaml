@@ -1,0 +1,41 @@
+# 算法库配置文件
+# 用于 AlgorithmLoader 动态加载算法库
+
+algorithm_libraries:
+  # 检测算法（新架构 - 使用 IDetectionTask 接口）
+  detection:
+    - name: "yolo"
+      library: "libyolo_tensorrt.so"
+      enabled: true
+      priority: 1
+      description: "YOLO object detection with TensorRT (new architecture)"
+
+  # OBB检测算法（新架构 - 使用 IOBBDetectionTask 接口）
+  obb_detection:
+    - name: "yolo_obb"
+      library: "libyolo_obb_tensorrt.so"
+      enabled: true
+      priority: 1
+      description: "YOLO OBB (Oriented Bounding Box) detection with TensorRT"
+
+  # 分割算法（新架构 - 使用 ISegmentationTask 接口）
+  segmentation:
+    - name: "yolo_seg"
+      library: "libyolo_seg_tensorrt.so"
+      enabled: true
+      priority: 1
+      description: "YOLO instance segmentation with TensorRT (new architecture)"
+
+  # 以下算法库暂未迁移到新架构，启用后会跳过
+  # 等待后续迁移完成后启用
+
+# 自动发现配置（作为备份机制）
+auto_discovery:
+  enabled: false  # 是否启用自动发现（true: 配置文件不存在或加载失败时自动扫描算法库）
+  prefixes:
+    - "libyolo_"      # 匹配 libyolo_tensorrt.so, libyolo_seg_tensorrt.so
+    - "libscrfd_"     # 匹配未来可能存在的 scrfd 算法库
+    - "libppocr_"     # 匹配未来可能存在的 ppocr 算法库
+    - "libgesture_"   # 匹配未来可能存在的手势识别算法库
+
+

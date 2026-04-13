@@ -1,0 +1,9 @@
+udp_server:
+  ros__parameters:
+    udp_port: 8888
+    udp_buffer_size: 65507
+    client_ip: "192.168.9.177"
+    client_port: 8889
+    bShowRunInfo: true
+    command_max_rate: 20
+    log_interval: 1

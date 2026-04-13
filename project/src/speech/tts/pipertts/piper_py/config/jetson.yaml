@@ -1,0 +1,119 @@
+# Piper Speech Jetson专用配置文件
+# 针对Jetson Orin NX Super的优化配置
+
+# 语音合成参数 (Jetson优化)
+tts:
+  # 语速控制 - Jetson平台建议使用默认值
+  rate: 1.0
+  
+  # 音调控制
+  pitch: 0
+  
+  # 音量控制
+  volume: 80
+  
+  # 噪声参数 - Jetson平台适当降低噪声以提升清晰度
+  noise_scale: 0.5
+  noise_scale_w: 0.6
+  
+  # 语速缩放
+  length_scale: 1.0
+  
+  # 音频采样率 - Jetson支持多种采样率
+  sample_rate: 22050
+
+# 音频输出配置 (Jetson专用)
+audio:
+  # 输出格式
+  format: "wav"
+  
+  # 默认保存路径
+  output_dir: "../../resources/audio_data"
+  
+  # 自动保存合成结果
+  auto_save: true
+  
+  # 播放合成音频 - Jetson支持音频输出
+  auto_play: true
+  
+  # 音频设备设置
+  device:
+    # 默认音频设备
+    default: "hw:0,0"
+    
+    # 支持的音频设备列表
+    available:
+      - "hw:0,0"  # HDMI音频
+      - "hw:1,0"  # 3.5mm音频接口
+      - "pulse"   # PulseAudio
+
+# 模型配置 (Jetson优化)
+model:
+  # 默认模型路径
+  default_model: "../../resources/models/zh_CN/medium/zh_CN-huayan-medium.onnx"
+  
+  # 模型配置文件路径
+  config_path: "../../resources/models/zh_CN/medium/zh_CN-huayan-medium.onnx.json"
+  
+  # 模型缓存大小 - Jetson内存有限，适当减小
+  cache_size: 5
+
+# 系统配置 (Jetson专用)
+system:
+  # 日志级别
+  log_level: "INFO"
+  
+  # 最大内存使用 (MB) - Jetson Orin NX Super有16GB内存
+  max_memory: 4096
+  
+  # 线程数 - 根据CPU核心数调整
+  threads: 8
+  
+  # GPU加速 - Jetson支持GPU推理
+  gpu_acceleration: true
+  
+  # GPU设备ID
+  gpu_device_id: 0
+  
+  # TensorRT优化
+  tensorrt_optimization: true
+  
+  # 功耗管理
+  power:
+    # 最大功耗限制 (W)
+    max_power: 30
+    
+    # 温度阈值 (°C)
+    temperature_threshold: 80
+    
+    # 风扇控制
+    fan_control: true
+
+# 网络配置 (Jetson)
+network:
+  # 模型下载服务器
+  model_server: "https://huggingface.co"
+  
+  # 代理设置
+  proxy: null
+  
+  # 超时时间 (秒)
+  timeout: 30
+
+# ROS集成配置 (可选)
+ros:
+  # 启用ROS支持
+  enabled: false
+  
+  # ROS节点名称
+  node_name: "piper_tts"
+  
+  # 发布话题
+  topics:
+    audio: "/piper/audio"
+    status: "/piper/status"
+  
+  # 服务
+  services:
+    synthesize: "/piper/synthesize"
+    list_voices: "/piper/list_voices"

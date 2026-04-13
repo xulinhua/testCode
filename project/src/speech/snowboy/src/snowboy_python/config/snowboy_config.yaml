@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    # 唤醒词模型路径
+    hotword_model_path: "src/snowboy/src/resources/models/hoson.pmdl"
+    # 资源文件路径
+    hotword_resource_path: "src/snowboy/src/resources/common.res"
+    # 检测灵敏度 (0.0 - 1.0)
+    sensitivity: 0.5

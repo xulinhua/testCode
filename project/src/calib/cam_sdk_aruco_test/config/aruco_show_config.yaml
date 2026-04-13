@@ -1,0 +1,17 @@
+# Aruco显示配置文件
+# 决定是实时相机SDK采图还是直接加载本地指定路径下的图片文件
+
+# 工作模式配置
+work_mode: "file"  # 可选: "camera"(实时相机) 或 "file"(本地图片文件)
+
+# 相机配置 (仅在work_mode为"camera"时有效)
+camera:
+  # 使用的相机配置文件路径
+  config_file: "../../../sys_config/cam_config.yaml"
+
+# 文件配置 (仅在work_mode为"file"时有效)
+file:
+  # 图片文件夹路径
+  image_folder: "./images"
+  # 支持的图片格式
+  image_extensions: [".jpg", ".jpeg", ".png", ".bmp"]

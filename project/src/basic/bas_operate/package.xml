@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>bas_operate</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="xlh@todo.todo">xlh</maintainer>
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- ROS2核心依赖 -->
+  <depend>rclcpp</depend>      <!-- ROS2 C++客户端库，提供基础ROS功能 -->
+  <depend>rcutils</depend>     <!-- ROS2工具库，提供字符串处理等工具函数 -->
+  <depend>yaml_cpp_vendor</depend>  <!-- yaml-cpp配置文件支持 -->
+  
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

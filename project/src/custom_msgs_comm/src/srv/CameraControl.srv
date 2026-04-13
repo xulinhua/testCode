@@ -1,0 +1,12 @@
+int32 cam_id
+int32 sence_id
+int32 operate_type
+---
+bool success
+string message
+
+# operate_type 说明:
+# 1 - 开启相机
+# 2 - 关闭相机
+# 3 - 切换场景参数
+# 4 - 设置自定义话题名 (sence_id: 0=设置图像话题名, 1=设置内参话题名; operate_type: 0=彩色图像, 1=深度图像, 2=彩色内参, 3=深度内参)

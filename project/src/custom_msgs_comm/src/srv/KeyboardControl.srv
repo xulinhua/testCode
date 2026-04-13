@@ -1,0 +1,7 @@
+# 键盘控制服务
+# 请求：按键名称
+string key_name
+---
+# 响应：执行结果
+bool success
+string message

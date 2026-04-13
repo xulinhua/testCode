@@ -1,0 +1,9 @@
+# 移动机械臂到指定位姿服务
+# 请求：目标位姿、速度和机械臂ID
+geometry_msgs/PoseStamped target_pose
+int32 speed
+int32 arm_id
+---
+# 响应：执行结果
+bool success
+string message

@@ -1,0 +1,18 @@
+# 手眼标定配置文件
+
+# 标定配置
+calibration:
+  # 最小标定点数量
+  min_points: 4
+  
+  # 源数据目录
+  source_data_dir: "sys_config/source_calib_data"
+  
+  # 输出数据目录
+  output_data_dir: "output_calib_data"
+  
+  # 坐标系映射关系
+   # 0: XYZ_TO_YZX,     // 相机坐标系xyz -> 机械臂坐标系yzx (默认，机器人行业默认坐标系为YZX) 
+   # 1: XYZ_TO_XYZ,     // 相机坐标系xyz -> 机械臂坐标系xyz
+   # 2: XYZ_TO_ZXY,     // 相机坐标系xyz -> 机械臂坐标系zxy
+  coordinate_mapping: 0

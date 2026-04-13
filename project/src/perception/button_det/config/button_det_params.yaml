@@ -1,0 +1,24 @@
+# Button Detection 节点参数配置文件
+# 用于 ros2 launch 时加载: ros2 launch button_det button_det.py params_file:=config/button_det_params.yaml
+#
+# 配置说明:
+# - camera_id: 启用的相机ID列表（全局配置）
+# - 相机与机械臂的对应关系从 sys_cam_config.yaml 自动获取
+# - 相机类型从 sys_cam_config.yaml 自动获取
+# - 各相机的算法相关参数在各自独立的 cam_X_parameters 中配置
+
+ros__parameters:
+  # 启用相机ID列表（从参数服务器获取相机配置）
+  camera_id: [0]  # 启用相机ID列表，[0, 1, 2]
+
+# ==================== 相机0独立配置 ====================
+cam_0_parameters:
+  # 检测引擎路径
+  engine_path: "install/button_det/models/switch_button.engine"
+  # 标定模式配置
+  usecalib: true
+
+# ==================== 相机1独立配置 ====================
+cam_1_parameters:
+  engine_path: "install/button_det/models/switch_button.engine"
+  usecalib: true

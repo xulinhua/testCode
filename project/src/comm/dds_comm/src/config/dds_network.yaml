@@ -1,0 +1,35 @@
+# DDS网络配置参数
+# 用于DDS通信项目的网络参数配置
+
+# DDS通信配置
+dds_config:
+  domain_id: 0
+  participant_name: "main_participant"
+  qos_profile: "default"
+  
+# 网络地址配置
+network:
+  # 服务器地址（x86主板）
+  server_ip: "192.168.1.100"
+  server_port: 7400
+  
+  # 客户端地址（Jetson主板）
+  client_ip: "192.168.1.101"
+  client_port: 7401
+  
+  # 多播配置
+  multicast_ip: "239.255.0.1"
+  multicast_port: 7400
+
+# 主题配置
+topics:
+  command_topic: "project_command"
+  status_topic: "project_status"
+  robot_pose_topic: "robot_pose"
+  ai_coord_topic: "ai_coordinate"
+
+# 超时配置
+timeout:
+  connection_timeout_ms: 5000
+  read_timeout_ms: 1000
+  write_timeout_ms: 1000

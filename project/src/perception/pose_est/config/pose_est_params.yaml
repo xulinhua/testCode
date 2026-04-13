@@ -1,0 +1,52 @@
+# Pose Est Parameters
+# 配置说明:
+# - camera_id: 启用的相机ID列表（全局配置）
+# - 各相机的算法相关参数在各自独立的 cam_X_parameters 中配置
+
+ros__parameters:
+  # 启用相机ID列表
+  camera_id: [0]
+
+# ==================== 相机0独立配置 ====================
+cam_0_parameters:
+  # FoundationPose模型配置
+  refiner_engine_path: "install/pose_est/models/refiner_hwc_dynamic_fp16.engine"
+  scorer_engine_path: "install/pose_est/models/scorer_hwc_dynamic_fp16.engine"
+  mesh_path: "install/pose_est/test_data/jetson-box/mesh/Texture_1.obj"
+  target_name: "jetson-box"
+
+  # YOLO实例分割模型配置（用于生成物体mask）
+  seg_engine_path: "install/pose_est/models/jetson-box.engine"
+  # 目标物体类别名称（空字符串表示自动选择置信度最高的检测，否则指定类别名称如 "bottle"）
+  target_class_name: "jetson-box"
+  seg_conf_threshold: 0.5       # 分割置信度阈值
+  seg_iou_threshold: 0.3        # IoU阈值
+
+  # Track后验校验参数（防止物体离开视野后仍输出无意义的pose）
+  # 多点深度一致性：投影3D边界框的15个采样点到2D，检查深度图匹配度
+  track_max_depth_error: 0.15     # 单点最大允许深度偏差(m)
+  track_min_visible_ratio: 0.3    # 深度一致的采样点比例阈值(0~1)，低于此值认为物体已消失
+  track_fail_reset_count: 10      # 连续Track校验失败多少次后回到IDLE重新检测
+  reinit_period_ms: 5000         # Track多久后强制重新Register防漂移(ms)，0=禁用
+
+  # 标定模式配置
+  usecalib: true               # 是否使用标定矩阵将位姿转换到base_link坐标系
+  # camera_type: "realsense"    # 相机类型（可选，用于自动生成话题名）
+
+# ==================== 相机1独立配置 ====================
+cam_1_parameters:
+  refiner_engine_path: "install/pose_est/models/refiner_hwc_dynamic_fp16.engine"
+  scorer_engine_path: "install/pose_est/models/scorer_hwc_dynamic_fp16.engine"
+  mesh_path: "install/pose_est/test_data/jetson-box/mesh/Texture_1.obj"
+  target_name: "jetson-box"
+  seg_engine_path: "install/pose_est/models/jetson-box.engine"
+  target_class_name: "jetson-box"
+  seg_conf_threshold: 0.5
+  seg_iou_threshold: 0.3
+  usecalib: true
+
+  # Track后验校验参数
+  track_max_depth_error: 0.15
+  track_min_visible_ratio: 0.3
+  track_fail_reset_count: 10
+  reinit_period_ms: 5000

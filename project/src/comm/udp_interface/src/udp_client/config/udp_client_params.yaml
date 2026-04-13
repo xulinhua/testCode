@@ -1,0 +1,15 @@
+udp_client:
+  ros__parameters:
+    server_ip: "192.168.9.30"
+    server_port: 8888
+    client_port: 8889
+    bShowRunInfo: true
+    log_interval: 1 
+    camera_type: "Realsense"  # 可选: "Realsense" 或 "Gemini"
+    udp_blocking_mode: false  # UDP发送阻塞模式，默认为非阻塞
+    auto_start_enabled: true      # 启用自动启动（项目）功能（总开关）
+    auto_start_camera: true       # 自动启动camera项目
+    auto_start_pcl2laser: true    # 自动启动pcl2laser项目
+    auto_start_detection: false    # 自动启动detection项目
+    auto_start_cmd_dispatcher: false    # 自动启动cmd_dispatcher项目
+    auto_start_delay: 10.0        # UDP客户端启动后10秒开始自动启动项目

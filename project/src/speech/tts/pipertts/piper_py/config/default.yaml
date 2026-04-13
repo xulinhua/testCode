@@ -1,0 +1,62 @@
+# Piper Speech 默认配置文件
+# 适用于通用环境的默认配置
+
+# 语音合成参数
+tts:
+  # 语速控制 (0.5 = 慢速, 1.0 = 正常, 2.0 = 快速)
+  rate: 1.0
+  
+  # 音调控制 (-12 = 降低八度, 0 = 正常, +12 = 升高八度)
+  pitch: 0
+  
+  # 音量控制 (0-100%)
+  volume: 80
+  
+  # 噪声参数
+  noise_scale: 0.667
+  noise_scale_w: 0.8
+  
+  # 语速缩放
+  length_scale: 1.0
+  
+  # 音频采样率
+  sample_rate: 22050
+
+# 音频输出配置
+audio:
+  # 输出格式
+  format: "wav"
+  
+  # 默认保存路径
+  output_dir: "../../resources/audio_data"
+  
+  # 自动保存合成结果
+  auto_save: true
+  
+  # 播放合成音频
+  auto_play: false
+
+# 模型配置
+model:
+  # 默认模型路径
+  default_model: "../../resources/models/zh_CN/medium/zh_CN-huayan-medium.onnx"
+  
+  # 模型配置文件路径
+  config_path: "../../resources/models/zh_CN/medium/zh_CN-huayan-medium.onnx.json"
+  
+  # 模型缓存大小
+  cache_size: 10
+
+# 系统配置
+system:
+  # 日志级别
+  log_level: "INFO"
+  
+  # 最大内存使用 (MB)
+  max_memory: 1024
+  
+  # 线程数
+  threads: 4
+  
+  # GPU加速
+  gpu_acceleration: true

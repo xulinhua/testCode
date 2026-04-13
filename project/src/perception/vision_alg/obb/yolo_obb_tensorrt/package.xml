@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>yolo_obb_tensorrt</name>
+  <version>1.0.0</version>
+  <description>YOLO OBB (Oriented Bounding Box) Detection with TensorRT backend</description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>vision_base</depend>
+  <depend>log_system</depend>
+  <depend>bas_operate</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

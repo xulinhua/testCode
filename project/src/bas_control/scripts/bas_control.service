@@ -1,0 +1,46 @@
+[Unit]
+Description=BAS Control Node - 统一部署控制层
+Documentation=https://github.com/your-repo/bas_control
+After=network.target ros2.service
+Wants=ros2.service
+
+[Service]
+Type=simple
+User=robot
+Group=robot
+WorkingDirectory=/home/robot/ros2_ws
+
+# 环境设置
+Environment="ROS_DOMAIN_ID=0"
+Environment="RMW_IMPLEMENTATION=rmw_cyclonedds_cpp"
+
+# 启动命令（需要根据实际路径修改）
+ExecStartPre=/bin/bash -c 'source /opt/ros/humble/setup.bash && source /home/robot/ros2_ws/install/setup.bash'
+ExecStart=/bin/bash -c 'source /opt/ros/humble/setup.bash && source /home/robot/ros2_ws/install/setup.bash && ros2 run bas_control bas_control_node'
+
+# 重启策略
+Restart=on-failure
+RestartSec=10s
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bas_control
+
+# 安全配置（根据实际需求调整）
+# PrivateTmp=yes
+# ProtectSystem=strict
+# ProtectHome=read-only
+# ReadWritePaths=/var/log/bas /tmp
+
+# 优雅停止（发送SIGTERM信号）
+KillSignal=SIGTERM
+KillMode=process
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

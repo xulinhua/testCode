@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>bas_control</name>
+  <version>1.0.0</version>
+  <description>统一部署控制层，负责视觉系统模块的启动管理、状态监控、任务调度和配置热更新</description>
+  <maintainer email="developer@example.com">Developer</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>builtin_interfaces</depend>
+  <depend>yaml_cpp_vendor</depend>
+  <depend>bas_operate</depend>
+  <depend>data_handler</depend>
+  <depend>bas_operate_ros</depend>
+  <depend>log_system</depend>
+  <depend>custom_msgs_comm</depend>
+  <depend>ament_index_cpp</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

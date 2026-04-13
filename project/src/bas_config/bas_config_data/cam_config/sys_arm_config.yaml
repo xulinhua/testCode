@@ -1,0 +1,15 @@
+sys_arm_config:
+  arm_num: 2
+
+arm_0:
+  is_enable: true
+  robot_arm_ip: "192.168.5.1"
+  user_name: "left_robot_arm"
+  
+arm_1:
+  is_enable: true
+  robot_arm_ip: "192.168.5.2"
+  user_name: "right_robot_arm"
+  
+
+  

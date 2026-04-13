@@ -1,0 +1,8 @@
+# 请求部分
+uint8 command_type
+string project_name
+---
+# 响应部分
+bool success
+string message
+

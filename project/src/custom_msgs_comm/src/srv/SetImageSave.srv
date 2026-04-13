@@ -1,0 +1,12 @@
+# Set Image Save Service
+# Request
+int32 operate_type  # 0: 关闭 1: 开启
+int32[] cam_ids    # 相机 ID 数组，-1 为默认值
+int32[] sence_ids  # 场景 ID 数组，-1 为默认值
+int32[] stream_types  # 流类型数组，参考 CamStreamType: 0-COLOR, 1-DEPTH, 2-IR, 3-CLOUD, -1 为默认值
+string save_path   # 保存路径名，为空时使用默认路径
+
+---
+# Response
+bool success        # 操作是否成功
+string message      # 响应消息

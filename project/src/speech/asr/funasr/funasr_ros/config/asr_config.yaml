@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    # 音频配置
+    audio_format: 16  # 音频格式 (16表示16位)
+    audio_channels: 1  # 声道数
+    sample_rate: 16000  # 采样率
+    chunk_size: 512  # 音频块大小
+    
+    # ASR配置
+    enable_vad: true  # 是否启用语音活动检测
+    enable_punctuation: true  # 是否启用标点符号
+    
+    # 话题配置
+    microphone_topic: "/audio/microphone"  # 麦克风音频输入话题
+    asr_result_topic: "/asr/result"  # ASR结果输出话题

@@ -1,0 +1,7 @@
+<library path="libxtrainer_hardware_interface">
+  <class name="xtrainer_moveit_config/XTrainerHardwareInterface" 
+         type="xtrainer_moveit_config::XTrainerHardwareInterface" 
+         base_class_type="hardware_interface::SystemInterface">
+    <description>XTrainer Hardware Interface</description>
+  </class>
+</library>

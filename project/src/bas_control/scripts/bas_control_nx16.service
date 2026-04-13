@@ -1,0 +1,47 @@
+[Unit]
+Description=BAS Control Node - 统一部署控制层
+Documentation=https://github.com/your-repo/bas_control
+After=network.target ros2.service
+Wants=ros2.service
+
+[Service]
+Type=simple
+User=nx16
+Group=nx16
+WorkingDirectory=/home/nx16/project
+
+# 环境设置
+Environment="HOME=/home/nx16"
+Environment="ROS_DOMAIN_ID=100"
+# Environment="RMW_IMPLEMENTATION=rmw_cyclonedds_cpp"  # 如果未安装 cyclonedds，请注释此行
+
+# 启动命令
+ExecStartPre=/bin/bash -c 'source /opt/ros/humble/setup.bash && source /home/nx16/project/Dev/install/setup.bash'
+ExecStart=/bin/bash -c 'source /opt/ros/humble/setup.bash && source /home/nx16/project/Dev/install/setup.bash && export ROS_DOMAIN_ID=100 && source /opt/ros/humble/setup.bash && source /home/nx16/project/Dev/install/setup.bash && ros2 run bas_control bas_control_node && sudo systemctl restart chrony'
+
+# 重启策略
+Restart=on-failure
+RestartSec=10s
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bas_control
+
+# 安全配置（根据实际需求调整）
+# PrivateTmp=yes
+# ProtectSystem=strict
+# ProtectHome=read-only
+# ReadWritePaths=/var/log/bas /tmp
+
+# 优雅停止（发送 SIGTERM 信号）
+KillSignal=SIGTERM
+KillMode=process
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

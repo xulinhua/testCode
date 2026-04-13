@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lidar_sensor">
+
+  <xacro:macro name="lidar" params="prefix parent xyz rpy 
+                                    scan_topic:='lidar_sensor/scan' 
+                                    points_topic:='lidar_sensor/points'">
+    
+    <!-- 激光雷达物理连杆 - 加大尺寸，用鲜艳颜色 -->
+    <link name="${prefix}_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="0.1" radius="0.05"/> 
+        </geometry>
+        <material name="lidar_green">  <!-- 鲜艳的绿色 -->
+          <color rgba="0 1 0 1"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="0.1" radius="0.05"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.1"/>
+        <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+      </inertial>
+    </link>
+
+    <!-- 安装关节 - 位置提高更明显 -->
+    <joint name="${prefix}_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}_link"/>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+    </joint>
+
+    <!-- Gazebo GPU激光雷达插件配置（保持不变）-->
+    <gazebo reference="${prefix}_link">
+      <sensor name="${prefix}_sensor" type="gpu_lidar">
+        <always_on>true</always_on>
+        <update_rate>20</update_rate>
+        <visualize>true</visualize>
+        <pose>0 0 0 0 0 0</pose>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>720</samples>
+              <resolution>1.0</resolution>
+              <min_angle>-3.14159</min_angle>
+              <max_angle>3.14159</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.15</min>
+            <max>30.0</max>
+            <resolution>0.01</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </ray>
+
+         <!-- 插件1：输出LaserScan -->
+        <plugin name="${prefix}_laserscan" filename="libgazebo_ros_ray_sensor.so">
+          <ros>
+            <namespace>/</namespace>
+            <remapping>~/out:=${scan_topic}</remapping>
+          </ros>
+          <output_type>sensor_msgs/LaserScan</output_type>
+          <frame_name>${prefix}_link</frame_name>
+        </plugin>
+        
+        <!-- 插件2：输出PointCloud2 -->
+        <plugin name="${prefix}_pointcloud" filename="libgazebo_ros_ray_sensor.so">
+          <ros>
+            <namespace>/</namespace>
+            <remapping>~/out:=${points_topic}</remapping>
+          </ros>
+          <output_type>sensor_msgs/PointCloud2</output_type>
+          <frame_name>${prefix}_link</frame_name>
+        </plugin>
+
+      </sensor>
+    </gazebo>
+    
+  </xacro:macro>
+  
+</robot>

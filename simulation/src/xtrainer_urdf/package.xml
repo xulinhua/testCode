@@ -1,0 +1,21 @@
+<package format="3">
+  <name>x-trainer_asm-0226</name>  <!-- 保留后缀 -->
+  <version>1.0.0</version>
+  <description>URDF for x-trainer</description>
+  <maintainer email="you@email.com">Your Name</maintainer>
+  <license>BSD</license>
+
+  <!-- ROS2 必备依赖 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  
+  <!-- 其他依赖 -->
+  <depend>launch</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>rviz2</depend>
+  <depend>joint_state_publisher_gui</depend>
+  <depend>gazebo_ros_pkgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

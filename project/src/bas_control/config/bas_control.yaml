@@ -1,0 +1,108 @@
+# Bas Control Configuration File
+version: "1.1.0"
+
+#系统配置
+system:
+  platform: "jetson_orin_nx"
+  ros_version: "humble"
+  config_path: "/config/bas_control"
+  # 默认启动场景（可选值：idle, navigation, interaction, manipulation, calibration, full）
+  # 修改此值可以更改系统启动时默认加载的场景
+  default_scene: "idle"
+
+#模块配置
+modules:
+  #启动顺序
+  startup_order:
+    - bas_sys_config_ros
+    - cam_mgr_ros
+    - yolo_det
+    - face_det
+    - hand_gesture_rec
+    - ppocr
+    - yolo_obb_det
+    - marker_detect_ros
+    - hand_eye_calib_ros
+  
+  # 模块依赖关系
+  dependencies:
+    bas_sys_config_ros: []
+    cam_mgr_ros: [bas_sys_config_ros]
+    yolo_det: [cam_mgr_ros, bas_sys_config_ros]
+    face_det: [cam_mgr_ros, bas_sys_config_ros]
+    hand_gesture_rec: [cam_mgr_ros, bas_sys_config_ros]
+    ppocr: [cam_mgr_ros, bas_sys_config_ros]
+    yolo_obb_det: [cam_mgr_ros, bas_sys_config_ros]
+    marker_detect_ros: [cam_mgr_ros, bas_sys_config_ros]
+    hand_eye_calib_ros: [marker_detect_ros, cam_mgr_ros, bas_sys_config_ros]
+
+#场配置
+scenes:
+  #空闲场景
+  idle:
+    modules: [bas_sys_config_ros, cam_mgr_ros]
+    description: "空闲场景，仅启动基础服务"
+  
+  #导航场景
+  navigation:
+    modules: [bas_sys_config_ros, cam_mgr_ros, yolo_det, ppocr]
+    description: "导航场景，启动检测和OCR服务"
+  
+  # 交互场景
+  interaction:
+    modules: [bas_sys_config_ros, cam_mgr_ros, face_det, hand_gesture_rec]
+    description: "交互场景，启动人脸识别和手势识别"
+  
+  # 操作场景
+  manipulation:
+    modules: [bas_sys_config_ros, cam_mgr_ros, yolo_det, yolo_obb_det]
+    description: "操作场景，启动精确检测服务"
+  
+  # 标定场景
+  calibration:
+    modules: [bas_sys_config_ros, cam_mgr_ros, marker_detect_ros, hand_eye_calib_ros]
+    description: "标定场景，启动标识识别和手眼标定服务"
+  
+  #完整场景
+  full:
+    modules: [bas_sys_config_ros, cam_mgr_ros, yolo_det, face_det, hand_gesture_rec, ppocr, yolo_obb_det, marker_detect_ros, hand_eye_calib_ros]
+    description: "完整场景，启动所有视觉服务"
+
+#监控配置
+monitoring:
+  #检查间隔(毫秒)
+  health_check_interval: 5000
+  
+  #状态上报间隔(毫秒)
+  status_report_interval: 1000
+  
+  #监控间隔(毫秒)
+  resource_monitor_interval: 2000
+  
+  #资源阈值警告
+  cpu_threshold_warning: 80.0    # CPU使用率警告阈值(%)
+  memory_threshold_warning: 85.0  #内存使用率警告阈值(%)
+  gpu_threshold_warning: 85.0     # GPU使用率警告阈值(%)
+  temperature_threshold_warning: 70.0  #温警告警告阈值(°C)
+
+#启动配置
+startup:
+  # 启动超时时间(毫秒)
+  timeout_ms: 30000
+  
+  # 最大重启尝试次数
+  max_restart_attempts: 3
+  
+  # 重启间隔时间(毫秒)
+  restart_interval_ms: 5000
+
+#系统资源限制
+resource_limits:
+  # 最大内存使用(MB)
+  max_memory_mb: 8192
+  
+  # 最大CPU核心数
+  max_cpu_cores: 4
+  
+  # 最大GPU内存(MB)
+  max_gpu_memory_mb: 4096

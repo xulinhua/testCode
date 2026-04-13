@@ -1,0 +1,11 @@
+# Get Marker Image Service
+# Request
+string request_id                    # Request identifier
+
+---
+# Response
+bool success                         # Operation success
+string message                       # Response message
+sensor_msgs/Image image              # Image data
+string frame_id                      # Frame identifier
+builtin_interfaces/Time stamp        # Timestamp

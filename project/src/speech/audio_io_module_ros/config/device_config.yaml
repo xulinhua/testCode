@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    # 麦克风设备配置
+    mic_device_index: 24          # USB麦克风设备索引 (hw:2,0)
+    mic_sample_rate: 44100        # 麦克风采样率
+    mic_channels: 1              # 麦克风声道数
+    
+    # 扬声器设备配置
+    speaker_device_index: 25      # USB扬声器设备索引 (hw:3,0)
+    speaker_sample_rate: 44100    # 扬声器采样率
+    speaker_channels: 1          # 扬声器声道数
+    
+    # 音频处理配置
+    chunk_size: 1024             # 音频块大小
+    publish_rate: 44             # 音频发布频率

@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>dds_comm</name>
+  <version>1.0.0</version>
+  <description>
+    DDS通信服务模块 - 用于x86和Jetson主板间的命令和数据传输
+    提供项目控制、状态监控和数据发布功能
+  </description>
+  <maintainer email="support@example.com">DDS通信项目组</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  
+  <!-- 通用消息接口依赖 -->
+  <depend>custom_msgs_comm</depend>
+
+  <!-- 第三方库依赖 -->
+  <depend>yaml-cpp</depend>
+  <depend>nlohmann_json</depend>
+
+  <!-- 日志系统依赖 -->
+  <depend>log_system</depend>
+
+  <!-- 测试依赖 -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

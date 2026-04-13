@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>data_handler</name>
+  <version>0.0.0</version>
+  <description>数据处理包 - 提供YAML配置文件操作、数据序列化等通用功能</description>
+  <maintainer email="chenwang@todo.todo">chenwang</maintainer>
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- ROS2核心依赖 -->
+  <depend>rclcpp</depend>      <!-- ROS2 C++客户端库，提供基础ROS功能 -->
+  <depend>log_system</depend>  <!-- 自定义日志系统，提供简化的日志宏接口 -->
+  <depend>bas_operate</depend>  <!-- 基础操作库，提供通用工具函数 -->
+  
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

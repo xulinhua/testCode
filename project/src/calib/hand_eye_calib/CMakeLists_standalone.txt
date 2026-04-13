@@ -1,0 +1,95 @@
+cmake_minimum_required(VERSION 3.10)
+project(hand_eye_calib_standalone)
+
+# 设置C++标准
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# 启用C++17 filesystem支持
+add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=1)
+
+# 查找必要的包
+find_package(OpenCV REQUIRED)
+find_package(Eigen3 REQUIRED)
+
+# 查找第三方库
+# nlohmann_json
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JSON REQUIRED nlohmann_json)
+
+# 包含目录
+include_directories(
+  include
+  ${OpenCV_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+  ${JSON_INCLUDE_DIRS}
+  ${PROJECT_SOURCE_DIR}/../sdk/cam_manage/src/include
+  ${PROJECT_SOURCE_DIR}/../calib/aruco_alg/src/include
+)
+
+# 链接目录
+link_directories(
+  ${OpenCV_LIBRARY_DIRS}
+  ${JSON_LIBRARY_DIRS}
+)
+
+# 源文件
+set(SOURCES
+  src/calib_data_collector.cpp
+  src/gen_calib_matrix.cpp
+  src/calib_result_apply.cpp
+  src/calib_quality_analysis.cpp
+  src/calib_utils.cpp
+)
+
+# 创建库
+add_library(hand_eye_calib_core STATIC
+  src/calib_data_collector.cpp
+  src/gen_calib_matrix.cpp
+  src/calib_result_apply.cpp
+  src/calib_quality_analysis.cpp
+  src/calib_utils.cpp
+)
+
+# 设置位置无关代码，使库可以被链接到共享库中
+set_target_properties(hand_eye_calib_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# 创建可执行文件
+add_executable(${PROJECT_NAME} src/main.cpp)
+
+target_link_libraries(hand_eye_calib_core
+  ${OpenCV_LIBS}
+  Eigen3::Eigen
+  ${JSON_LIBRARIES}
+)
+
+target_link_libraries(${PROJECT_NAME}
+  hand_eye_calib_core
+  ${OpenCV_LIBS}
+  Eigen3::Eigen
+  ${JSON_LIBRARIES}
+)
+
+# 添加测试程序
+add_executable(test_calibration test_calibration.cpp)
+
+target_link_libraries(test_calibration
+  hand_eye_calib_core
+  ${OpenCV_LIBS}
+  Eigen3::Eigen
+  ${JSON_LIBRARIES}
+)
+
+# 安装配置
+install(TARGETS ${PROJECT_NAME} test_calibration
+  RUNTIME DESTINATION bin
+)
+
+install(TARGETS hand_eye_calib_core
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+)
+
+install(DIRECTORY include/
+  DESTINATION include
+)

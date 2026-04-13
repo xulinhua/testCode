@@ -1,0 +1,5 @@
+# Aruco Tool Offset Configuration
+aruco_tool_offset:
+  offset_x: 0.0
+  offset_y: 0.0
+  offset_z: 0.0

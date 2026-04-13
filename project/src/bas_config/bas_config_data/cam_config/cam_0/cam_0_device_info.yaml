@@ -1,0 +1,205 @@
+cam_id: 0
+cam_usr_name: head_camera
+serial_number: CP02653000L4
+cam_type: 1
+cam_model: Orbbec Gemini 335
+cam_index: 0
+enable: true
+show_topic_image: true
+device_info:
+  device_id: 0
+  product_id: 2048
+  device_name: Orbbec Gemini 335
+  physical_port: USB3.2
+  user_name: Orbbec Gemini 335
+  facturer_name: Orbbec
+  firmware_version: ""
+topics:
+  image_topic: /ob_camera_0/color/image_raw
+roi_fps:
+  color:
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1920 X 1080 X 30
+    - roi_fps: 1920 X 1080 X 15
+    - roi_fps: 1920 X 1080 X 10
+    - roi_fps: 1920 X 1080 X 6
+    - roi_fps: 1280 X 720 X 60
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 10
+    - roi_fps: 1280 X 720 X 6
+    - roi_fps: 960 X 540 X 60
+    - roi_fps: 960 X 540 X 30
+    - roi_fps: 960 X 540 X 15
+    - roi_fps: 960 X 540 X 10
+    - roi_fps: 960 X 540 X 6
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 10
+    - roi_fps: 848 X 480 X 6
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 10
+    - roi_fps: 640 X 480 X 6
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 10
+    - roi_fps: 640 X 360 X 6
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 10
+    - roi_fps: 424 X 240 X 6
+    - roi_fps: 320 X 240 X 60
+    - roi_fps: 320 X 240 X 30
+    - roi_fps: 320 X 240 X 6
+    - roi_fps: 320 X 180 X 60
+    - roi_fps: 320 X 180 X 30
+    - roi_fps: 320 X 180 X 6
+  depth:
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 1280 X 800 X 30
+    - roi_fps: 1280 X 800 X 15
+    - roi_fps: 1280 X 800 X 10
+    - roi_fps: 1280 X 800 X 6
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 10
+    - roi_fps: 1280 X 720 X 6
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 10
+    - roi_fps: 848 X 480 X 6
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 10
+    - roi_fps: 640 X 480 X 6
+    - roi_fps: 640 X 400 X 30
+    - roi_fps: 640 X 400 X 15
+    - roi_fps: 640 X 400 X 10
+    - roi_fps: 640 X 400 X 6
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 10
+    - roi_fps: 640 X 360 X 6
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 10
+    - roi_fps: 480 X 270 X 6
+    - roi_fps: 424 X 266 X 30
+    - roi_fps: 424 X 266 X 15
+    - roi_fps: 424 X 266 X 10
+    - roi_fps: 424 X 266 X 6
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 10
+    - roi_fps: 424 X 240 X 6
+    - roi_fps: 848 X 100 X 100
+  ir_left:
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 1280 X 800 X 30
+    - roi_fps: 1280 X 800 X 25
+    - roi_fps: 1280 X 800 X 15
+    - roi_fps: 1280 X 800 X 10
+    - roi_fps: 1280 X 800 X 6
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 10
+    - roi_fps: 1280 X 720 X 6
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 10
+    - roi_fps: 848 X 480 X 6
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 10
+    - roi_fps: 640 X 480 X 6
+    - roi_fps: 640 X 400 X 30
+    - roi_fps: 640 X 400 X 25
+    - roi_fps: 640 X 400 X 15
+    - roi_fps: 640 X 400 X 10
+    - roi_fps: 640 X 400 X 6
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 10
+    - roi_fps: 640 X 360 X 6
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 10
+    - roi_fps: 480 X 270 X 6
+    - roi_fps: 424 X 266 X 30
+    - roi_fps: 424 X 266 X 15
+    - roi_fps: 424 X 266 X 10
+    - roi_fps: 424 X 266 X 6
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 10
+    - roi_fps: 424 X 240 X 6
+    - roi_fps: 848 X 100 X 100
+  ir_right:
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 1280 X 800 X 30
+    - roi_fps: 1280 X 800 X 25
+    - roi_fps: 1280 X 800 X 15
+    - roi_fps: 1280 X 800 X 10
+    - roi_fps: 1280 X 800 X 6
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 10
+    - roi_fps: 1280 X 720 X 6
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 10
+    - roi_fps: 848 X 480 X 6
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 10
+    - roi_fps: 640 X 480 X 6
+    - roi_fps: 640 X 400 X 30
+    - roi_fps: 640 X 400 X 25
+    - roi_fps: 640 X 400 X 15
+    - roi_fps: 640 X 400 X 10
+    - roi_fps: 640 X 400 X 6
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 10
+    - roi_fps: 640 X 360 X 6
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 10
+    - roi_fps: 480 X 270 X 6
+    - roi_fps: 424 X 266 X 30
+    - roi_fps: 424 X 266 X 15
+    - roi_fps: 424 X 266 X 10
+    - roi_fps: 424 X 266 X 6
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 10
+    - roi_fps: 424 X 240 X 6
+    - roi_fps: 848 X 100 X 100

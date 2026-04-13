@@ -1,0 +1,169 @@
+cam_id: 2
+cam_usr_name: right_arm_camera
+serial_number: 218622278200
+cam_type: 0
+cam_model: Intel RealSense D405
+cam_index: 0
+enable: true
+show_topic_image: true
+device_info:
+  device_id: 1
+  product_id: 0B5B
+  device_name: Intel RealSense D405
+  physical_port: 2-1.2-21
+  user_name: Intel RealSense D405
+  facturer_name: Intel RealSense D405
+  firmware_version: 5.12.14.100
+topics:
+  image_topic: /camera/rs_camera_2/color/image_rect_raw
+roi_fps:
+  Stereo Module_color:
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 5
+    - roi_fps: 848 X 480 X 90
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 5
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 5
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 5
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 5
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 5
+  Stereo Module_depth:
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 5
+    - roi_fps: 848 X 480 X 90
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 5
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 5
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 5
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 5
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 5
+    - roi_fps: 256 X 144 X 90
+  Stereo Module_infrared:
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 5
+    - roi_fps: 848 X 480 X 90
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 5
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 5
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 5
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 5
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 5
+    - roi_fps: 256 X 144 X 90
+    - roi_fps: 1288 X 808 X 25
+    - roi_fps: 1288 X 808 X 15
+  color:
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 5
+    - roi_fps: 848 X 480 X 90
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 5
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 5
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 5
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 5
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 5
+  depth:
+    - roi_fps: 1280 X 720 X 30
+    - roi_fps: 1280 X 720 X 15
+    - roi_fps: 1280 X 720 X 5
+    - roi_fps: 848 X 480 X 90
+    - roi_fps: 848 X 480 X 60
+    - roi_fps: 848 X 480 X 30
+    - roi_fps: 848 X 480 X 15
+    - roi_fps: 848 X 480 X 5
+    - roi_fps: 640 X 480 X 90
+    - roi_fps: 640 X 480 X 60
+    - roi_fps: 640 X 480 X 30
+    - roi_fps: 640 X 480 X 15
+    - roi_fps: 640 X 480 X 5
+    - roi_fps: 640 X 360 X 90
+    - roi_fps: 640 X 360 X 60
+    - roi_fps: 640 X 360 X 30
+    - roi_fps: 640 X 360 X 15
+    - roi_fps: 640 X 360 X 5
+    - roi_fps: 480 X 270 X 90
+    - roi_fps: 480 X 270 X 60
+    - roi_fps: 480 X 270 X 30
+    - roi_fps: 480 X 270 X 15
+    - roi_fps: 480 X 270 X 5
+    - roi_fps: 424 X 240 X 90
+    - roi_fps: 424 X 240 X 60
+    - roi_fps: 424 X 240 X 30
+    - roi_fps: 424 X 240 X 15
+    - roi_fps: 424 X 240 X 5
+    - roi_fps: 256 X 144 X 90

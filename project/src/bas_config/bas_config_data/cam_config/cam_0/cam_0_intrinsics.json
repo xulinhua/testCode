@@ -1,0 +1,45 @@
+{
+  "camera_id": 0,
+  "camera_matrix": [
+    [
+      904.40185546875,
+      0.0,
+      654.4412841796875
+    ],
+    [
+      0.0,
+      903.4046630859375,
+      381.7017822265625
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "description": "相机内参",
+  "distortion": {
+    "coefficients": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "model": "Brown-Conrady"
+  },
+  "intrinsics": {
+    "fx": 904.40185546875,
+    "fy": 903.4046630859375,
+    "model": "distortion.inverse_brown_conrady",
+    "ppx": 654.4412841796875,
+    "ppy": 381.7017822265625
+  },
+  "resolution": {
+    "height": 720,
+    "width": 1280
+  },
+  "timestamp": "2025-12-09 09:21:37",
+  "topic_name": "/camera/rs_camera_0/color/image_raw",
+  "version": "1.0"
+}

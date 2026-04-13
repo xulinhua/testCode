@@ -1,0 +1,77 @@
+# DDS配置参数
+# 注意：网络参数已移至sys_config/network_config/comm_network.yaml
+# 请从该文件中读取网络配置参数
+
+# DDS通信配置
+dds_config:
+  domain_id: 0
+  participant_name: "main_participant"
+  qos_profile: "default"
+
+# 话题配置
+topics:
+  command_topic: "/dds/command"          # 命令话题名称
+  status_topic: "/dds/status"             # 状态话题名称
+  data_topic_prefix: "/dds/data"         # 数据话题前缀
+
+# 发布间隔配置（毫秒）
+publish_intervals:
+  command_publish_interval_ms: 100       # 命令发布间隔
+  status_publish_interval_ms: 1000       # 状态发布间隔
+  data_publish_interval_ms: 500          # 数据发布间隔
+
+# 重试配置
+retry_settings:
+  max_command_retries: 3                  # 最大命令重试次数
+  retry_delay_ms: 100                     # 重试延迟时间
+  max_connection_retries: 5               # 最大连接重试次数
+
+# 超时配置（秒）
+timeout_settings:
+  command_timeout: 30                     # 命令超时时间
+  connection_timeout: 60                  # 连接超时时间
+  health_check_timeout: 300               # 健康检查超时时间
+
+# 日志配置
+logging:
+  config_file: "config/log_config.yaml" # log_system配置文件路径
+
+# 项目配置
+projects:
+  hand_eye_calib:
+    auto_start: true                      # 是否自动启动
+    auto_recovery: true                   # 是否自动恢复
+    max_retries: 3                        # 最大重试次数
+    health_check_interval: 10             # 健康检查间隔（秒）
+    
+  camera:
+    auto_start: true
+    auto_recovery: true
+    max_retries: 3
+    health_check_interval: 5
+    
+  pcl2laserscan:
+    auto_start: false
+    auto_recovery: true
+    max_retries: 3
+    health_check_interval: 10
+    
+  yolo_det:
+    auto_start: false
+    auto_recovery: true
+    max_retries: 3
+    health_check_interval: 10
+
+# 网络配置
+network:
+  enable_multicast: true                  # 是否启用多播
+  multicast_group: "239.255.0.1"         # 多播组地址
+  port: 7400                              # 端口号
+  interface: "eth0"                       # 网络接口
+
+# 安全配置
+security:
+  enable_authentication: false            # 是否启用认证
+  enable_encryption: false                # 是否启用加密
+  certificate_path: ""                    # 证书路径
+  private_key_path: ""                    # 私钥路径

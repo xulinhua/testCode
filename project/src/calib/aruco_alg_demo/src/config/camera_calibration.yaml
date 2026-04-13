@@ -1,0 +1,30 @@
+%YAML:1.0
+# Camera calibration parameters for ArUco detection demo
+# Modify these values according to your camera calibration
+
+camera_matrix: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 800.0, 0.0, 320.0,
+           0.0, 800.0, 240.0,
+           0.0, 0.0, 1.0 ]
+
+distortion_coefficients: !!opencv-matrix
+   rows: 5
+   cols: 1
+   dt: d
+   data: [ 0.1, -0.2, 0.001, 0.002, 0.0 ]
+
+# Camera image dimensions
+image_width: 640
+image_height: 480
+
+# Camera distortion model
+distortion_model: rational_polynomial
+
+# Notes:
+# - This is a sample configuration file
+# - Use camera calibration tools to get accurate parameters
+# - For best results, calibrate your specific camera
+# - The above values are for demonstration purposes only

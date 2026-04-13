@@ -1,0 +1,18 @@
+nova_robot_ctrl_node:
+  ros__parameters:
+    # 机械臂IP地址
+    robot_ip: "192.168.5.1"
+    
+    # 主题名称
+    robot_target_pos_topic: "/robot_target_pose"
+    robot_pose_topic: "/right_arm_cartesian_pose"
+    robot_ready_state_topic: "/robot_ready_state"
+    robot_run_state_topic: "/robot_run_state"
+    
+    # 服务名称
+    robot_control_service: "/robot_control"
+    get_calib_points_service: "/get_calibration_points"
+    get_robot_pose_service: "/get_robot_pose"
+    
+    # 定时器周期（毫秒）
+    timer_period_ms: 100

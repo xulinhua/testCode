@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>bas_sys_config_ros</name>
+  <version>0.0.1</version>
+  <description>System configuration sharing module for camera and robot arm information</description>
+  <maintainer email="maintainer@example.com">Maintainer</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>custom_msgs_comm</depend>
+  <depend>log_system</depend>
+  <depend>bas_operate</depend>
+  <depend>bas_operate_ros</depend>
+  <depend>bas_sys_config</depend>
+  <depend>hand_eye_calib</depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

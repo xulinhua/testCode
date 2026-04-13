@@ -1,0 +1,113 @@
+version: 1.0.0
+description: 相机配置参数 - 支持多相机类型配置
+camera_types:
+  realsense:
+    description: Intel RealSense深度相机系列
+    supported_models: [D435, D455, L515]
+    default_device_id: ""
+    default_resolution: 1280x720
+    default_fps: 30
+    auto_exposure: true
+    auto_white_balance: true
+    get_intrinsics_from_api: true
+    auto_save_intrinsics_to_file: true
+    sdk_required: librealsense2
+  orbbec:
+    description: 奥比中光深度相机系列
+    supported_models: [Gemini 335, Gemini 2]
+    default_device_id: ""
+    default_resolution: 1280x720
+    default_fps: 30
+    auto_exposure: true
+    auto_white_balance: true
+    get_intrinsics_from_api: true
+    auto_save_intrinsics_to_file: true
+    sdk_required: Orbbec SDK
+  usb:
+    description: 通用USB相机
+    supported_models: [Logitech, Microsoft, Generic USB]
+    default_device_id: 0
+    default_resolution: 640x480
+    default_fps: 30
+    auto_exposure: true
+    auto_white_balance: true
+    get_intrinsics_from_api: false
+    auto_save_intrinsics_to_file: true
+    sdk_required: OpenCV VideoCapture
+  file:
+    description: 文件相机（用于测试）
+    supported_models: [Video File, Image Sequence]
+    default_device_id: test_video.mp4
+    default_resolution: 640x480
+    default_fps: 30
+    auto_exposure: false
+    auto_white_balance: false
+    get_intrinsics_from_api: false
+    auto_save_intrinsics_to_file: true
+    sdk_required: OpenCV VideoCapture
+default_camera:
+  camera_type: orbbec
+  device_id: ""
+  resolution: 1280x720
+  fps: 0
+  auto_exposure: true
+  auto_white_balance: true
+  get_intrinsics_from_api: true
+  auto_save_intrinsics_to_file: true
+  topic_name: color/image_raw
+camera_intrinsics:
+  realsense_d435:
+    fx: 617.173
+    fy: 617.485
+    cx: 319.035
+    cy: 242.381
+    width: 640
+    height: 480
+    camera_model: RealSense D435
+    dist_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+  realsense_d455:
+    fx: 640.0
+    fy: 640.0
+    cx: 640.0
+    cy: 360.0
+    width: 1280
+    height: 720
+    camera_model: RealSense D455
+    dist_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+  orbbec_gemini335:
+    fx: 600.0
+    fy: 600.0
+    cx: 320.0
+    cy: 240.0
+    width: 640
+    height: 480
+    camera_model: Orbbec Gemini 335
+    dist_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+  usb_generic:
+    fx: 600.0
+    fy: 600.0
+    cx: 320.0
+    cy: 240.0
+    width: 640
+    height: 480
+    camera_model: Generic USB Camera
+    dist_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+connection_settings:
+  timeout_ms: 5000
+  retry_attempts: 3
+  retry_delay_ms: 1000
+  stream_config:
+    color_stream: true
+    depth_stream: false
+    infrared_stream: false
+    pointcloud_stream: false
+  performance:
+    enable_auto_exposure: true
+    enable_auto_white_balance: true
+    enable_motion_correction: false
+    enable_temporal_filtering: false
+multi_camera_support:
+  max_cameras: 4
+  camera_sync: false
+  timestamp_sync: true
+  frame_sync_threshold_ms: 16.67

@@ -1,0 +1,11 @@
+calib_test_node:
+  ros__parameters:
+    # 话题名称配置
+    robot_pose_topic: "/right_arm_cartesian_pose"
+    calib_result_topic: "/aruco_detection/calib_result"
+    
+    # 服务名称配置
+    gripper_control_service: "/gripper_control"
+    
+    # 定时器周期（毫秒）
+    timer_period_ms: 100

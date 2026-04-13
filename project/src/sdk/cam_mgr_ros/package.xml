@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cam_mgr_ros</name>
+  <version>1.0.0</version>
+  <description>相机管理器ROS2功能包，根据配置文件启动对应相机驱动（支持RealSense和Orbbec）</description>
+  <maintainer email="user@todo.todo">user</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>yaml-cpp</depend>
+  <depend>nlohmann-json-dev</depend>  <!-- 添加json库依赖 -->
+  <depend>builtin_interfaces</depend>  <!-- 添加builtin_interfaces依赖 -->
+  <depend>cam_config_mgr</depend>  <!-- 添加cam_config_mgr依赖 -->
+  <depend>log_system</depend>  <!-- 添加log_system依赖 -->
+  <depend>visualization</depend>  <!-- 添加visualization依赖 -->
+  <depend>cv_bridge</depend>  <!-- 添加cv_bridge依赖 -->
+  <depend>bas_sys_config_ros</depend>  <!-- 添加bas_sys_config_ros依赖 -->
+  <depend>custom_msgs_comm</depend>  <!-- 添加custom_msgs_comm依赖 -->
+  <depend>OpenCV</depend>  <!-- 添加OpenCV依赖 -->
+  <depend>hand_eye_calib</depend>  <!-- 添加hand_eye_calib依赖 -->
+  
+  <!-- 添加对服务消息的支持 -->
+  <build_depend>rosidl_default_generators</build_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

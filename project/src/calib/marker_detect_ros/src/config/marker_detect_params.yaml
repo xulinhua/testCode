@@ -1,0 +1,56 @@
+# marker检测节点配置参数
+marker_detect_config:
+  camera_id: [0]  # 启用相机ID，[0, 1, 2][0, 2]
+cam_0_parameters:
+  marker_result_type: "center"  # 可选值: "center" 或 "corner"，默认为 "center"
+  trans_marker_mm: true  # 是否将marker标记位置转换为毫米
+  show_src_image: false  # 是否显示源图像
+  show_result_image: true  # 是否显示结果图像
+  marker_type: 0  # 可选值: 0:Aruco 或 1:Chessboard，默认为 0:Aruco
+  # ArUco标记参数
+  aruco_dict_type: [[5, 0.1]]  # 按照定义[字典类型，标记实际长度（米）]
+  # marker_length: 0.1  # 标记实际长度（米）
+  chessboard_size: [8, 6]  # 棋盘格尺寸（内角点数量）方格尺寸（米）
+  chessboard_square_size: 0.017  # 棋盘格方格尺寸（米）
+cam_1_parameters:
+  marker_result_type: "center"  # 可选值: "center" 或 "corner"，默认为 "center"
+  trans_marker_mm: true  # 是否将marker标记位置转换为毫米
+  show_src_image: false  # 是否显示源图像
+  show_result_image: true  # 是否显示结果图像
+  marker_type: 0  # 可选值: 0:Aruco 或 1:Chessboard，默认为 0:Aruco
+  # ArUco标记参数
+  aruco_dict_type: [[5, 0.1], [10, 0.1445]]  # 按照定义[字典类型，标记实际长度（米）]
+  # marker_length: 0.1  # 标记实际长度（米）
+  chessboard_size: [10, 7]  # 棋盘格尺寸（内角点数量）方格尺寸（米）
+  chessboard_square_size: 0.024  # 棋盘格方格尺寸（米）
+
+cam_2_parameters:
+  marker_result_type: "center"  # 可选值: "center" 或 "corner"，默认为 "center"
+  trans_marker_mm: true  # 是否将marker标记位置转换为毫米
+  show_src_image: false  # 是否显示源图像
+  show_result_image: true  # 是否显示结果图像
+  marker_type: 0  # 可选值: 0:Aruco 或 1:Chessboard，默认为 0:Aruco
+  # ArUco标记参数
+  aruco_dict_type: [[5, 0.1]]  # 按照定义[字典类型，标记实际长度（米）]
+  # marker_length: 0.1  # 标记实际长度（米）
+  chessboard_size: [10, 7]  # 棋盘格尺寸（内角点数量）方格尺寸（米）
+  chessboard_square_size: 0.024  # 棋盘格方格尺寸（米）
+
+  # 可选的其他字典类型:
+  # 0: DICT_4X4_50
+  # 1: DICT_4X4_100
+  # 2: DICT_4X4_250
+  # 3: DICT_4X4_1000
+  # 4: DICT_5X5_50
+  # 5: DICT_5X5_100
+  # 6: DICT_5X5_250
+  # 7: DICT_5X5_1000
+  # 8: DICT_6X6_50
+  # 9: DICT_6X6_100
+  # 10: DICT_6X6_250
+  # 11: DICT_6X6_1000
+  # 12: DICT_7X7_50
+  # 13: DICT_7X7_100
+  # 14: DICT_7X7_250
+  # 15: DICT_7X7_1000
+  

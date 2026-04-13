@@ -1,0 +1,16 @@
+# Project control service
+# Request
+string project_name                       # Project name
+uint8 command                             # Control command
+
+# Command constants
+uint8 START=1                             # Start project
+uint8 STOP=2                              # Stop project
+uint8 RESTART=3                           # Restart project
+uint8 STATUS=4                            # Get project status
+
+---
+# Response
+bool success                              # Operation success
+string message                            # Response message
+ProjectStatus status                      # Current project status

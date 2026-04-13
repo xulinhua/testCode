@@ -1,0 +1,16 @@
+# Get Robot Pose Service
+# Request
+string request_id                    # Request identifier
+
+---
+# Response
+bool success                         # Operation success
+string message                       # Response message
+float64 x                            # X coordinate (mm)
+float64 y                            # Y coordinate (mm)
+float64 z                            # Z coordinate (mm)
+float64 rx                           # RX angle (degrees)
+float64 ry                           # RY angle (degrees)
+float64 rz                           # RZ angle (degrees)
+builtin_interfaces/Time stamp        # Timestamp
+int32 arm_id                         # arm id

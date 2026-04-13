@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="aruco_cali">
+  
+  <!-- 定义 aruco_cali 宏 -->
+  <xacro:macro name="aruco_cali" params="parent_link child_link cali_x cali_y cali_z cali_roll cali_pitch cali_yaw">
+    
+    <!-- ArUco 标定板尺寸参数 -->
+    <xacro:property name="board_width" value="0.1"/>      
+    <xacro:property name="board_height" value="0.1"/>     
+    <xacro:property name="board_thickness" value="0.001"/> 
+    
+    <!-- 连接到父链接的关节 -->
+    <joint name="base_to_aruco_joint" type="fixed">
+      <origin xyz="${cali_x} ${cali_y} ${cali_z}" 
+              rpy="${cali_roll} ${cali_pitch} ${cali_yaw}"/>
+      <parent link="${parent_link}"/>
+      <child link="${child_link}"/>
+    </joint>
+    
+    <!-- 主链接 -->
+    <link name="${child_link}">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${board_width} ${board_height} ${board_thickness}"/>
+        </geometry>
+        <material name="aruco_texture">
+          <texture filename="package://nova_sim/meshes/6x6_1000-0.png"/>
+        </material>
+      </visual>
+      
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${board_width} ${board_height} ${board_thickness}"/>
+        </geometry>
+      </collision>
+      
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="0.00004167" ixy="0" ixz="0" iyy="0.00004167" iyz="0" izz="0.00008333"/>
+      </inertial>
+    </link>
+
+    <!-- Gazebo 配置 - 使用纹理贴图 -->
+    <gazebo reference="${child_link}">
+      <mu1>0.5</mu1>
+      <mu2>0.5</mu2>
+      <visual>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <specular>0 0 0 0</specular>
+          <pbr>
+            <metal>
+              <albedo_map>package://nova_sim/meshes/6x6_1000-0.png</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+    </gazebo>
+    
+    <!-- ArUco 标记可视化（使用白色板子，实际识别由视觉系统处理） -->
+    <!-- 注意：Gazebo 原生不支持直接渲染 ArUco 图案，需要在视觉系统中添加真实相机图像识别 -->
+  
+  </xacro:macro>
+
+</robot>

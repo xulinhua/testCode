@@ -1,0 +1,46 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*~
+*.backup
+
+# Log files
+*.log
+
+# Qoder cache
+.qoder/
+
+# Home directory patterns (for paths like ${HOME}/ros2_logs)
+\${HOME}/
+~/
+
+# Large binary files (optional - uncomment if needed)
+# *.stl
+# *.dae
+
+# Files exceeding GitHub 100MB limit
+*.a
+project/src/perception/vision_alg/foundationpose_alg/ppl.cv/lib/
+simulation/src/nova_sim/meshes/sensor/camera/realsense/d415.dae
+# *.png
+# *.jpg

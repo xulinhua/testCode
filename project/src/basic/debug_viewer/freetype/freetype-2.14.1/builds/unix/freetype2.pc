@@ -1,0 +1,14 @@
+prefix=/home/ubuntu/testCode/dev/src/basic/debug_viewer/freetype
+exec_prefix=/home/ubuntu/testCode/dev/src/basic/debug_viewer/freetype
+libdir=/home/ubuntu/testCode/dev/src/basic/debug_viewer/freetype/lib
+includedir=/home/ubuntu/testCode/dev/src/basic/debug_viewer/freetype/include
+
+Name: FreeType 2
+URL: https://freetype.org
+Description: A free, high-quality, and portable font engine.
+Version: 26.4.20
+Requires: 
+Requires.private: zlib, libpng, libbrotlidec
+Libs: -L/home/ubuntu/testCode/dev/src/basic/debug_viewer/freetype/lib -lfreetype
+Libs.private: 
+Cflags: -I${includedir}/freetype2

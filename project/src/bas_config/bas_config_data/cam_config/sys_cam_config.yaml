@@ -1,0 +1,27 @@
+sys_cam_config:
+  cam_num: 1
+
+cam_0:
+  is_enable: true
+  serial_number: CP02653000L4
+  user_name: head_camera
+  default_color_resolution: RGB_NATIVE
+  default_depth_resolution: DEPTH_NATIVE
+  arm_list: [1]
+  
+cam_1:
+  is_enable: true
+  serial_number: 218622278367
+  user_name: left_arm_camera
+  default_color_resolution: RGB_NATIVE
+  default_depth_resolution: DEPTH_NATIVE
+  arm_list: [0]
+  
+cam_2:
+  is_enable: true
+  serial_number: 218622278200
+  default_color_resolution: RGB_NATIVE
+  default_depth_resolution: DEPTH_NATIVE
+  user_name: right_arm_camera
+  arm_list: [1]
+  

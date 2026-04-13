@@ -1,0 +1,14 @@
+# Get Markers Info Service
+# Request
+string request_id                    # Request identifier
+
+---
+# Response
+bool success                         # Operation success
+string message                       # Response message
+string object_class                  # Object class
+int32 marker_num                     # Marker number
+SingleMarkerInfo[] marker_info       # Single Marker Info
+string frame_id                      # Frame identifier
+sensor_msgs/Image image              # Image data
+builtin_interfaces/Time stamp        # Timestamp

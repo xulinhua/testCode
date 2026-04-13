@@ -1,0 +1,178 @@
+# log_system 统一配置文件
+# 高度独立通用的ROS2日志管理系统配置文件
+# 不包含任何特定项目的配置，完全通用
+#
+# 配置文件说明：
+# - 采用YAML格式，支持层次化配置结构
+# - 支持全局默认配置和项目特定配置
+# - 提供灵活的日志级别控制和输出目标设置
+# - 支持运行时动态加载和热更新
+#
+# 配置优先级：
+# 1. 项目特定配置（最高优先级）
+# 2. 全局默认配置（中等优先级）
+# 3. 代码默认值（最低优先级）
+
+projects:
+  project_default: # 当前项目默认配置（若有额外子项目配置，可以继续添加子项目的key）
+    comm:
+      enable_log: true   # 是否启用日志记录
+
+    # 控制台输出配置
+    console:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "OFF"         # 是否显示日期 （可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_time: "OFF"         # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID（可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+      color_output: true       # 启用彩色输出
+      
+    # 文件输出配置
+    file:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "DEBUG"       # 是否显示日期
+      show_time: "DEBUG"       # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+
+  bas_control_node: 
+    comm:
+      enable_log: true   # 是否启用日志记录
+
+    # 控制台输出配置
+    console:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "OFF"         # 是否显示日期 （可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_time: "OFF"         # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID（可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+      color_output: true       # 启用彩色输出
+      
+    # 文件输出配置
+    file:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "DEBUG"       # 是否显示日期
+      show_time: "DEBUG"       # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+
+  config_hot_updater: 
+    comm:
+      enable_log: true   # 是否启用日志记录
+
+    # 控制台输出配置
+    console:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "OFF"         # 是否显示日期 （可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_time: "OFF"         # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID（可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+      color_output: true       # 启用彩色输出
+      
+    # 文件输出配置
+    file:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "DEBUG"       # 是否显示日期
+      show_time: "DEBUG"       # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+
+  launch_mgr: 
+    comm:
+      enable_log: true   # 是否启用日志记录
+
+    # 控制台输出配置
+    console:
+      log_level: "DEBUG"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "OFF"         # 是否显示日期 （可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_time: "OFF"         # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID（可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+      color_output: true       # 启用彩色输出
+      
+    # 文件输出配置
+    file:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "DEBUG"       # 是否显示日期
+      show_time: "DEBUG"       # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+
+  status_monitor: 
+    comm:
+      enable_log: true   # 是否启用日志记录
+
+    # 控制台输出配置
+    console:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "OFF"         # 是否显示日期 （可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_time: "OFF"         # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID（可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+      color_output: true       # 启用彩色输出
+      
+    # 文件输出配置
+    file:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "DEBUG"       # 是否显示日期
+      show_time: "DEBUG"       # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+
+
+  task_scheduler: 
+    comm:
+      enable_log: true   # 是否启用日志记录
+
+    # 控制台输出配置
+    console:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "OFF"         # 是否显示日期 （可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_time: "OFF"         # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID（可选择：OFF、DEBUG, INFO, WARN, ERROR, FATAL）
+      show_log_params: "OFF"   # 是否输出参数信息到控制台
+      color_output: true       # 启用彩色输出
+      
+    # 文件输出配置
+    file:
+      log_level: "INFO"        # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+      show_level: "DEBUG"      # 是否显示日志级别
+      show_project: "DEBUG"    # 是否显示项目名称
+      show_date: "DEBUG"       # 是否显示日期
+      show_time: "DEBUG"       # 是否显示时间
+      show_file: "DEBUG"       # 是否显示文件名
+      show_thread_id: "OFF"    # 是否显示线程ID
+      show_log_params: "OFF"   # 是否输出参数信息到控制台

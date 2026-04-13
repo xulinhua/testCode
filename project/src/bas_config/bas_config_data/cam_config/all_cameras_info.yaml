@@ -1,0 +1,11 @@
+cameras:
+  - index: 0
+    cam_type: 1
+    device_id: 0
+    product_id: 2048
+    device_name: Orbbec Gemini 335
+    serial_number: CP02653000L4
+    physical_port: USB3.2
+    user_name: Orbbec Gemini 335
+    facturer_name: Orbbec
+    firmware_version: ""

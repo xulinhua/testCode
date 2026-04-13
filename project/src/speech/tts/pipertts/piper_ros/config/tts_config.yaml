@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    # 是否保存合成的音频数据到文件
+    save_audio_to_file: false
+    
+    # 音频文件保存目录（相对于项目根目录）
+    audio_save_directory: "../../resources/audio_data_ros"
+    
+    # Piper模型配置
+    model_path: "../../resources/models/zh_CN/medium/zh_CN-huayan-medium.onnx"
+    config_path: "../../resources/models/zh_CN/medium/zh_CN-huayan-medium.onnx.json"
+    
+    # 音频参数
+    sample_rate: 22050
+    speaker_id: 0

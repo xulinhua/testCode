@@ -1,0 +1,9 @@
+{
+    "quality_metrics": {
+        "condition_number": 0.0,
+        "data_point_count": 0,
+        "reprojection_error": 3.213028025654636,
+        "rotation_error": 0.0,
+        "translation_error": 3.213028025654636
+    }
+}

@@ -1,0 +1,1598 @@
+#usda 1.0
+(
+    customLayerData = {
+        dictionary cameraSettings = {
+            dictionary Front = {
+                double3 position = (5, 0, 0)
+                double radius = 5
+            }
+            dictionary Perspective = {
+                double3 position = (1.6861852580813061, 1.4150192518220488, 1.5771051826891176)
+                double3 target = (0.12674868161739195, -0.14441732464186474, 0.017668643446194565)
+            }
+            dictionary Right = {
+                double3 position = (0, -5, 0)
+                double radius = 5
+            }
+            dictionary Top = {
+                double3 position = (0, 0, 5)
+                double radius = 5
+            }
+            string boundCamera = "/OmniverseKit_Persp"
+        }
+        dictionary omni_layer = {
+            string authoring_layer = "./nova_robot_1.usda"
+            dictionary locked = {
+            }
+            dictionary muteness = {
+            }
+        }
+        dictionary renderSettings = {
+        }
+    }
+    defaultPrim = "World"
+    endTimeCode = 1000000
+    metersPerUnit = 1
+    startTimeCode = 0
+    timeCodesPerSecond = 60
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def OmniGraph "nova_robot_action"
+    {
+        token evaluationMode = "Automatic"
+        token evaluator:type = "execution"
+        token fabricCacheBacking = "StageWithoutHistory"
+        int2 fileFormatVersion = (1, 9)
+        token pipelineStage = "pipelineStageSimulation"
+
+        def OmniGraphNode "on_playback_tick" (
+            prepend apiSchemas = ["NodeGraphNodeAPI"]
+        )
+        {
+            token node:type = "omni.graph.action.OnPlaybackTick"
+            int node:typeVersion = 2
+            custom double outputs:deltaSeconds
+            custom double outputs:frame
+            custom uint outputs:tick (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom double outputs:time
+            uniform token ui:nodegraph:node:expansionState = "open"
+            uniform float2 ui:nodegraph:node:pos = (82, 105)
+        }
+
+        def OmniGraphNode "isaac_read_simulation_time" (
+            prepend apiSchemas = ["NodeGraphNodeAPI"]
+        )
+        {
+            custom uint64 inputs:referenceTimeDenominator
+            custom int64 inputs:referenceTimeNumerator
+            custom bool inputs:resetOnStop
+            token node:type = "isaacsim.core.nodes.IsaacReadSimulationTime"
+            int node:typeVersion = 1
+            custom double outputs:simulationTime
+            uniform token ui:nodegraph:node:expansionState = "open"
+            uniform float2 ui:nodegraph:node:pos = (78, 320)
+        }
+
+        def OmniGraphNode "ros2_publish_joint_state" (
+            prepend apiSchemas = ["NodeGraphNodeAPI"]
+        )
+        {
+            custom uint64 inputs:context
+            prepend uint64 inputs:context.connect = </World/nova_robot_action/ros2_context.outputs:context>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </World/nova_robot_action/on_playback_tick.outputs:tick>
+            custom string inputs:nodeNamespace
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize
+            custom rel inputs:targetPrim = </World/Xform/nova_robot/root_joint> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            custom double inputs:timeStamp
+            prepend double inputs:timeStamp.connect = </World/nova_robot_action/isaac_read_simulation_time.outputs:simulationTime>
+            custom string inputs:topicName
+            token node:type = "isaacsim.ros2.bridge.ROS2PublishJointState"
+            int node:typeVersion = 1
+            uniform token ui:nodegraph:node:expansionState = "open"
+            uniform float2 ui:nodegraph:node:pos = (399.08316, 67.38877)
+        }
+
+        def OmniGraphNode "ros2_subscribe_joint_state" (
+            prepend apiSchemas = ["NodeGraphNodeAPI"]
+        )
+        {
+            custom uint64 inputs:context
+            prepend uint64 inputs:context.connect = </World/nova_robot_action/ros2_context.outputs:context>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </World/nova_robot_action/on_playback_tick.outputs:tick>
+            custom string inputs:nodeNamespace
+            custom string inputs:qosProfile
+            custom uint64 inputs:queueSize
+            custom string inputs:topicName
+            token node:type = "isaacsim.ros2.bridge.ROS2SubscribeJointState"
+            int node:typeVersion = 2
+            custom double[] outputs:effortCommand
+            custom uint outputs:execOut (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            custom token[] outputs:jointNames
+            custom double[] outputs:positionCommand
+            custom double outputs:timeStamp
+            custom double[] outputs:velocityCommand
+            uniform token ui:nodegraph:node:expansionState = "open"
+            uniform float2 ui:nodegraph:node:pos = (394.32446, 332.75684)
+        }
+
+        def OmniGraphNode "articulation_controller" (
+            prepend apiSchemas = ["NodeGraphNodeAPI"]
+        )
+        {
+            custom double[] inputs:effortCommand
+            prepend double[] inputs:effortCommand.connect = </World/nova_robot_action/ros2_subscribe_joint_state.outputs:effortCommand>
+            custom uint inputs:execIn (
+                customData = {
+                    bool isExecution = 1
+                }
+            )
+            prepend uint inputs:execIn.connect = </World/nova_robot_action/on_playback_tick.outputs:tick>
+            custom int[] inputs:jointIndices
+            custom token[] inputs:jointNames
+            prepend token[] inputs:jointNames.connect = </World/nova_robot_action/ros2_subscribe_joint_state.outputs:jointNames>
+            custom double[] inputs:positionCommand
+            prepend double[] inputs:positionCommand.connect = </World/nova_robot_action/ros2_subscribe_joint_state.outputs:positionCommand>
+            custom string inputs:robotPath
+            custom rel inputs:targetPrim = </World/Xform> (
+                customData = {
+                    dictionary omni = {
+                        dictionary graph = {
+                            string relType = "target"
+                        }
+                    }
+                }
+            )
+            custom double[] inputs:velocityCommand
+            prepend double[] inputs:velocityCommand.connect = </World/nova_robot_action/ros2_subscribe_joint_state.outputs:velocityCommand>
+            token node:type = "isaacsim.core.nodes.IsaacArticulationController"
+            int node:typeVersion = 1
+            uniform token ui:nodegraph:node:expansionState = "open"
+            uniform float2 ui:nodegraph:node:pos = (717.41644, 185.79956)
+        }
+
+        def OmniGraphNode "ros2_context" (
+            prepend apiSchemas = ["NodeGraphNodeAPI"]
+        )
+        {
+            custom uchar inputs:domain_id
+            custom bool inputs:useDomainIDEnvVar
+            token node:type = "isaacsim.ros2.bridge.ROS2Context"
+            int node:typeVersion = 2
+            custom uint64 outputs:context
+            uniform token ui:nodegraph:node:expansionState = "open"
+            uniform float2 ui:nodegraph:node:pos = (99.49104, 491.19623)
+        }
+    }
+
+    def Xform "Xform"
+    {
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        over "nova_robot" (
+            prepend references = @./nova_robot/nova_robot.usd@
+        )
+        {
+            string isaac:namespace (
+                displayName = "Namespace"
+                doc = "Namespace of the prim in Isaac Sim"
+            )
+            double3 xformOp:translate = (0, 0, 0.2)
+
+            over "base_link" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double3 xformOp:translate = (0, 0, 2.980232227667301e-9)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_1" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (100, 100, 100)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (100, 100, 100)
+                float physxRigidBody:maxLinearVelocity = 6000
+                quatd xformOp:orient = (0.9999999999999987, 2.910860453836921e-8, -4.233756406020456e-8, -4.975446751527065e-9)
+                double3 xformOp:translate = (3.17513695335947e-7, -8.381903171539307e-8, 0.2233998954296112)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_2" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (2.645056e17, -5.7201618e17, 1.5335265e18)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (89698010000000, 4.019569e15, 1.4844734e15)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.0000025877857348672336, -0.000002470937180060532, 0.7071080030762558, -0.7071055592856753)
+                double3 xformOp:translate = (3.1749186746310443e-7, -6.705522537231445e-8, 0.2233998954296112)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_3" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (4.4278608e17, -9.915259e17, 1.5335224e18)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (-2.9725313e15, 8.1059546e15, 4.1656206e15)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.5000017769514651, 0.5000000335254499, 0.5000017024554168, -0.4999964870492708)
+                double3 xformOp:translate = (2.60770320892334e-7, -0.0000010095536708831787, 0.5033998966217041)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_4" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (5.0558524e17, -1.1311201e18, 1.5335239e18)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (322281130000000, 1.0961173e16, 5.054112e15)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.5000018626414344, -0.500000014900274, 0.4999982863655241, 0.4999998360863345)
+                double3 xformOp:translate = (0.22500115633010864, -0.117499440908432, 0.5034003138542176)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_5" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (4.530923e18, 7.664601e17, 4.80638e18)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (2.7480352e15, 9.79491e15, 3.5911773e15)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (-0.5000017993070168, 0.49999814852874136, -0.49999811872641736, 0.500001933423882)
+                double3 xformOp:translate = (0.34500110149383545, -0.11749947816133499, 0.503400731086731)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_6" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (4.2821984e18, 2.393158e18, 3.8582352e18)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (3.6221325e15, -2.2091264e15, 4.4907963e15)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.0000013054343573402286, -0.7071066321735671, 0.7071069301968087, -0.0000014482066893466344)
+                double3 xformOp:translate = (0.34500178694725037, -0.11749950796365738, 0.4156577467918396)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_7" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (4.2821984e18, 2.393158e18, 3.8582352e18)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (1.5601129e16, -3.2445522e15, 1.7275633e16)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (2.7407958408557573e-8, -0.000002720115661825406, -0.7071054102758648, 0.7071081520893401)
+                double3 xformOp:translate = (7200080134144, 2.0203579761575854e18, -7724840517632.2)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J1_8" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (4.2821984e18, 2.393158e18, 3.8582352e18)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (9.83656e15, -1.0570057e16, -767709630000000)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.0000027858387808298383, 8.068496560558098e-10, 0.7071055294852395, 0.707108032880152)
+                double3 xformOp:translate = (-288606266589184, -7.970895471813276e19, -289683632291840.2)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_1" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.9999999999999984, 2.98221822079728e-8, -4.6841944681443147e-8, 5.009404731654957e-9)
+                double3 xformOp:translate = (1.059999704360962, -8.381903171539307e-8, 0.2233998954296112)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_2" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.000002597592818012775, -0.0000024787442830430355, 0.7071080030762241, -0.7071055592856438)
+                double3 xformOp:translate = (1.0599995851516724, -6.705522537231445e-8, 0.22339992523193358)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_3" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.000002594796956026414, -0.0000024754552370391515, 0.707108032878349, -0.7071055294834365)
+                double3 xformOp:translate = (1.0599995851516724, -0.0000010086223483085632, 0.5033998370170594)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_4" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.7071106079459483, -0.7071029543875341, -0.000005170048098078906, -5.430774763225517e-8)
+                double3 xformOp:translate = (0.8350003957748413, -0.11750266700983047, 0.5033994197845459)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_5" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (-0.7071029189238354, -0.000007601668585271367, 0.707110643387298, -8.911592885857713e-8)
+                double3 xformOp:translate = (0.7150004506111145, -0.11750353127717972, 0.5033985257148743)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_6" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.0000027132338369952375, 0.7071029068509105, 0.7071106554548633, 0.0000076042489515145736)
+                double3 xformOp:translate = (0.7150014638900757, -0.1175025925040245, 0.4156555414199829)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_7" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.000010387320522927572, -3.98154300134603e-8, 0.7071078540311198, -0.7071057082640522)
+                double3 xformOp:translate = (0.7389974594116211, -0.05500151589512825, 0.29997630715370177)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J2_8" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (0, 0, 0)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (0, 0, 0)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (-1.3525455083135012e-7, -0.000010372894168832812, 0.7071031154537456, 0.707110446824251)
+                double3 xformOp:translate = (0.7389988303184509, -0.18000154197216034, 0.29997544288635253)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J3_1" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (2329495700000, 13575464000, -1.3044187e19)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (7670668000000, 7534622500000, 1376937.8)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (-0.000003620109702604207, -4.458707091702036e-8, -8.549250706184805e-11, 0.9999999999934465)
+                double3 xformOp:translate = (0.20000004768371582, -0.5749999284744263, 0.15854989290237426)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J3_2" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (-1.1036205e17, -6.1870314e16, -1.3044187e19)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (32688996000000, 383906730000000, -7103817000000)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.0000025554913914456725, -0.0000025280752785898025, 0.7071080626807564, -0.7071054996808792)
+                double3 xformOp:translate = (0.20000004768371582, -0.5749999284744263, 0.15854992270469664)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J3_3" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (2.4457244e19, 2.8745135e19, -1.3043778e19)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (4.3901463e16, -3.83124e16, -1.2865279e15)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.707110607946383, -0.707102954387534, -0.00000511039979755784, -3.869354259221902e-8)
+                double3 xformOp:translate = (0.19950024783611298, -0.6025006175041199, 0.35429983139038085)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J3_4" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (2.561275e18, 5.649876e18, -1.304414e19)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (6.9479196e16, -5.5910707e16, -614787200000000)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (-0.0000025227207913119234, -0.000002553686758505043, 0.7071029068690748, 0.7071106554736812)
+                double3 xformOp:translate = (0.3532002866268158, -0.6044995188713074, 0.35317842960357665)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J3_5" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (9.1653937e18, 3.991095e18, -1.871102e19)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (7.708279e16, -5.2596556e16, 2.4254676e15)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (-3.201421566162079e-8, -0.7045225060603679, -0.000007642025762437855, 0.7096816458074828)
+                double3 xformOp:translate = (0.35120078921318054, -0.6579495072364807, 0.35319243669509887)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J3_6" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (7.364828e19, 1.44256955e20, -1.5479136e20)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (-1.3745711e18, 3.0039592e17, 4.222339e17)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (-0.0000038258738163504006, -0.000003924942807885918, 0.7071042479738353, 0.7071093143689415)
+                double3 xformOp:translate = (0.43764880299568176, -0.6889486312866211, 0.35256134271621703)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J4_1" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (0.000016450731, -7.290212e-8, 124.088554)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (2.4120982e-7, 0.00010215438, 2.8060399e-14)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.9999991071676521, 9.390532784038408e-11, 2.1079983954373765e-8, 0.0013362873561819845)
+                double3 xformOp:translate = (0.8600000143051147, -0.5749999284744263, 0.15854995250701903)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J4_2" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (-46.680527, 1164.9583, 124.093185)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (2.9033008, 0.19546504, -0.7384093)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.028888072780066484, 0.02699475175436033, 0.7065926191059467, -0.7065151330677728)
+                double3 xformOp:translate = (0.8600000143051147, -0.5749998688697815, 0.15854995250701903)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J4_3" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (2.086586, -38.56703, 124.07954)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (4.102658, 0.07949057, -1.0947682)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.7064150321289066, -0.7063207031215961, -0.03325028345421745, -0.03135738149693592)
+                double3 xformOp:translate = (0.844615638256073, -0.6025418639183044, 0.3536885857582092)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J4_4" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                vector3f physics:angularVelocity = (28.21613, -719.7988, 124.071754)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (4.2931633, -0.08092463, -1.3194216)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.051704933918577556, -0.0535943180686236, 0.7050689455687951, 0.7052177187746648)
+                double3 xformOp:translate = (0.6917426586151123, -0.6049514412879944, 0.33781062364578246)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J4_5" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (-583.28436, -745.0363, -108.374725)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (4.502594, -0.14666271, -1.6606394)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.7607410497518885, 0.031249266136274625, 0.6471422318467457, 0.03877460958864459)
+                double3 xformOp:translate = (0.6938608288764954, -0.6586959362030029, 0.33813087940216063)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "J4_6" (
+                prepend apiSchemas = ["PhysxRigidBodyAPI"]
+            )
+            {
+                string isaac:nameOverride (
+                    displayName = "Name Override"
+                    doc = "Name override for prim lookup in base name search"
+                )
+                vector3f physics:angularVelocity = (-453.62775, -3609.801, 140.92856)
+                rel physics:simulationOwner
+                vector3f physics:velocity = (3.4368339, 0.059087694, -3.2774024)
+                float physxRigidBody:maxLinearVelocity = 1000
+                quatd xformOp:orient = (0.09383155495294489, -0.09747208940540826, 0.6645540789814706, 0.7348895884356685)
+                double3 xformOp:translate = (0.6091063618659973, -0.6897704005241394, 0.32122938632965087)
+
+                over "visuals" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+
+                over "collisions" (
+                    prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "PhysxTriangleMeshCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxConvexDecompositionCollisionAPI", "PhysxConvexHullCollisionAPI"]
+                )
+                {
+                    uniform token physics:approximation = "convexHull"
+                    bool physics:collisionEnabled = 1
+                    rel physics:simulationOwner
+                }
+            }
+
+            over "joints"
+            {
+                over "J1_1_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = -22.1
+                    string isaac:nameOverride (
+                        displayName = "Name Override"
+                        doc = "Name override for prim lookup in base name search"
+                    )
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    point3f physics:localPos0 = (0, 0, 0)
+                    quatf physics:localRot0 = (1, 0, 0, 0)
+                    quatf physics:localRot1 = (1, 0, 0, 0)
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J2_1_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J3_1_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = 4.3
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J4_1_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J1_2_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = 85.700005
+                    string isaac:nameOverride (
+                        displayName = "Name Override"
+                        doc = "Name override for prim lookup in base name search"
+                    )
+                    uniform token physics:axis = "Z"
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J2_2_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J3_2_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J4_2_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = 59.100002
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J1_3_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = 36.9
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J2_3_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J3_3_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = 77.6
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J4_3_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = -8.6
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J1_4_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = -99.4
+                    string isaac:nameOverride (
+                        displayName = "Name Override"
+                        doc = "Name override for prim lookup in base name search"
+                    )
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J2_4_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J3_4_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J4_4_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = -24.5
+                    string isaac:nameOverride (
+                        displayName = "Name Override"
+                        doc = "Name override for prim lookup in base name search"
+                    )
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J1_5_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = 108.1
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J2_5_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J3_5_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J4_5_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = -99.4
+                    string isaac:nameOverride (
+                        displayName = "Name Override"
+                        doc = "Name override for prim lookup in base name search"
+                    )
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J1_6_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J2_6_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J3_6_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J4_6_joint"
+                {
+                    float drive:angular:physics:maxForce = 10000
+                    float drive:angular:physics:targetPosition = 59.100002
+                    string isaac:nameOverride (
+                        displayName = "Name Override"
+                        doc = "Name override for prim lookup in base name search"
+                    )
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = -180
+                    float physics:upperLimit = 180
+                    float state:angular:physics:position = 3.4028233e38
+                    float state:angular:physics:velocity = 3.4028233e38
+                }
+
+                over "J1_7_joint"
+                {
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = 0
+                    float physics:upperLimit = 0
+                    float state:linear:physics:position = 3.4028235e38
+                    float state:linear:physics:velocity = 3.4028235e38
+                }
+
+                over "J1_8_joint"
+                {
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = 0
+                    float physics:upperLimit = 0
+                    float state:linear:physics:position = 3.4028235e38
+                    float state:linear:physics:velocity = 3.4028235e38
+                }
+
+                over "J2_7_joint"
+                {
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = 0
+                    float physics:upperLimit = 0
+                    float state:linear:physics:position = 3.4028235e38
+                    float state:linear:physics:velocity = 3.4028235e38
+                }
+
+                over "J2_8_joint"
+                {
+                    float physics:breakForce = 0
+                    float physics:breakTorque = 0
+                    float physics:lowerLimit = 0
+                    float physics:upperLimit = 0
+                    float state:linear:physics:position = 3.4028235e38
+                    float state:linear:physics:velocity = 3.4028235e38
+                }
+            }
+        }
+    }
+}
+
+def Xform "Environment"
+{
+    quatd xformOp:orient = (1, 0, 0, 0)
+    double3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (0, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+    def DistantLight "defaultLight" (
+        prepend apiSchemas = ["ShapingAPI"]
+    )
+    {
+        float inputs:angle = 1
+        float inputs:intensity = 3000
+        float inputs:shaping:cone:angle = 180
+        float inputs:shaping:cone:softness
+        float inputs:shaping:focus
+        color3f inputs:shaping:focusTint
+        asset inputs:shaping:ies:file
+        quatd xformOp:orient = (0.6532814824381883, 0.2705980500730985, 0.27059805007309845, 0.6532814824381882)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}
+
+def "Render" (
+    hide_in_stage_window = true
+    no_delete = true
+)
+{
+    def "OmniverseKit"
+    {
+        def "HydraTextures" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            def RenderProduct "omni_kit_widget_viewport_ViewportTexture_0" (
+                prepend apiSchemas = ["OmniRtxSettingsCommonAdvancedAPI_1", "OmniRtxSettingsRtAdvancedAPI_1", "OmniRtxSettingsPtAdvancedAPI_1", "OmniRtxPostColorGradingAPI_1", "OmniRtxPostChromaticAberrationAPI_1", "OmniRtxPostBloomPhysicalAPI_1", "OmniRtxPostMatteObjectAPI_1", "OmniRtxPostCompositingAPI_1", "OmniRtxPostDofAPI_1", "OmniRtxPostMotionBlurAPI_1", "OmniRtxPostTvNoiseAPI_1", "OmniRtxPostTonemapIrayReinhardAPI_1", "OmniRtxPostDebugSettingsAPI_1", "OmniRtxDebugSettingsAPI_1"]
+                hide_in_stage_window = true
+                no_delete = true
+            )
+            {
+                rel camera = </OmniverseKit_Persp>
+                token omni:rtx:background:source:texture:textureMode = "repeatMirrored"
+                token omni:rtx:background:source:type = "domeLight"
+                bool omni:rtx:dlss:frameGeneration = 0
+                string omni:rtx:material:db:rtSensorNameToIdMap = "DefaultMaterial:0;AsphaltStandardMaterial:1;AsphaltWeatheredMaterial:2;VegetationGrassMaterial:3;WaterStandardMaterial:4;GlassStandardMaterial:5;FiberGlassMaterial:6;MetalAlloyMaterial:7;MetalAluminumMaterial:8;MetalAluminumOxidizedMaterial:9;PlasticStandardMaterial:10;RetroMarkingsMaterial:11;RetroSignMaterial:12;RubberStandardMaterial:13;SoilClayMaterial:14;ConcreteRoughMaterial:15;ConcreteSmoothMaterial:16;OakTreeBarkMaterial:17;FabricStandardMaterial:18;PlexiGlassStandardMaterial:19;MetalSilverMaterial:20"
+                bool omni:rtx:material:db:syncLoads = 1
+                bool omni:rtx:post:registeredCompositing:invertColorCorrection = 1
+                bool omni:rtx:post:registeredCompositing:invertToneMap = 1
+                bool omni:rtx:pt:lightcache:cached:dontResolveConflicts = 1
+                int omni:rtx:pt:maxSamplesPerLaunch = 2073600
+                int omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
+                color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
+                bool omni:rtx:rt:demoire = 0
+                bool omni:rtx:rt:ecoMode:enabled
+                bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
+                bool omni:rtx:scene:hydra:materialSyncLoads = 1
+                bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
+                uint omni:rtx:viewTile:limit = 4294967295
+                rel orderedVars = </Render/Vars/LdrColor>
+                custom bool overrideClipRange = 0
+                uniform int2 resolution = (1280, 720)
+            }
+        }
+    }
+
+    def RenderSettings "OmniverseGlobalRenderSettings" (
+        prepend apiSchemas = ["OmniRtxSettingsGlobalRtAdvancedAPI_1", "OmniRtxSettingsGlobalPtAdvancedAPI_1"]
+        no_delete = true
+    )
+    {
+        rel products = </Render/OmniverseKit/HydraTextures/omni_kit_widget_viewport_ViewportTexture_0>
+    }
+
+    def "Vars"
+    {
+        def RenderVar "LdrColor" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            uniform string sourceName = "LdrColor"
+        }
+    }
+}
+
+def PhysicsScene "physicsScene" (
+    prepend apiSchemas = ["PhysxSceneAPI"]
+)
+{
+    uint physxScene:gpuFoundLostAggregatePairsCapacity = 6000
+}
+
+def "FlatGrid" (
+    prepend references = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Environments/Grid/default_environment.usd@
+)
+{
+}
+

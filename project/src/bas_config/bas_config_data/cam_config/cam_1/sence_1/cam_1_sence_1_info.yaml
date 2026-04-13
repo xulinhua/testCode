@@ -1,0 +1,17 @@
+enable_depth_stream: true
+enable_color_stream: true
+enable_ir_stream: false
+enable_cloud_stream: false
+enable_publish_intrinsics: true
+enable_save_intrinsics: true
+color_para:
+  auto_exposure: true
+  auto_white_balance: true
+  width: 1280
+  height: 720
+  fps: 30
+depth_para:
+  auto_exposure: true
+  width: 1280
+  height: 720
+  fps: 30

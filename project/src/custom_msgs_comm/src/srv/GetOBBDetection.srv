@@ -1,0 +1,16 @@
+# Get OBB Detection Result Service
+# Request
+string request_id                    # Request identifier
+
+---
+# Response
+bool success                         # Operation success
+string message                       # Response message
+string object_class                  # Object class
+float64[] position                   # Position coordinates [x, y, z] in meters (transformed by calibration matrix if enabled)
+float64[] orientation                # Orientation quaternion [x, y, z, w]
+float64 confidence                   # Confidence level
+string frame_id                      # Frame identifier
+# sensor_msgs/Image image              # Original image data
+# sensor_msgs/Image result_image       # Result image with detections drawn
+builtin_interfaces/Time stamp        # Timestamp

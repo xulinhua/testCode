@@ -1,0 +1,22 @@
+# USB音频设备配置
+audio_capturer:
+  ros__parameters:
+    device_name: "hw:0,0"  # USB麦克风设备号，默认为 hw:0,0
+    rate: 44100           # 采样率(Hz)，根据设备支持情况设置为44100
+    channels: 1           # 声道数(1=单声道, 2=立体声)，默认选择单声道
+    chunk: 512            # 数据块大小
+    auto_search_device: true  # 是否自动搜寻麦克风设备，默认为false
+
+audio_player:
+  ros__parameters:
+    device_name: "hw:2,0"  # USB扬声器设备号，根据实际设备调整
+    channels: 1           # 声道数(1=单声道, 2=立体声)
+    voice_gain: 1.0       # 默认音量0.5 (0.2 ~ 1.0)
+
+# 唤醒词检测配置
+wake_word:
+  ros__parameters:
+    enabled: true                             # 是否启用唤醒词检测功能
+    model_path: "install/snowboy_python/share/snowboy_python/resources/models/hoson.pmdl"   # 唤醒词模型文件路径
+    resource_path: "install/snowboy_python/share/snowboy_python/resources/common.res"       # 资源文件路径
+    sensitivity: 0.5                          # 检测灵敏度(0.0-1.0)

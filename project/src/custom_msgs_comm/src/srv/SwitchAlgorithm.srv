@@ -1,0 +1,11 @@
+# 算法切换服务请求
+string algorithm              # 算法名称: yolo, detr, scrfd, yolo_obb, yolo_seg 等
+string model_path            # 模型文件路径
+string engine_type           # 推理引擎类型: tensorrt, onnx, ncnn, rknn, opencv_dnn, paddle, auto
+---
+# 算法切换服务响应
+bool success                 # 切换是否成功
+string message               # 响应消息
+string current_algorithm     # 当前使用的算法名称
+string current_model_path    # 当前使用的模型路径
+string current_engine_type   # 当前使用的引擎类型

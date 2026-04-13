@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>marker_detect_ros</name>
+  <version>1.0.0</version>
+  <description>ROS2 node for Marker detection library</description>
+  <maintainer email="developer@example.com">Developer</maintainer>
+  <license>MIT</license>
+
+  <!-- 构建工具依赖 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- 编译依赖 -->
+  <build_depend>cmake</build_depend>
+
+  <!-- ROS2核心依赖 -->
+  <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>vision_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+  <depend>std_srvs</depend>
+
+  <!-- 第三方库依赖 -->
+  <depend>aruco_alg</depend>
+  <depend>chessboard_alg</depend>
+  <depend>opencv4</depend>
+  <depend>visualization</depend>
+  <depend>log_system</depend>
+  <depend>custom_msgs_comm</depend>
+  <depend>hand_eye_calib</depend>
+  <depend>bas_sys_config_ros</depend>
+
+  <!-- 测试依赖 -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

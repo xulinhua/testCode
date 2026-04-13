@@ -1,0 +1,17 @@
+robot_1:
+  enable: true
+  robot_config:
+    ip: 192.168.5.2
+  gripper_config:
+    enable: false
+    serial_port: /dev/ttyUSB1
+    id: 22
+    user_name: gripper_1
+    baudrate: 1000000
+    servo_params:
+      pos_min: 2000
+      pos_max: 3000
+      speed_min: 0
+      speed_max: 4096
+      force_min: 0
+      force_max: 100

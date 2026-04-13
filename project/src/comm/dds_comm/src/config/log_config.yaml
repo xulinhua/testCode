@@ -1,0 +1,49 @@
+# dds_comm项目日志配置文件
+# 采用与log_system一致的层次化配置格式
+# 支持多项目配置，基于project_name区分
+
+projects:
+  dds_comm: # DDS通讯项目默认配置
+    comm:
+      log_level: "INFO"   # 日志级别配置: DEBUG, INFO, WARN, ERROR, FATAL
+
+    # 控制台输出配置
+    console:
+      enable_console_output: true    # 是否启用控制台输出（控制台输出总开关）
+      enable_output_params: true     # 是否输出参数信息到控制台
+      color_output: true             # 启用彩色输出
+
+      # 不同级别控制台输出开关
+      debug: true   # DEBUG级别是否输出到终端（默认开启，用于调试）
+      info: true     # INFO级别是否输出到终端（默认开启，显示基本信息）
+      warn: true     # WARN级别是否输出到终端（默认开启，显示警告信息）
+      error: true    # ERROR级别是否输出到终端（默认开启，显示错误信息）
+      fatal: true    # FATAL级别是否输出到终端（默认开启，显示致命错误）
+
+
+    # 文件输出配置
+    file:
+      enable_file_output: true               # 是否启用文件输出（文件输出总开关）
+      enable_output_params: true             # 是否输出参数信息到文件
+      log_file_path: "~/ros2_logs/{project_name}/log_{timestamp}.log"  # 使用时间戳命名的日志文件
+      filename_pattern: "%Y%m%d_%H%M%S.log"  # 文件命名格式: 基于启动时间生成，年月日_时分秒
+      max_file_size: "10MB"                  # 单个文件最大大小
+      max_files: 10                          # 最大文件数量
+      rotate_on_start: true                  # 启动时轮转文件
+
+      # 不同级别文件输出开关
+      debug: true   # DEBUG级别是否保存到文件（默认开启，用于调试分析）
+      info: true     # INFO级别是否保存到文件（默认开启，记录运行信息）
+      warn: true     # WARN级别是否保存到文件（默认开启，记录警告信息）
+      error: true    # ERROR级别是否保存到文件（默认开启，记录错误信息）
+      fatal: true    # FATAL级别是否保存到文件（默认开启，记录致命错误）
+
+    # 日志格式配置
+    # 控制日志消息的显示格式，影响终端和文件输出
+    format:
+      show_timestamp: true                        # 是否显示时间戳
+      timestamp_format: "%Y-%m-%d %H:%M:%S"       # 时间戳格式
+      show_level: true                            # 是否显示日志级别
+      show_project: true                          # 是否显示项目名称
+      show_thread_id: false                       # 是否显示线程ID（默认关闭避免冗长）
+      show_file_info: false                       # 是否包含文件信息

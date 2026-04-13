@@ -1,0 +1,36 @@
+# Hand Gesture Recognition 节点参数配置文件
+#
+# 配置说明:
+# - camera_id: 启用的相机ID列表（全局配置）
+# - 各相机的算法相关参数在各自独立的 cam_X_parameters 中配置
+
+ros__parameters:
+  # 启用相机ID列表
+  camera_id: [0]
+
+# ==================== 相机0独立配置 ====================
+cam_0_parameters:
+  # 模型路径配置
+  engine_path: "install/hand_gesture_rec/models/rtmdet-hand.engine"
+  pose_engine_path: "install/hand_gesture_rec/models/rtmpose-hand.engine"
+  # 标定模式配置
+  usecalib: true
+  # 功能开关
+  enable_visualization: true
+  # 手势识别参数
+  min_wave_pairs: 1
+  use_real_3d: true
+  # 3D模式挥手阈值（毫米单位）
+  max_wave_y_movement: 30.0 #50.0 2D模式使用像素单位
+  min_wave_amplitude: 30.0  #80.0 
+
+# ==================== 相机1独立配置 ====================
+cam_1_parameters:
+  engine_path: "install/hand_gesture_rec/models/rtmdet-hand.engine"
+  pose_engine_path: "install/hand_gesture_rec/models/rtmpose-hand.engine"
+  usecalib: true
+  enable_visualization: true
+  min_wave_pairs: 1
+  use_real_3d: true
+  max_wave_y_movement: 30.0
+  min_wave_amplitude: 30.0

@@ -1,0 +1,51 @@
+# OBB Detection 节点参数配置文件
+# 用于 ros2 launch 时加载: ros2 launch obb_det obb_det.py params_file:=config/obb_det_params.yaml
+#
+# 配置说明:
+# - camera_id: 启用的相机ID列表（全局配置）
+# - 相机与机械臂的对应关系从 sys_cam_config.yaml 自动获取
+# - 相机类型从 sys_cam_config.yaml 自动获取
+# - 各相机的算法相关参数在各自独立的 cam_X_parameters 中配置
+
+ros__parameters:
+  # 启用相机ID列表（从参数服务器获取相机配置）
+  camera_id: [0]  # 启用相机ID列表，[0, 1, 2]
+
+# ==================== 相机0独立配置 ====================
+cam_0_parameters:
+  # 算法配置
+  algorithm: "yolo_obb"                                        # 算法名称
+  model_path: "install/obb_det/models/cassette-obb.engine"     # 模型文件路径
+  # 类别名称文件（与模型同名，自动加载 cassette-obb.names）
+  engine_type: "tensorrt"                                      # 推理引擎: tensorrt, onnx, ncnn, rknn, opencv_dnn, paddle, auto
+  
+  # 标定模式配置
+  usecalib: true
+  # 推理引擎配置
+  device_id: 0              # GPU设备ID
+  enable_fp16: false        # 是否启用FP16推理
+  enable_int8: false        # 是否启用INT8量化
+  batch_size: 1             # 批处理大小
+  # 检测参数
+  conf_threshold: 0.5       # 置信度阈值
+  nms_threshold: 0.45       # NMS阈值
+  max_detections: 100       # 最大检测数
+  use_gpu_preprocess: true  # 是否使用GPU预处理
+  use_gpu_postprocess: true # 是否使用GPU后处理
+
+# ==================== 相机1独立配置 ====================
+cam_1_parameters:
+  algorithm: "yolo_obb"
+  model_path: "install/obb_det/models/cassette-obb.engine"
+  # 类别名称文件（与模型同名，自动加载 cassette-obb.names）
+  engine_type: "tensorrt"
+  usecalib: true
+  device_id: 0
+  enable_fp16: false
+  enable_int8: false
+  batch_size: 1
+  conf_threshold: 0.5
+  nms_threshold: 0.45
+  max_detections: 100
+  use_gpu_preprocess: true
+  use_gpu_postprocess: true

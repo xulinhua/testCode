@@ -1,0 +1,19 @@
+cam_id: 1
+cam_usr_name: left_arm_camera
+serial_number: 218622278367
+cam_type: 0
+cam_model: Intel RealSense D405
+cam_index: 0
+enable: true
+show_topic_image: true
+device_info:
+  device_id: 0
+  product_id: 0B5B
+  device_name: Intel RealSense D405
+  physical_port: 2-1.1-17
+  user_name: Intel RealSense D405
+  facturer_name: Intel RealSense D405
+  firmware_version: 5.12.14.100
+topics:
+  image_topic: /camera/rs_camera_1/color/image_rect_raw
+roi_fps: ~

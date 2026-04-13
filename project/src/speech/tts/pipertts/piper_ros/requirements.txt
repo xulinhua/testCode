@@ -1,0 +1,5 @@
+# Piper ROS 依赖项
+rclpy>=3.0.0
+std_msgs>=4.0.0
+audio_common_msgs>=1.0.0
+numpy>=1.21.0

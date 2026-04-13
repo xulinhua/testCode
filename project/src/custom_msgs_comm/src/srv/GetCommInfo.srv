@@ -1,0 +1,5 @@
+uint16 msg_type
+uint32 cam_id
+uint8 arm_id
+---
+custom_msgs_comm/RosCommInfo comm_info

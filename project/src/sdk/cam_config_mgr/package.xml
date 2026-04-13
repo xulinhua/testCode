@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cam_config_mgr</name>
+  <version>0.0.1</version>
+  <description>Camera configuration manager with ROS support</description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>yaml-cpp</depend>
+  <depend>bas_operate</depend>
+  <depend>nlohmann-json</depend>
+  <depend>log_system</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,14 @@
+# Get Calibration Points Service
+# Request
+string request_id                    # Request identifier
+
+---
+# Response
+bool success                         # Operation success
+string message                       # Response message
+float64[] x                          # X coordinates
+float64[] y                          # Y coordinates
+float64[] z                          # Z coordinates
+float64[] rx                         # RX angles
+float64[] ry                         # RY angles
+float64[] rz                         # RZ angles

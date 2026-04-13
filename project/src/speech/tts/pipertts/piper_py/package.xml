@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>piper_py</name>
+  <version>1.0.1</version>
+  <description>Piper Speech - 基于Piper TTS引擎的高性能语音合成系统，专为Jetson Orin NX Super优化</description>
+  <maintainer email="piper-speech@example.com">Piper Speech Team</maintainer>
+  <license>GPL-3.0</license>
+
+  <depend>python3</depend>
+  <depend>rclpy</depend>
+  
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

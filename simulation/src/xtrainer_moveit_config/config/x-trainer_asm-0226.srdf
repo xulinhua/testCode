@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--This does not replace URDF, and is not an extension of URDF.
+    This is a format for representing semantic information about the robot structure.
+    A URDF file must exist for this robot as well, where the joints and the links that are referenced are defined
+-->
+<robot name="x-trainer_asm-0226">
+    <!--GROUPS Representation of a set of joints and links. This can be useful for specifying DOF to plan for, defining arms, end effectors, etc-->
+    <!--LINKS When a link is specified, the parent joint of that link (if it exists) is automatically included-->
+    <!--JOINTS When a joint is specified, the child link of that joint (which will always exist) is automatically included-->
+    <!--CHAINS When a chain is specified, all the links along the chain (including endpoints) are included in the group. Additionally, all the joints that are parents to included links are also included. This means that joints along the chain and the parent joint of the base link are included in the group-->
+    <!--SUBGROUPS Groups can also be formed by referencing to already defined group names-->
+    <group name="l_arm">
+        <joint name="R1-1"/>
+        <joint name="R1-2"/>
+        <joint name="R1-3"/>
+        <joint name="R1-4"/>
+        <joint name="R1-5"/>
+        <joint name="R1-6"/>
+    </group>
+    <group name="l_gripper">
+        <link name="J1-8"/>
+        <link name="J1-7"/>
+    </group>
+    <group name="r_arm">
+        <joint name="R2-1"/>
+        <joint name="R2-2"/>
+        <joint name="R2-3"/>
+        <joint name="R2-4"/>
+        <joint name="R2-5"/>
+        <joint name="R2-6"/>
+    </group>
+    <group name="r_gripper">
+        <link name="J2-7"/>
+        <link name="J2-8"/>
+    </group>
+    <!--GROUP STATES Purpose Define a named state for a particular group, in terms of joint values. This is useful to define states like 'folded arms'-->
+    <group_state name="home" group="l_arm">
+        <joint name="R1-1" value="-1.57"/>
+        <joint name="R1-2" value="0"/>
+        <joint name="R1-3" value="-1.57"/>
+        <joint name="R1-4" value="0"/>
+        <joint name="R1-5" value="1.57"/>
+        <joint name="R1-6" value="1.57"/>
+    </group_state>
+    <group_state name="home" group="l_gripper">
+        <joint name="R1-7" value="0"/>
+        <joint name="R1-8" value="0"/>
+    </group_state>
+    <group_state name="home" group="r_arm">
+        <joint name="R2-1" value="1.57"/>
+        <joint name="R2-2" value="0"/>
+        <joint name="R2-3" value="1.57"/>
+        <joint name="R2-4" value="0"/>
+        <joint name="R2-5" value="-1.57"/>
+        <joint name="R2-6" value="-1.57"/>
+    </group_state>
+    <group_state name="home" group="r_gripper">
+        <joint name="R2-7" value="0"/>
+        <joint name="R2-8" value="0"/>
+    </group_state>
+    <!--END EFFECTOR Purpose Represent information about an end effector.-->
+    <end_effector name="l_g" parent_link="J1-6" group="l_gripper"/>
+    <end_effector name="r_g" parent_link="J2-6" group="r_gripper"/>
+    <!--DISABLE COLLISIONS By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
+    <disable_collisions link1="J1-1" link2="J1-2" reason="Adjacent"/>
+    <disable_collisions link1="J1-1" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="J2-4" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="J2-6" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="J2-7" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J1-1" link2="base_link" reason="Adjacent"/>
+    <disable_collisions link1="J1-2" link2="J1-3" reason="Adjacent"/>
+    <disable_collisions link1="J1-2" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-2" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-2" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-2" link2="J2-4" reason="Never"/>
+    <disable_collisions link1="J1-2" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J1-2" link2="J2-6" reason="Never"/>
+    <disable_collisions link1="J1-2" link2="J2-7" reason="Never"/>
+    <disable_collisions link1="J1-2" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J1-4" reason="Adjacent"/>
+    <disable_collisions link1="J1-3" link2="J1-5" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-4" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-6" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-7" reason="Never"/>
+    <disable_collisions link1="J1-3" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J1-5" reason="Adjacent"/>
+    <disable_collisions link1="J1-4" link2="J1-6" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J1-7" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J1-8" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-4" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-6" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-7" reason="Never"/>
+    <disable_collisions link1="J1-4" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J1-6" reason="Adjacent"/>
+    <disable_collisions link1="J1-5" link2="J1-7" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J1-8" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J2-4" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J2-7" reason="Never"/>
+    <disable_collisions link1="J1-5" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J1-6" link2="J1-7" reason="Adjacent"/>
+    <disable_collisions link1="J1-6" link2="J1-8" reason="Adjacent"/>
+    <disable_collisions link1="J1-6" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-6" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-6" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-6" link2="J2-4" reason="Never"/>
+    <disable_collisions link1="J1-6" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J1-7" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-7" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-7" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-7" link2="J2-4" reason="Never"/>
+    <disable_collisions link1="J1-7" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J1-7" link2="J2-6" reason="Never"/>
+    <disable_collisions link1="J1-8" link2="J2-1" reason="Never"/>
+    <disable_collisions link1="J1-8" link2="J2-2" reason="Never"/>
+    <disable_collisions link1="J1-8" link2="J2-3" reason="Never"/>
+    <disable_collisions link1="J1-8" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J1-8" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J2-1" link2="J2-2" reason="Adjacent"/>
+    <disable_collisions link1="J2-1" link2="base_link" reason="Adjacent"/>
+    <disable_collisions link1="J2-2" link2="J2-3" reason="Adjacent"/>
+    <disable_collisions link1="J2-3" link2="J2-4" reason="Adjacent"/>
+    <disable_collisions link1="J2-3" link2="J2-5" reason="Never"/>
+    <disable_collisions link1="J2-4" link2="J2-5" reason="Adjacent"/>
+    <disable_collisions link1="J2-4" link2="J2-6" reason="Never"/>
+    <disable_collisions link1="J2-4" link2="J2-7" reason="Never"/>
+    <disable_collisions link1="J2-4" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J2-5" link2="J2-6" reason="Adjacent"/>
+    <disable_collisions link1="J2-5" link2="J2-7" reason="Never"/>
+    <disable_collisions link1="J2-5" link2="J2-8" reason="Never"/>
+    <disable_collisions link1="J2-6" link2="J2-7" reason="Adjacent"/>
+    <disable_collisions link1="J2-6" link2="J2-8" reason="Adjacent"/>
+</robot>

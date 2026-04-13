@@ -1,0 +1,73 @@
+<robot name="nova_robot">
+  <link name="base_link">
+    <inertial>
+      <origin
+        xyz="0.529993726614458 -0.186441381563561 -0.00936699784472195"
+        rpy="0 0 0" />
+      <mass
+        value="16.7027966650362" />
+      <inertia
+        ixx="1.16831503400653"
+        ixy="7.89722873250628E-07"
+        ixz="1.48320613359242E-06"
+        iyy="2.396915631753"
+        iyz="0.0106059785382614"
+        izz="3.5540378350848" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="file:///home/hs/testCode/simulation/src/urdf_new/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.2 0.4 0.694117647058824 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="J1_1">
+    <inertial>
+      <origin xyz="-2.00100988057006E-07 -0.021871021005788 -0.0236237987331687" rpy="0 0 0" />
+      <mass value="0.803381596273923" />
+      <inertia
+        ixx="0.00167953529900133"
+        ixy="1.47067983775821E-07"
+        ixz="6.67826003947778E-08"
+        iyy="0.00146965644822024"
+        iyz="0.000442019784443742"
+        izz="0.00103706681305504" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh filename="file:///home/hs/testCode/simulation/src/urdf_new/J1_1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="J1_1_joint" type="revolute">
+    <origin xyz="0 0 0.2234" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="J1_1" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  
+</robot>

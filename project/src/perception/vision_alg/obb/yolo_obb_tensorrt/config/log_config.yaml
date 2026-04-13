@@ -1,0 +1,4 @@
+# YOLO OBB TensorRT 日志配置
+log_level: INFO
+log_to_console: true
+log_to_file: false

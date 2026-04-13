@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<package format="2">
+    <name>pcl2laserscan_trans</name>
+    <version>2.0.1</version>
+    <description>Converts 3D point clouds from cameras and LiDARs into 2D laser scans with filtering.This is useful for making devices like the Kinect appear like a laser scanner for 2D-based algorithms (e.g. laser-based SLAM).</description>
+
+    <maintainer email="paul@bovbel.com">Paul Bovbel</maintainer>
+    <maintainer email="michel@ekumenlabs.com">Michel Hidalgo</maintainer>
+    <author email="paul@bovbel.com">Paul Bovbel</author>
+    <author email="michel@ekumenlabs.com">Michel Hidalgo</author>
+    <author>Tully Foote</author>
+
+    <license>BSD</license>
+
+    <url type="website">http://ros.org/wiki/perception_pcl</url>
+    <url type="bugtracker">https://github.com/ros-perception/perception_pcl/issues</url>
+    <url type="repository">https://github.com/ros-perception/perception_pcl</url>
+
+    <buildtool_depend>ament_cmake_auto</buildtool_depend>
+
+    <depend>laser_geometry</depend>
+    <depend>message_filters</depend>
+    <depend>rclcpp</depend>
+    <depend>rclcpp_components</depend>
+    <depend>sensor_msgs</depend>
+    <depend>tf2</depend>
+    <depend>tf2_ros</depend>
+    <depend>tf2_sensor_msgs</depend>
+    <depend>pcl_conversions</depend> 
+    <depend>pcl_ros</depend>          
+    <depend>geometry_msgs</depend>
+    <depend>nav_msgs</depend>
+    <depend>rviz2</depend>
+    <depend>visualization_msgs</depend>
+    <!-- 添加新的依赖项 -->
+    <depend>log_system</depend>
+    <depend>bas_operate</depend>
+    <depend>bas_operate_ros</depend>
+    <depend>pcl_proc</depend>
+
+    <exec_depend>launch</exec_depend>
+    <exec_depend>launch_ros</exec_depend>
+
+    <test_depend>ament_lint_auto</test_depend>
+    <test_depend>ament_cmake_cppcheck</test_depend>
+    <test_depend>ament_cmake_cpplint</test_depend>
+    <test_depend>ament_cmake_flake8</test_depend>
+    <test_depend>ament_cmake_lint_cmake</test_depend>
+    <test_depend>ament_cmake_pep257</test_depend>
+    <test_depend>ament_cmake_uncrustify</test_depend>
+    <test_depend>ament_cmake_xmllint</test_depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>
