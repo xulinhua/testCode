@@ -42,6 +42,21 @@ def generate_launch_description():
         output='screen',
         arguments=['-d', LaunchConfiguration('rvizconfig')],
     )
+    
+    # 延时加载控制器
+    load_controllers = TimerAction(
+        period=1.0,
+        actions=[
+            ExecuteProcess(
+                cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'joint_state_broadcaster'],
+                output='screen'
+            ),
+            ExecuteProcess(
+                cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'arm_controller'],
+                output='screen'
+            )
+        ]
+    )
         
     return LaunchDescription([
         world_arg,
@@ -49,4 +64,5 @@ def generate_launch_description():
         rvizconfig_arg,
         gazebo_launch,
         rviz_node,
+        load_controllers,
     ])

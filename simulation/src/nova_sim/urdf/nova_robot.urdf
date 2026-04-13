@@ -1296,6 +1296,14 @@
       <state_interface name="position"/>
       <state_interface name="velocity"/>
   </joint>
+ <joint name="J1_7_joint"> <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+  </joint>
+ <joint name="J1_8_joint"> <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+  </joint>
  <joint name="J2_1_joint"> <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
@@ -1317,6 +1325,14 @@
       <state_interface name="velocity"/>
   </joint>
  <joint name="J2_6_joint"> <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+  </joint>
+ <joint name="J2_7_joint"> <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+  </joint>
+ <joint name="J2_8_joint"> <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
   </joint>
