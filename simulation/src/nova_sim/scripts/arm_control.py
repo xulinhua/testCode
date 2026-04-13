@@ -22,10 +22,10 @@ class ArmController(Node):
         
         # 定义关节名称列表（按 URDF 中的顺序）
         self.joint_names = [
-            'J1-1_joint', 'J1-2_joint', 'J1-3_joint', 'J1-4_joint', 'J1-5_joint', 'J1-6_joint',
-            'J2-1_joint', 'J2-2_joint', 'J2-3_joint', 'J2-4_joint', 'J2-5_joint', 'J2-6_joint',
-            'J3-1_joint', 'J3-2_joint', 'J3-3_joint', 'J3-4_joint', 'J3-5_joint', 'J3-6_joint',
-            'J4-1_joint', 'J4-2_joint', 'J4-3_joint', 'J4-4_joint', 'J4-5_joint', 'J4-6_joint'
+            'J1_1_joint', 'J1_2_joint', 'J1_3_joint', 'J1_4_joint', 'J1_5_joint', 'J1_6_joint',
+            'J2_1_joint', 'J2_2_joint', 'J2_3_joint', 'J2_4_joint', 'J2_5_joint', 'J2_6_joint',
+            'J3_1_joint', 'J3_2_joint', 'J3_3_joint', 'J3_4_joint', 'J3_5_joint', 'J3_6_joint',
+            'J4_1_joint', 'J4_2_joint', 'J4_3_joint', 'J4_4_joint', 'J4_5_joint', 'J4_6_joint'
         ]
         
         timer_period = 1.0  # 秒
@@ -33,7 +33,7 @@ class ArmController(Node):
         self.count = 0
         
     def timer_callback(self):
-        # 示例：让 J1-1 关节正弦摆动
+        # 示例：让 J1_1 关节正弦摆动
         msg = Float64MultiArray()
         positions = [0.0] * len(self.joint_names)
         
