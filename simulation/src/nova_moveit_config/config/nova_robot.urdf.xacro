@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="nova_robot">
+  <!-- Reuse the same robot description as nova_test simulation. -->
+  <xacro:include filename="$(find nova_test)/urdf/nova_robot_position.urdf"/>
+</robot>

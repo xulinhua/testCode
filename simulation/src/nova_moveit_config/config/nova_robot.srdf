@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="nova_robot">
+  <group name="l_arm">
+    <joint name="J1_1_joint"/>
+    <joint name="J1_2_joint"/>
+    <joint name="J1_3_joint"/>
+    <joint name="J1_4_joint"/>
+    <joint name="J1_5_joint"/>
+    <joint name="J1_6_joint"/>
+  </group>
+
+  <group name="l_gripper">
+    <joint name="J1_7_joint"/>
+    <joint name="J1_8_joint"/>
+  </group>
+
+  <group name="r_arm">
+    <joint name="J2_1_joint"/>
+    <joint name="J2_2_joint"/>
+    <joint name="J2_3_joint"/>
+    <joint name="J2_4_joint"/>
+    <joint name="J2_5_joint"/>
+    <joint name="J2_6_joint"/>
+  </group>
+
+  <group name="r_gripper">
+    <joint name="J2_7_joint"/>
+    <joint name="J2_8_joint"/>
+  </group>
+
+  <group name="j3_arm">
+    <joint name="J3_1_joint"/>
+    <joint name="J3_2_joint"/>
+    <joint name="J3_3_joint"/>
+    <joint name="J3_4_joint"/>
+    <joint name="J3_5_joint"/>
+    <joint name="J3_6_joint"/>
+  </group>
+
+  <group name="j4_arm">
+    <joint name="J4_1_joint"/>
+    <joint name="J4_2_joint"/>
+    <joint name="J4_3_joint"/>
+    <joint name="J4_4_joint"/>
+    <joint name="J4_5_joint"/>
+    <joint name="J4_6_joint"/>
+  </group>
+
+  <group_state name="home" group="l_arm">
+    <joint name="J1_1_joint" value="-1.57"/>
+    <joint name="J1_2_joint" value="0.0"/>
+    <joint name="J1_3_joint" value="-1.57"/>
+    <joint name="J1_4_joint" value="0.0"/>
+    <joint name="J1_5_joint" value="1.57"/>
+    <joint name="J1_6_joint" value="1.57"/>
+  </group_state>
+
+  <group_state name="home" group="r_arm">
+    <joint name="J2_1_joint" value="1.57"/>
+    <joint name="J2_2_joint" value="0.0"/>
+    <joint name="J2_3_joint" value="1.57"/>
+    <joint name="J2_4_joint" value="0.0"/>
+    <joint name="J2_5_joint" value="-1.57"/>
+    <joint name="J2_6_joint" value="-1.57"/>
+  </group_state>
+
+  <group_state name="home" group="j3_arm">
+    <joint name="J3_1_joint" value="0.0"/>
+    <joint name="J3_2_joint" value="0.0"/>
+    <joint name="J3_3_joint" value="0.0"/>
+    <joint name="J3_4_joint" value="0.0"/>
+    <joint name="J3_5_joint" value="0.0"/>
+    <joint name="J3_6_joint" value="0.0"/>
+  </group_state>
+
+  <group_state name="home" group="j4_arm">
+    <joint name="J4_1_joint" value="0.0"/>
+    <joint name="J4_2_joint" value="0.0"/>
+    <joint name="J4_3_joint" value="0.0"/>
+    <joint name="J4_4_joint" value="0.0"/>
+    <joint name="J4_5_joint" value="0.0"/>
+    <joint name="J4_6_joint" value="0.0"/>
+  </group_state>
+
+  <end_effector name="l_g" parent_link="J1_6" group="l_gripper"/>
+  <end_effector name="r_g" parent_link="J2_6" group="r_gripper"/>
+
+  <virtual_joint name="world_joint" type="fixed" parent_frame="world" child_link="base_link"/>
+</robot>
