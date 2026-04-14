@@ -1014,7 +1014,7 @@
   
   <!-- Camera0 光学坐标系 -->
  <joint name="camera0_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera0_link"/>
     <child link="camera0_optical_frame"/>
   </joint>
@@ -1055,8 +1055,8 @@
           <format>R8G8B8</format>
         </image>
         <clip>
-          <near>0.1</near>
-          <far>10.0</far>
+          <near>0.25</near>
+          <far>1.2</far>
         </clip>
         <distortion>
           <k1>0.0</k1>
@@ -1135,7 +1135,7 @@
   
   <!-- Camera1 光学坐标系 -->
  <joint name="camera1_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera1_link"/>
     <child link="camera1_optical_frame"/>
   </joint>
@@ -1226,7 +1226,7 @@
   
   <!-- Camera2 光学坐标系 -->
  <joint name="camera2_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera2_link"/>
     <child link="camera2_optical_frame"/>
   </joint>

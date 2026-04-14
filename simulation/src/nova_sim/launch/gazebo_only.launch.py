@@ -2,7 +2,7 @@ import os
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, ExecuteProcess, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory, get_package_prefix
@@ -35,8 +35,9 @@ def generate_launch_description():
         description='URDF file path'
     )
 
-    # 直接读取 URDF 文件内容
+    # URDF/xacro 路径
     urdf_path = LaunchConfiguration('urdf_file')
+    robot_description = Command(['xacro ', urdf_path])
 
     # Include the empty_world launch file
     gazebo_launch = IncludeLaunchDescription(
@@ -54,16 +55,18 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 发布机器人描述 - 使用 ExecuteProcess 从文件读取
-    robot_state_publisher = ExecuteProcess(
-        cmd=['ros2', 'run', 'robot_state_publisher', 'robot_state_publisher', urdf_path],
-        output='screen'
+    # 发布机器人描述（先展开 xacro，确保 aruco 宏等内容真正进入模型）
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        output='screen',
+        parameters=[{'robot_description': robot_description}],
     )
 
-    # Spawn model from file（略抬高 z，减轻初始帧与地面的穿模冲击）
+    # 从 robot_description 话题生成模型，避免 -file 直读导致 xacro 宏未展开
     spawn_model = ExecuteProcess(
         cmd=['ros2', 'run', 'gazebo_ros', 'spawn_entity.py',
-             '-file', urdf_path,
+             '-topic', 'robot_description',
              '-entity', 'nova_robot',
              '-z', '0.1'],
         output='screen'

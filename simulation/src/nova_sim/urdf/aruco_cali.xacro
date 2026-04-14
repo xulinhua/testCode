@@ -10,7 +10,7 @@
     <xacro:property name="board_thickness" value="0.001"/> 
     
     <!-- 连接到父链接的关节 -->
-    <joint name="base_to_aruco_joint" type="fixed">
+    <joint name="${child_link}_joint" type="fixed">
       <origin xyz="${cali_x} ${cali_y} ${cali_z}" 
               rpy="${cali_roll} ${cali_pitch} ${cali_yaw}"/>
       <parent link="${parent_link}"/>
@@ -22,11 +22,9 @@
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0"/>
         <geometry>
-          <box size="${board_width} ${board_height} ${board_thickness}"/>
+          <!-- 使用带UV的平面网格贴图，Gazebo 对这种方式兼容性更好 -->
+          <mesh filename="package://nova_sim/meshes/aruco_board.dae"/>
         </geometry>
-        <material name="aruco_texture">
-          <texture filename="package://nova_sim/meshes/6x6_1000-0.png"/>
-        </material>
       </visual>
       
       <collision>
@@ -43,21 +41,16 @@
       </inertial>
     </link>
 
-    <!-- Gazebo 配置 - 使用纹理贴图 -->
+    <!-- Gazebo 配置 -->
     <gazebo reference="${child_link}">
       <mu1>0.5</mu1>
       <mu2>0.5</mu2>
-      <visual>
-        <material>
-          <diffuse>1 1 1 1</diffuse>
-          <specular>0 0 0 0</specular>
-          <pbr>
-            <metal>
-              <albedo_map>package://nova_sim/meshes/6x6_1000-0.png</albedo_map>
-            </metal>
-          </pbr>
-        </material>
-      </visual>
+      <material>
+        <ambient>1 1 1 1</ambient>
+        <diffuse>1 1 1 1</diffuse>
+        <specular>0 0 0 1</specular>
+        <emissive>0 0 0 1</emissive>
+      </material>
     </gazebo>
     
     <!-- ArUco 标记可视化（使用白色板子，实际识别由视觉系统处理） -->

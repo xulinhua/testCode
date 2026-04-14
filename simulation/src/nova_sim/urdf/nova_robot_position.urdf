@@ -1015,7 +1015,7 @@
   
   <!-- Camera0 光学坐标系 -->
  <joint name="camera0_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera0_link"/>
     <child link="camera0_optical_frame"/>
   </joint>
@@ -1056,8 +1056,8 @@
           <format>R8G8B8</format>
         </image>
         <clip>
-          <near>0.1</near>
-          <far>10.0</far>
+          <near>0.25</near>
+          <far>1.2</far>
         </clip>
         <distortion>
           <k1>0.0</k1>
@@ -1136,7 +1136,7 @@
   
   <!-- Camera1 光学坐标系 -->
  <joint name="camera1_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera1_link"/>
     <child link="camera1_optical_frame"/>
   </joint>
@@ -1227,7 +1227,7 @@
   
   <!-- Camera2 光学坐标系 -->
  <joint name="camera2_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera2_link"/>
     <child link="camera2_optical_frame"/>
   </joint>
@@ -1414,25 +1414,47 @@
   </gazebo>
 
   <!-- ========== ArUco 标定板（可配置参数） ========== -->
-  <xacro:property name="aruco_parent_link" value="base_link"/>
-  <xacro:property name="aruco_child_link" value="aruco_board_link"/>
-  <xacro:property name="aruco_cali_x" value="0.3"/>
-  <xacro:property name="aruco_cali_y" value="0.0"/>
-  <xacro:property name="aruco_cali_z" value="0.1"/>
-  <xacro:property name="aruco_cali_roll" value="0.0"/>
-  <xacro:property name="aruco_cali_pitch" value="0.0"/>
-  <xacro:property name="aruco_cali_yaw" value="0.0"/>
+  <!-- 板1：绑定到 J1_6 -->
+  <xacro:property name="aruco1_parent_link" value="J1_6"/>
+  <xacro:property name="aruco1_child_link" value="aruco_board_j1_6"/>
+  <xacro:property name="aruco1_cali_x" value="0.0"/>
+  <xacro:property name="aruco1_cali_y" value="-0.08"/>
+  <xacro:property name="aruco1_cali_z" value="0.15"/>
+  <xacro:property name="aruco1_cali_roll" value="0.0"/>
+  <xacro:property name="aruco1_cali_pitch" value="0.0"/>
+  <xacro:property name="aruco1_cali_yaw" value="0.0"/>
+
+  <!-- 板2：绑定到 J2_6 -->
+  <xacro:property name="aruco2_parent_link" value="J2_6"/>
+  <xacro:property name="aruco2_child_link" value="aruco_board_j2_6"/>
+  <xacro:property name="aruco2_cali_x" value="0.0"/>
+  <xacro:property name="aruco2_cali_y" value="-0.08"/>
+  <xacro:property name="aruco2_cali_z" value="0.15"/>
+  <xacro:property name="aruco2_cali_roll" value="0.0"/>
+  <xacro:property name="aruco2_cali_pitch" value="0.0"/>
+  <xacro:property name="aruco2_cali_yaw" value="0.0"/>
   
   <xacro:include filename="$(find nova_sim)/urdf/aruco_cali.xacro"/>
-  <xacro:aruco_cali 
-    parent_link="${aruco_parent_link}"
-    child_link="${aruco_child_link}"
-    cali_x="${aruco_cali_x}"
-    cali_y="${aruco_cali_y}"
-    cali_z="${aruco_cali_z}"
-    cali_roll="${aruco_cali_roll}"
-    cali_pitch="${aruco_cali_pitch}"
-    cali_yaw="${aruco_cali_yaw}"
+  <xacro:aruco_cali
+    parent_link="${aruco1_parent_link}"
+    child_link="${aruco1_child_link}"
+    cali_x="${aruco1_cali_x}"
+    cali_y="${aruco1_cali_y}"
+    cali_z="${aruco1_cali_z}"
+    cali_roll="${aruco1_cali_roll}"
+    cali_pitch="${aruco1_cali_pitch}"
+    cali_yaw="${aruco1_cali_yaw}"
+  />
+
+  <xacro:aruco_cali
+    parent_link="${aruco2_parent_link}"
+    child_link="${aruco2_child_link}"
+    cali_x="${aruco2_cali_x}"
+    cali_y="${aruco2_cali_y}"
+    cali_z="${aruco2_cali_z}"
+    cali_roll="${aruco2_cali_roll}"
+    cali_pitch="${aruco2_cali_pitch}"
+    cali_yaw="${aruco2_cali_yaw}"
   />
 
 </robot>
