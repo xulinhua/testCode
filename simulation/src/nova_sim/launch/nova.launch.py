@@ -14,18 +14,18 @@ def generate_launch_description():
         description='World file to load in Gazebo',
         default_value=PathJoinSubstitution([FindPackageShare('nova_sim'), 'worlds', 'simple.world'])
     )
-    
+
     urdf_file_arg = DeclareLaunchArgument(
         name='urdf_file',
         description='URDF/xacro file absolute path',
         default_value=PathJoinSubstitution([FindPackageShare('nova_sim'), 'urdf', 'nova_robot.urdf'])
     )
-    
+
     rvizconfig_arg = DeclareLaunchArgument(
         name='rvizconfig',
         default_value=PathJoinSubstitution([FindPackageShare('nova_sim'), 'config', 'nova_sim.rviz']),
     )
-    
+
     # 启动Gazebo
     gazebo_launch = IncludeLaunchDescription(
         PathJoinSubstitution([FindPackageShare('nova_sim'), 'launch', 'gazebo_only.launch.py']),
@@ -34,7 +34,7 @@ def generate_launch_description():
             ('urdf_file', LaunchConfiguration('urdf_file'))
         ]
     )
-    
+
     # RViz2 可视化
     rviz_node = Node(
         package='rviz2',
@@ -42,7 +42,7 @@ def generate_launch_description():
         output='screen',
         arguments=['-d', LaunchConfiguration('rvizconfig')],
     )
-    
+
     # 延时加载控制器
     load_controllers = TimerAction(
         period=1.0,
@@ -57,7 +57,7 @@ def generate_launch_description():
             )
         ]
     )
-        
+
     return LaunchDescription([
         world_arg,
         urdf_file_arg,

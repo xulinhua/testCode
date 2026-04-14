@@ -54,6 +54,12 @@ def generate_launch_description():
         arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'base_footprint'],
         output='screen'
     )
+    tf_world_base = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=['0', '0', '0', '0', '0', '0', 'world', 'base_link'],
+        output='screen'
+    )
 
     # 发布机器人描述（先展开 xacro，确保 aruco 宏等内容真正进入模型）
     robot_state_publisher = Node(
@@ -76,6 +82,7 @@ def generate_launch_description():
         world_arg,
         urdf_file_arg,
         gazebo_launch,
+        tf_world_base,
         tf_footprint_base,
         robot_state_publisher,
         spawn_model

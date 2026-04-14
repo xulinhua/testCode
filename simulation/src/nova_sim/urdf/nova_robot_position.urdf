@@ -259,7 +259,7 @@
  <parent link="J1_6" />
  <child link="J1_7" />
  <axis xyz="0 0 -1" />
- <limit lower="-0.1" upper="0.1" effort="100" velocity="2" />
+ <limit lower="-0.04" upper="0.02" effort="100" velocity="2" />
  <dynamics damping="1.0" friction="1.0"/>
   </joint>
  <link name="J1_8">
@@ -289,7 +289,7 @@
  <parent link="J1_6" />
  <child link="J1_8" />
  <axis xyz="0 0 1" />
- <limit lower="-0.1" upper="0.1" effort="100" velocity="2" />
+ <limit lower="-0.02" upper="0.04" effort="100" velocity="2" />
  <dynamics damping="1.0" friction="1.0"/>
   </joint>
  <link name="J2_1">
@@ -499,7 +499,7 @@
  <parent link="J2_6" />
  <child link="J2_7" />
  <axis xyz="0 0 -1" />
- <limit lower="-0.1" upper="0.1" effort="100" velocity="2" />
+ <limit lower="-0.04" upper="0.02" effort="100" velocity="2" />
  <dynamics damping="1.0" friction="1.0"/>
   </joint>
  <link name="J2_8">
@@ -529,7 +529,7 @@
  <parent link="J2_6" />
  <child link="J2_8" />
  <axis xyz="0 0 1" />
- <limit lower="-0.1" upper="0.1" effort="100" velocity="2" />
+ <limit lower="-0.02" upper="0.04" effort="100" velocity="2" />
  <dynamics damping="1.0" friction="1.0"/>
   </joint>
  <link name="J3_1">
