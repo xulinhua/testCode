@@ -45,14 +45,6 @@ def generate_launch_description():
         output='screen'
     )
     
-    # 发布关节状态（驱动 TF 链路）
-    joint_state_publisher = Node(
-        package='joint_state_publisher',
-        executable='joint_state_publisher',
-        name='joint_state_publisher',
-        output='screen',
-    )
-
     # 发布机器人描述 - 使用 ExecuteProcess 从文件读取
     robot_state_publisher = ExecuteProcess(
         cmd=['ros2', 'run', 'robot_state_publisher', 'robot_state_publisher', urdf_path],
@@ -71,7 +63,6 @@ def generate_launch_description():
         urdf_file_arg,
         gazebo_launch,
         tf_footprint_base,
-        joint_state_publisher,
         robot_state_publisher,
         spawn_model
     ])
