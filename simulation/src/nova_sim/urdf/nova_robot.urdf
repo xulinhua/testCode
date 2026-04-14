@@ -1,14 +1,5 @@
 <robot name="nova_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <!-- 添加虚拟根链接 -->
-  <link name="world"/>
-  
-  <!-- 连接虚拟根链接和base_link -->
- <joint name="world_to_base" type="fixed">
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-    <parent link="world"/>
-    <child link="base_link"/>
-  </joint>
-  
+  <!-- 根为 base_link，无虚拟 world（与 nova_robot_position.urdf 一致） -->
   <link name="base_link">
     <inertial>
       <origin xyz="0.529993726614458 -0.186441381563561 -0.00936699784472195" rpy="0 0 0" />
@@ -31,6 +22,35 @@
       </geometry>
     </collision>
   </link>
+  <gazebo reference="base_link">
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
+    <kp>200000.0</kp>
+    <kd>120.0</kd>
+    <minDepth>0.003</minDepth>
+    <maxVel>0.25</maxVel>
+  </gazebo>
+  <!-- Gazebo 材质覆盖：让仿真颜色与 URDF 视觉颜色更一致 -->
+  <gazebo reference="base_link"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="J1_3"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="J1_6"><material>Gazebo/Grey</material></gazebo>
+  <gazebo reference="J1_7"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="J1_8"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="J2_3"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="J2_7"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="J2_8"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="J3_1"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="J3_2"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="J3_3"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="J3_4"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="J3_5"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="J3_6"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="J4_3"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="J4_4"><material>Gazebo/LightGrey</material></gazebo>
+  <gazebo reference="gantry_left_column"><material>Gazebo/Grey</material></gazebo>
+  <gazebo reference="gantry_right_column"><material>Gazebo/Grey</material></gazebo>
+  <gazebo reference="gantry_beam"><material>Gazebo/Grey</material></gazebo>
+  <gazebo reference="gantry_connector"><material>Gazebo/Grey</material></gazebo>
   <link name="J1_1">
     <inertial>
       <origin xyz="-2.00100988057006E-07 -0.021871021005788 -0.0236237987331687" rpy="0 0 0" />
@@ -964,7 +984,7 @@
   
   <!-- Camera0 相机 -->
  <joint name="camera0_joint" type="fixed">
-    <origin xyz="0 0 -0.15" rpy="1.57 2.24 0"/>
+    <origin xyz="0 0 -0.15" rpy="1.57 2.24 1.5708"/>
     <parent link="gantry_connector"/>
     <child link="camera0_link"/>
   </joint>
@@ -994,7 +1014,7 @@
   
   <!-- Camera0 光学坐标系 -->
  <joint name="camera0_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
     <parent link="camera0_link"/>
     <child link="camera0_optical_frame"/>
   </joint>
@@ -1085,7 +1105,7 @@
 
   <!-- Camera1 连接到J1_6 -->
  <joint name="camera1_joint" type="fixed">
-    <origin xyz="0 -0.08 0.041" rpy="0 -1.57 0"/>
+    <origin xyz="0 -0.08 0.041" rpy="0 -1.57 1.5708"/>
     <parent link="J1_6"/>
     <child link="camera1_link"/>
   </joint>
@@ -1115,7 +1135,7 @@
   
   <!-- Camera1 光学坐标系 -->
  <joint name="camera1_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
     <parent link="camera1_link"/>
     <child link="camera1_optical_frame"/>
   </joint>
@@ -1176,7 +1196,7 @@
 
   <!-- Camera2 连接到J2_6 -->
  <joint name="camera2_joint" type="fixed">
-    <origin xyz="0 -0.08 0.041" rpy="0 -1.57 0"/>
+    <origin xyz="0 -0.08 0.041" rpy="0 -1.57 1.5708"/>
     <parent link="J2_6"/>
     <child link="camera2_link"/>
   </joint>
@@ -1206,7 +1226,7 @@
   
   <!-- Camera2 光学坐标系 -->
  <joint name="camera2_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
     <parent link="camera2_link"/>
     <child link="camera2_optical_frame"/>
   </joint>

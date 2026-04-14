@@ -12,10 +12,10 @@ def generate_launch_description():
     # Get the package share directory
     gazebo_ros_pkg = get_package_share_directory('gazebo_ros')
     your_pkg = get_package_share_directory('nova_sim')
-    
+
     package_name = "nova_sim"
     pkg_share = os.path.join(get_package_prefix(package_name), 'share')
-    
+
     # 设置 GAZEBO_MODEL_PATH 环境变量
     os.environ['GAZEBO_MODEL_PATH'] = pkg_share + os.pathsep + os.environ.get('GAZEBO_MODEL_PATH', '')
 
@@ -45,7 +45,7 @@ def generate_launch_description():
         ),
         launch_arguments={'world': LaunchConfiguration('world')}.items()
     )
-    
+
     # TF static transform publisher
     tf_footprint_base = Node(
         package='tf2_ros',
@@ -53,21 +53,22 @@ def generate_launch_description():
         arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'base_footprint'],
         output='screen'
     )
-    
+
     # 发布机器人描述 - 使用 ExecuteProcess 从文件读取
     robot_state_publisher = ExecuteProcess(
         cmd=['ros2', 'run', 'robot_state_publisher', 'robot_state_publisher', urdf_path],
         output='screen'
     )
 
-    # Spawn model from file
+    # Spawn model from file（略抬高 z，减轻初始帧与地面的穿模冲击）
     spawn_model = ExecuteProcess(
         cmd=['ros2', 'run', 'gazebo_ros', 'spawn_entity.py',
              '-file', urdf_path,
-             '-entity', 'nova_robot'],
+             '-entity', 'nova_robot',
+             '-z', '0.1'],
         output='screen'
     )
-    
+
     return LaunchDescription([
         world_arg,
         urdf_file_arg,
