@@ -31,6 +31,15 @@
       </geometry>
     </collision>
   </link>
+  <!-- 底座与地面接触：限制接触速度、略增阻尼，减轻落地/支撑抖动 -->
+  <gazebo reference="base_link">
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
+    <kp>800000.0</kp>
+    <kd>80.0</kd>
+    <minDepth>0.002</minDepth>
+    <maxVel>0.3</maxVel>
+  </gazebo>
   <link name="J1_1">
     <inertial>
       <origin xyz="-2.00100988057006E-07 -0.021871021005788 -0.0236237987331687" rpy="0 0 0" />

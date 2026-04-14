@@ -19,6 +19,15 @@ def generate_launch_description():
     # 设置 GAZEBO_MODEL_PATH 环境变量
     os.environ['GAZEBO_MODEL_PATH'] = pkg_share + os.pathsep + os.environ.get('GAZEBO_MODEL_PATH', '')
 
+    # 世界文件（默认使用包内 simple.world，便于调 ODE；上层 launch 可覆盖）
+    world_arg = DeclareLaunchArgument(
+        name='world',
+        default_value=PathJoinSubstitution(
+            [FindPackageShare('nova_sim'), 'worlds', 'simple.world']
+        ),
+        description='Gazebo world file path',
+    )
+
     # URDF 文件参数
     urdf_file_arg = DeclareLaunchArgument(
         name='urdf_file',
@@ -28,13 +37,13 @@ def generate_launch_description():
 
     # 直接读取 URDF 文件内容
     urdf_path = LaunchConfiguration('urdf_file')
-    
+
     # Include the empty_world launch file
     gazebo_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(gazebo_ros_pkg, 'launch', 'gazebo.launch.py')
         ),
-        launch_arguments={'world': '/usr/share/gazebo-11/worlds/empty.world'}.items()
+        launch_arguments={'world': LaunchConfiguration('world')}.items()
     )
     
     # TF static transform publisher
@@ -60,6 +69,7 @@ def generate_launch_description():
     )
     
     return LaunchDescription([
+        world_arg,
         urdf_file_arg,
         gazebo_launch,
         tf_footprint_base,
