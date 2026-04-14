@@ -44,3 +44,8 @@ project/src/perception/vision_alg/foundationpose_alg/ppl.cv/lib/
 simulation/src/nova_sim/meshes/sensor/camera/realsense/d415.dae
 # *.png
 # *.jpg
+
+# Local-only simulation packages (not tracked)
+simulation/src/nova_test/
+simulation/src/Universal_Robots_ROS2_Description/
+simulation/src/Universal_Robots_ROS2_Gazebo_Simulation/
