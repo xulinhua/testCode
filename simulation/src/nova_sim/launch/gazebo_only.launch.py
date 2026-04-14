@@ -22,7 +22,7 @@ def generate_launch_description():
     # URDF 文件参数
     urdf_file_arg = DeclareLaunchArgument(
         name='urdf_file',
-        default_value=os.path.join(your_pkg, 'urdf', 'nova_robot.urdf'),
+        default_value=os.path.join(your_pkg, 'urdf', 'nova_robot_position.urdf'),
         description='URDF file path'
     )
 
