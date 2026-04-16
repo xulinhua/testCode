@@ -1,9 +1,14 @@
 #include <memory>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 #include <array>
 #include <unordered_map>
+#include <map>
 #include <set>
 #include <regex>
 
@@ -27,6 +32,9 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QtConcurrent/QtConcurrentRun>
+
+#include "rclcpp/executors/single_threaded_executor.hpp"
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "moveit_msgs/srv/get_position_ik.hpp"
@@ -47,6 +55,41 @@ const std::vector<std::string> kJointOrder = {
   "J3_1_joint", "J3_2_joint", "J3_3_joint", "J3_4_joint", "J3_5_joint", "J3_6_joint",
   "J4_1_joint", "J4_2_joint", "J4_3_joint", "J4_4_joint", "J4_5_joint", "J4_6_joint"};
 const std::vector<int> kEePoseRows = {0, 1, 2, 3};
+
+struct JointStateUiBatch {
+  std::vector<std::pair<std::string, double>> position_updates;
+  std::set<int> arm_ids;
+  std::unordered_map<int, std::set<int>> joint_indices_by_arm;
+};
+
+JointStateUiBatch build_joint_state_batch(const sensor_msgs::msg::JointState & msg)
+{
+  JointStateUiBatch batch;
+  static const std::regex kJointPattern(R"(J(\d+)_(\d+)_joint)");
+  for (size_t i = 0; i < msg.name.size() && i < msg.position.size(); ++i) {
+    batch.position_updates.emplace_back(msg.name[i], msg.position[i]);
+    std::smatch m;
+    if (std::regex_match(msg.name[i], m, kJointPattern)) {
+      const int arm_num = std::stoi(m[1].str());
+      const int joint_num = std::stoi(m[2].str());
+      const int arm_id = arm_num - 1;
+      if (arm_id >= 0) {
+        batch.arm_ids.insert(arm_id);
+        batch.joint_indices_by_arm[arm_id].insert(joint_num);
+      }
+    }
+  }
+  return batch;
+}
+
+struct EePoseRowResult {
+  int arm_id{0};
+  QString ref_text;
+  QString ee_text;
+  QString pose_text;
+  bool tf_ok{false};
+  std::array<double, 7> pose{};
+};
 }  // namespace
 
 class NovaControlWindow : public QMainWindow
@@ -63,7 +106,8 @@ public:
       "/nova_pose_log", 20,
       [this](const std_msgs::msg::String::SharedPtr msg) {
         const QString text = QString::fromStdString(msg->data);
-        append_pose_log(text, text.startsWith("[ERROR]"));
+        const bool err = text.startsWith("[ERROR]");
+        QTimer::singleShot(0, this, [this, text, err]() { append_pose_log(text, err); });
       });
     joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", 50,
@@ -73,7 +117,8 @@ public:
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node_, false);
 
     setWindowTitle("Nova Control UI (Qt/C++)");
-    resize(620, 560);
+    resize(900, 780);
+    setMinimumSize(860, 720);
     build_ui();
 
     // Debounced realtime publish
@@ -96,15 +141,52 @@ public:
 
     ee_pose_timer_ = new QTimer(this);
     ee_pose_timer_->setInterval(200);
-    connect(ee_pose_timer_, &QTimer::timeout, [this]() { refresh_ee_pose_view(); });
+    connect(ee_pose_timer_, &QTimer::timeout, [this]() { schedule_ee_pose_refresh(); });
     ee_pose_timer_->start();
+
+    ros_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    ros_executor_->add_node(node_);
+    ros_spin_thread_ = std::thread([this]() {
+      while (rclcpp::ok() && !ros_spin_exit_.load()) {
+        if (ros_executor_) {
+          ros_executor_->spin_some(std::chrono::milliseconds(15));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
+  }
+
+  ~NovaControlWindow() override
+  {
+    ros_spin_exit_.store(true);
+    if (ros_executor_) {
+      ros_executor_->cancel();
+    }
+    if (ros_spin_thread_.joinable()) {
+      ros_spin_thread_.join();
+    }
   }
 
 private:
   void build_ui()
   {
+    setStyleSheet(
+      "QMainWindow { background: #eef1f4; }"
+      "QTabWidget::pane { border: 1px solid #c9d0d8; background: #f8fafc; }"
+      "QTabBar::tab { background: #e2e6eb; border: 1px solid #c4ccd6; padding: 6px 12px; margin-right: 2px; }"
+      "QTabBar::tab:selected { background: #ffffff; border-bottom-color: #ffffff; }"
+      "QGroupBox { border: 1px solid #cfd6df; border-radius: 6px; margin-top: 10px; font-weight: 600; background: #f5f7fa; }"
+      "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
+      "QLabel { color: #222b35; }"
+      "QDoubleSpinBox, QComboBox, QLineEdit { background: #ffffff; border: 1px solid #c9d2dc; border-radius: 4px; padding: 2px 5px; min-height: 22px; }"
+      "QPushButton { background: #e7ebf0; border: 1px solid #c1c9d3; border-radius: 4px; padding: 5px 10px; }"
+      "QPushButton:hover { background: #dbe1e8; }"
+      "QScrollArea { border: 1px solid #cfd6df; background: #fbfcfd; }");
+
     auto * central = new QWidget(this);
     auto * root_layout = new QVBoxLayout(central);
+    root_layout->setContentsMargins(8, 8, 8, 8);
+    root_layout->setSpacing(6);
     auto * tabs = new QTabWidget(central);
     root_layout->addWidget(tabs);
 
@@ -118,35 +200,79 @@ private:
     auto * scroll = new QScrollArea(joint_tab);
     scroll->setWidgetResizable(true);
     auto * scroll_content = new QWidget(scroll);
-    auto * joint_grid = new QGridLayout(scroll_content);
-    scroll_content->setLayout(joint_grid);
+    auto * joint_groups_layout = new QGridLayout(scroll_content);
+    joint_groups_layout->setHorizontalSpacing(8);
+    joint_groups_layout->setVerticalSpacing(8);
+    joint_groups_layout->setContentsMargins(8, 8, 8, 8);
+    scroll_content->setLayout(joint_groups_layout);
     scroll->setWidget(scroll_content);
     joint_layout->addWidget(scroll);
-    joint_grid->addWidget(new QLabel("Joint", scroll_content), 0, 0);
-    joint_grid->addWidget(new QLabel("Current(readonly)", scroll_content), 0, 1);
-    joint_grid->addWidget(new QLabel("Target", scroll_content), 0, 2);
+
+    std::map<int, QGridLayout *> arm_grids;
+    std::map<int, int> arm_rows;
+    static const std::regex kJointPattern(R"(J(\d+)_(\d+)_joint)");
 
     for (int i = 0; i < static_cast<int>(kJointOrder.size()); ++i) {
+      int arm_num = 0;
+      std::smatch m;
+      if (std::regex_match(kJointOrder[i], m, kJointPattern)) {
+        arm_num = std::stoi(m[1].str());
+      }
+      if (arm_grids.find(arm_num) == arm_grids.end()) {
+        auto * arm_group = new QGroupBox(QString("Arm Group J%1").arg(arm_num), scroll_content);
+        arm_group->setFixedSize(430, 305);
+        auto * arm_group_layout = new QVBoxLayout(arm_group);
+        auto * arm_grid = new QGridLayout();
+        arm_grid->setHorizontalSpacing(6);
+        arm_grid->setVerticalSpacing(4);
+        arm_grid->setColumnStretch(0, 0);
+        arm_grid->setColumnStretch(1, 0);
+        arm_grid->setColumnStretch(2, 0);
+        arm_grid->setColumnStretch(3, 1);
+        arm_grid->addWidget(new QLabel("Joint", arm_group), 0, 0);
+        arm_grid->addWidget(new QLabel("Current(readonly)", arm_group), 0, 1);
+        arm_grid->addWidget(new QLabel("Target", arm_group), 0, 2);
+        arm_group_layout->addLayout(arm_grid);
+        const int arm_id = std::max(0, arm_num - 1);
+        const int col = (arm_id >= 2) ? 1 : 0;   // left: arm 0/1, right: arm 2/3
+        const int row = (arm_id >= 2) ? (arm_id - 2) : arm_id;
+        joint_groups_layout->addWidget(arm_group, row, col, Qt::AlignTop | Qt::AlignLeft);
+        arm_grids[arm_num] = arm_grid;
+        arm_rows[arm_num] = 1;
+      }
+
       auto * label =
         new QLabel(QString("%1 %2").arg(i, 2, 10, QLatin1Char('0')).arg(kJointOrder[i].c_str()), scroll_content);
       auto * current = new QLabel("--", scroll_content);
       current->setTextInteractionFlags(Qt::TextSelectableByMouse);
       auto * spin = new QDoubleSpinBox(scroll_content);
+      label->setMinimumWidth(118);
+      label->setMaximumWidth(140);
+      current->setMinimumWidth(60);
+      current->setMaximumWidth(66);
+      current->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
       spin->setDecimals(4);
       spin->setRange(-6.28, 6.28);
       spin->setSingleStep(0.05);
       spin->setValue(0.0);
+      spin->setMaximumWidth(92);
       joint_current_labels_.push_back(current);
       joint_spins_.push_back(spin);
-      joint_grid->addWidget(label, i + 1, 0);
-      joint_grid->addWidget(current, i + 1, 1);
-      joint_grid->addWidget(spin, i + 1, 2);
+      const int row = arm_rows[arm_num]++;
+      arm_grids[arm_num]->addWidget(label, row, 0, Qt::AlignLeft);
+      arm_grids[arm_num]->addWidget(current, row, 1, Qt::AlignLeft);
+      arm_grids[arm_num]->addWidget(spin, row, 2, Qt::AlignLeft);
       connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), [this](double) {
         if (joint_realtime_check_ && joint_realtime_check_->isChecked()) {
           joint_publish_timer_->start();
         }
       });
     }
+    joint_groups_layout->setColumnStretch(0, 0);
+    joint_groups_layout->setColumnStretch(1, 0);
+    joint_groups_layout->setColumnMinimumWidth(0, 438);
+    joint_groups_layout->setColumnMinimumWidth(1, 438);
+    joint_groups_layout->setColumnStretch(2, 1);
     auto * joint_btns = new QHBoxLayout();
     auto * btn_publish = new QPushButton("Publish Once", joint_tab);
     auto * btn_zero = new QPushButton("Set All Zero", joint_tab);
@@ -176,6 +302,8 @@ private:
     auto * group_arm = new QGroupBox("Arm / Frame", pose_tab);
     auto * arm_form = new QFormLayout(group_arm);
     arm_form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
+    arm_form->setHorizontalSpacing(12);
+    arm_form->setVerticalSpacing(7);
     arm_id_combo_ = new QComboBox(group_arm);
     arm_id_combo_->setMaximumWidth(90);
     arm_id_combo_->addItem("0");
@@ -190,8 +318,11 @@ private:
     auto * group_pose = new QGroupBox("Target Pose", pose_tab);
     auto * pose_split = new QHBoxLayout(group_pose);
     auto * pose_form_widget = new QWidget(group_pose);
+    pose_form_widget->setMinimumWidth(340);
     auto * pose_form = new QFormLayout(pose_form_widget);
     pose_form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
+    pose_form->setHorizontalSpacing(14);
+    pose_form->setVerticalSpacing(8);
     orientation_mode_ = new QComboBox(group_pose);
     orientation_mode_->addItems({"rpy", "quaternion"});
     px_ = create_spin(group_pose, -5.0, 5.0, 0.35);
@@ -226,6 +357,7 @@ private:
     pose_split->addWidget(pose_form_widget, 0);
 
     auto * pose_log_group = new QGroupBox("Pose Log", group_pose);
+    pose_log_group->setMinimumWidth(390);
     auto * pose_log_layout = new QVBoxLayout(pose_log_group);
     pose_log_text_ = new QPlainTextEdit(pose_log_group);
     pose_log_text_->setReadOnly(true);
@@ -234,11 +366,16 @@ private:
     pose_log_text_->setMinimumWidth(280);
     pose_log_layout->addWidget(pose_log_text_);
     pose_split->addWidget(pose_log_group, 1);
+    pose_split->setSpacing(12);
+    pose_split->setStretch(0, 1);
+    pose_split->setStretch(1, 2);
     pose_layout->addWidget(group_pose);
 
     auto * group_gripper = new QGroupBox("Gripper (optional)", pose_tab);
     auto * grip_form = new QFormLayout(group_gripper);
     grip_form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
+    grip_form->setHorizontalSpacing(12);
+    grip_form->setVerticalSpacing(7);
     gripper_mode_ = new QComboBox(group_gripper);
     gripper_mode_->addItems({"none", "open", "close", "width"});
     gripper_width_ = create_spin(group_gripper, 0.0, 0.06, 0.03);
@@ -299,22 +436,67 @@ private:
         pose_publish_timer_->start();
       }
     };
-    connect(arm_id_combo_, &QComboBox::currentTextChanged, pose_changed_cb);
-    connect(frame_id_combo_, &QComboBox::currentTextChanged, [this](const QString &) {
-      // When reference frame changes, first refresh current EE poses in that frame,
-      // then sync selected arm current pose into target pose controls.
-      refresh_ee_pose_view();
-      copy_current_pose_to_target(false);
+
+    arm_combo_debounce_ = new QTimer(this);
+    arm_combo_debounce_->setSingleShot(true);
+    arm_combo_debounce_->setInterval(45);
+    connect(arm_combo_debounce_, &QTimer::timeout, this, [this]() {
       if (pose_realtime_check_ && pose_realtime_check_->isChecked()) {
         pose_publish_timer_->start();
       }
     });
-    connect(orientation_mode_, &QComboBox::currentTextChanged, [this](const QString & mode) {
-      update_orientation_widgets(mode == "rpy");
+    connect(arm_id_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+      if (suppress_combo_reactions_) {
+        return;
+      }
+      arm_combo_debounce_->start();
+    });
+
+    frame_combo_debounce_ = new QTimer(this);
+    frame_combo_debounce_->setSingleShot(true);
+    frame_combo_debounce_->setInterval(120);
+    connect(frame_combo_debounce_, &QTimer::timeout, this, [this]() {
+      schedule_ee_pose_refresh();
+      QTimer::singleShot(0, this, [this]() { copy_current_pose_to_target(false); });
       if (pose_realtime_check_ && pose_realtime_check_->isChecked()) {
         pose_publish_timer_->start();
       }
     });
+    connect(frame_id_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+      if (suppress_combo_reactions_) {
+        return;
+      }
+      frame_combo_debounce_->start();
+    });
+
+    orientation_combo_debounce_ = new QTimer(this);
+    orientation_combo_debounce_->setSingleShot(true);
+    orientation_combo_debounce_->setInterval(60);
+    connect(orientation_combo_debounce_, &QTimer::timeout, this, [this]() {
+      const bool use_rpy = orientation_mode_ && orientation_mode_->currentText() == QStringLiteral("rpy");
+      update_orientation_widgets(use_rpy);
+      if (pose_realtime_check_ && pose_realtime_check_->isChecked()) {
+        pose_publish_timer_->start();
+      }
+    });
+    connect(orientation_mode_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+      if (suppress_combo_reactions_) {
+        return;
+      }
+      orientation_combo_debounce_->start();
+    });
+
+    gripper_combo_debounce_ = new QTimer(this);
+    gripper_combo_debounce_->setSingleShot(true);
+    gripper_combo_debounce_->setInterval(80);
+    connect(gripper_combo_debounce_, &QTimer::timeout, this, [this]() { publish_gripper_realtime(); });
+    connect(gripper_mode_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+      if (suppress_combo_reactions_) {
+        return;
+      }
+      gripper_combo_debounce_->start();
+    });
+
     connect(px_, qOverload<double>(&QDoubleSpinBox::valueChanged), pose_changed_cb);
     connect(py_, qOverload<double>(&QDoubleSpinBox::valueChanged), pose_changed_cb);
     connect(pz_, qOverload<double>(&QDoubleSpinBox::valueChanged), pose_changed_cb);
@@ -325,14 +507,13 @@ private:
     connect(qy_, qOverload<double>(&QDoubleSpinBox::valueChanged), pose_changed_cb);
     connect(qz_, qOverload<double>(&QDoubleSpinBox::valueChanged), pose_changed_cb);
     connect(qw_, qOverload<double>(&QDoubleSpinBox::valueChanged), pose_changed_cb);
-    connect(gripper_mode_, &QComboBox::currentTextChanged, [this](const QString &) {
-      publish_gripper_realtime();
-    });
     connect(gripper_width_, qOverload<double>(&QDoubleSpinBox::valueChanged), [this](double) {
       publish_gripper_realtime();
     });
+    suppress_combo_reactions_ = true;
     orientation_mode_->setCurrentText("rpy");
     update_orientation_widgets(true);
+    suppress_combo_reactions_ = false;
 
     setCentralWidget(central);
   }
@@ -363,34 +544,25 @@ private:
 
   void on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg)
   {
-    std::set<int> arm_ids;
-    std::unordered_map<int, std::set<int>> joint_indices_by_arm;
-    static const std::regex kJointPattern(R"(J(\d+)_(\d+)_joint)");
-    for (size_t i = 0; i < msg->name.size() && i < msg->position.size(); ++i) {
-      current_joint_map_[msg->name[i]] = msg->position[i];
-      std::smatch m;
-      if (std::regex_match(msg->name[i], m, kJointPattern)) {
-        const int arm_num = std::stoi(m[1].str());
-        const int joint_num = std::stoi(m[2].str());
-        const int arm_id = arm_num - 1;
-        if (arm_id >= 0) {
-          arm_ids.insert(arm_id);
-          joint_indices_by_arm[arm_id].insert(joint_num);
-        }
-      }
+    auto batch = build_joint_state_batch(*msg);
+    QTimer::singleShot(0, this, [this, batch = std::move(batch)]() mutable { apply_joint_state_ui(std::move(batch)); });
+  }
+
+  void apply_joint_state_ui(JointStateUiBatch batch)
+  {
+    for (const auto & pr : batch.position_updates) {
+      current_joint_map_[pr.first] = pr.second;
     }
     bool arm_changed = false;
-    if (!arm_ids.empty() && arm_ids != available_arm_ids_) {
-      available_arm_ids_ = arm_ids;
+    if (!batch.arm_ids.empty() && batch.arm_ids != available_arm_ids_) {
+      available_arm_ids_ = batch.arm_ids;
       arm_changed = true;
     }
-    for (const auto & kv : joint_indices_by_arm) {
+    for (const auto & kv : batch.joint_indices_by_arm) {
       int chosen_joint_idx = -1;
       if (kv.second.count(6) > 0) {
-        // Prefer the wrist link as end-effector frame for articulated arms.
         chosen_joint_idx = 6;
       } else {
-        // Fallback: choose the largest non-gripper index first (<=6), then max available.
         for (int idx : kv.second) {
           if (idx <= 6 && idx > chosen_joint_idx) {
             chosen_joint_idx = idx;
@@ -607,7 +779,7 @@ private:
     if (ee_value_header_label_) {
       ee_value_header_label_->setText(use_rpy ? "pose (x y z | r p y)" : "pose (x y z | qx qy qz qw)");
     }
-    refresh_ee_pose_view();
+    schedule_ee_pose_refresh();
   }
 
   void copy_current_pose_to_target(bool show_error_popup)
@@ -673,62 +845,97 @@ private:
       false);
   }
 
-  void refresh_ee_pose_view()
+  void schedule_ee_pose_refresh()
   {
     if (!tf_buffer_ || ee_pose_labels_.size() != kEePoseRows.size() || ee_frame_labels_.size() != kEePoseRows.size() ||
       ee_ref_frame_labels_.size() != kEePoseRows.size())
     {
       return;
     }
+    if (ee_refresh_running_.exchange(true)) {
+      return;
+    }
 
     const std::string ref_frame = current_frame_id();
-    for (size_t i = 0; i < kEePoseRows.size(); ++i) {
-      const int arm_id = kEePoseRows[i];
-      const std::string ee_frame = frame_for_arm_id(arm_id);
-      ee_ref_frame_labels_[i]->setText(QString::fromStdString(ref_frame));
-      ee_frame_labels_[i]->setText(QString::fromStdString(ee_frame));
-      try {
-        const auto tf = tf_buffer_->lookupTransform(ref_frame, ee_frame, tf2::TimePointZero);
-        const auto & t = tf.transform.translation;
-        const auto & q = tf.transform.rotation;
-        cached_ee_pose_by_arm_[arm_id] = {t.x, t.y, t.z, q.x, q.y, q.z, q.w};
-        const bool use_rpy = orientation_mode_ && orientation_mode_->currentText() == "rpy";
-        if (use_rpy) {
-          const double sinr_cosp = 2.0 * (q.w * q.x + q.y * q.z);
-          const double cosr_cosp = 1.0 - 2.0 * (q.x * q.x + q.y * q.y);
-          const double roll = std::atan2(sinr_cosp, cosr_cosp);
-          const double sinp = 2.0 * (q.w * q.y - q.z * q.x);
-          double pitch = 0.0;
-          if (std::abs(sinp) >= 1.0) {
-            pitch = std::copysign(1.57079632679, sinp);
-          } else {
-            pitch = std::asin(sinp);
-          }
-          const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
-          const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
-          const double yaw = std::atan2(siny_cosp, cosy_cosp);
-          ee_pose_labels_[i]->setText(
-            QString("(%1 %2 %3 | %4 %5 %6)")
+    std::vector<std::pair<int, std::string>> arm_ee;
+    arm_ee.reserve(kEePoseRows.size());
+    for (int arm_id : kEePoseRows) {
+      arm_ee.emplace_back(arm_id, frame_for_arm_id(arm_id));
+    }
+    const bool use_rpy = orientation_mode_ && orientation_mode_->currentText() == "rpy";
+    const auto tf_buf = tf_buffer_;
+
+    (void)QtConcurrent::run([this, ref_frame, arm_ee, use_rpy, tf_buf]() {
+      std::vector<EePoseRowResult> rows;
+      rows.reserve(arm_ee.size());
+      for (const auto & pr : arm_ee) {
+        EePoseRowResult row;
+        row.arm_id = pr.first;
+        row.ref_text = QString::fromStdString(ref_frame);
+        row.ee_text = QString::fromStdString(pr.second);
+        try {
+          const auto tf = tf_buf->lookupTransform(ref_frame, pr.second, tf2::TimePointZero);
+          const auto & t = tf.transform.translation;
+          const auto & q = tf.transform.rotation;
+          row.pose = {t.x, t.y, t.z, q.x, q.y, q.z, q.w};
+          row.tf_ok = true;
+          if (use_rpy) {
+            const double sinr_cosp = 2.0 * (q.w * q.x + q.y * q.z);
+            const double cosr_cosp = 1.0 - 2.0 * (q.x * q.x + q.y * q.y);
+            const double roll = std::atan2(sinr_cosp, cosr_cosp);
+            const double sinp = 2.0 * (q.w * q.y - q.z * q.x);
+            double pitch = 0.0;
+            if (std::abs(sinp) >= 1.0) {
+              pitch = std::copysign(1.57079632679, sinp);
+            } else {
+              pitch = std::asin(sinp);
+            }
+            const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+            const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+            const double yaw = std::atan2(siny_cosp, cosy_cosp);
+            row.pose_text = QString("(%1 %2 %3 | %4 %5 %6)")
               .arg(t.x, 0, 'f', 3)
               .arg(t.y, 0, 'f', 3)
               .arg(t.z, 0, 'f', 3)
               .arg(roll, 0, 'f', 3)
               .arg(pitch, 0, 'f', 3)
-              .arg(yaw, 0, 'f', 3));
-        } else {
-          ee_pose_labels_[i]->setText(
-            QString("(%1 %2 %3 | %4 %5 %6 %7)")
+              .arg(yaw, 0, 'f', 3);
+          } else {
+            row.pose_text = QString("(%1 %2 %3 | %4 %5 %6 %7)")
               .arg(t.x, 0, 'f', 3)
               .arg(t.y, 0, 'f', 3)
               .arg(t.z, 0, 'f', 3)
               .arg(q.x, 0, 'f', 3)
               .arg(q.y, 0, 'f', 3)
               .arg(q.z, 0, 'f', 3)
-              .arg(q.w, 0, 'f', 3));
+              .arg(q.w, 0, 'f', 3);
+          }
+        } catch (const tf2::TransformException &) {
+          row.tf_ok = false;
+          row.pose_text = QStringLiteral("N/A");
         }
-      } catch (const tf2::TransformException &) {
-        cached_ee_pose_by_arm_.erase(arm_id);
-        ee_pose_labels_[i]->setText("N/A");
+        rows.push_back(std::move(row));
+      }
+
+      QTimer::singleShot(0, this, [this, rows = std::move(rows)]() mutable {
+        apply_ee_pose_rows(std::move(rows));
+        ee_refresh_running_.store(false);
+      });
+    });
+  }
+
+  void apply_ee_pose_rows(std::vector<EePoseRowResult> rows)
+  {
+    for (size_t i = 0; i < rows.size() && i < ee_pose_labels_.size(); ++i) {
+      const auto & r = rows[i];
+      ee_ref_frame_labels_[i]->setText(r.ref_text);
+      ee_frame_labels_[i]->setText(r.ee_text);
+      if (r.tf_ok) {
+        cached_ee_pose_by_arm_[r.arm_id] = r.pose;
+        ee_pose_labels_[i]->setText(r.pose_text);
+      } else {
+        cached_ee_pose_by_arm_.erase(r.arm_id);
+        ee_pose_labels_[i]->setText(r.pose_text);
       }
     }
   }
@@ -812,6 +1019,7 @@ private:
       return;
     }
 
+    suppress_combo_reactions_ = true;
     const QString old_arm = arm_id_combo_->currentText();
     arm_id_combo_->blockSignals(true);
     arm_id_combo_->clear();
@@ -847,6 +1055,7 @@ private:
     }
     frame_id_combo_->setCurrentIndex(frame_idx);
     frame_id_combo_->blockSignals(false);
+    suppress_combo_reactions_ = false;
   }
 
   std::shared_ptr<rclcpp::Node> node_;
@@ -907,6 +1116,16 @@ private:
   QTimer * pose_publish_timer_{nullptr};
   QTimer * ik_watchdog_timer_{nullptr};
   QTimer * ee_pose_timer_{nullptr};
+  QTimer * arm_combo_debounce_{nullptr};
+  QTimer * frame_combo_debounce_{nullptr};
+  QTimer * orientation_combo_debounce_{nullptr};
+  QTimer * gripper_combo_debounce_{nullptr};
+  bool suppress_combo_reactions_{false};
+
+  std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
+  std::thread ros_spin_thread_;
+  std::atomic<bool> ros_spin_exit_{false};
+  std::atomic<bool> ee_refresh_running_{false};
 };
 
 int main(int argc, char ** argv)
@@ -918,11 +1137,25 @@ int main(int argc, char ** argv)
   NovaControlWindow win(node);
   win.show();
 
-  QTimer ros_spin_timer;
-  QObject::connect(&ros_spin_timer, &QTimer::timeout, [node]() { rclcpp::spin_some(node); });
-  ros_spin_timer.start(20);
+  // Ensure Qt app exits promptly when ROS receives SIGINT/SIGTERM.
+  QTimer ros_shutdown_watchdog;
+  ros_shutdown_watchdog.setInterval(100);
+  QObject::connect(&ros_shutdown_watchdog, &QTimer::timeout, [&app]() {
+    if (!rclcpp::ok()) {
+      app.quit();
+    }
+  });
+  ros_shutdown_watchdog.start();
+
+  QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
+    if (rclcpp::ok()) {
+      rclcpp::shutdown();
+    }
+  });
 
   const int ret = app.exec();
-  rclcpp::shutdown();
+  if (rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
   return ret;
 }

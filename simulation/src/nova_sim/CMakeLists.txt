@@ -22,7 +22,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
-find_package(Qt5 REQUIRED COMPONENTS Widgets)
+find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 
 add_executable(moveit2_arm_executor_cpp
   src/moveit2_arm_executor.cpp
@@ -57,7 +57,7 @@ ament_target_dependencies(nova_control_ui_qt
   tf2_ros
   tf2
 )
-target_link_libraries(nova_control_ui_qt Qt5::Widgets)
+target_link_libraries(nova_control_ui_qt Qt5::Widgets Qt5::Concurrent)
 
 # 安装资源文件
 install(DIRECTORY

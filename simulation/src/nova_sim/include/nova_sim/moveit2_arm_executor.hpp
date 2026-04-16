@@ -35,6 +35,8 @@ private:
   std::unordered_map<int, std::pair<double, double>> gripper_open_;
   std::unordered_map<int, std::pair<double, double>> gripper_close_;
   std::unordered_map<std::string, double> current_joint_map_;
+  std::unordered_map<std::string, double> last_published_command_map_;
+  bool has_last_command_{false};
 
   rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedPtr ik_client_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr command_pub_;

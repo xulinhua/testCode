@@ -34,6 +34,11 @@ def generate_launch_description():
         default_value=os.path.join(your_pkg, 'urdf', 'nova_robot_position.urdf'),
         description='URDF file path'
     )
+    spawn_z_arg = DeclareLaunchArgument(
+        name='spawn_z',
+        default_value='0.06',
+        description='Initial Z offset to avoid base-ground penetration',
+    )
 
     # URDF/xacro 路径
     urdf_path = LaunchConfiguration('urdf_file')
@@ -74,13 +79,14 @@ def generate_launch_description():
         cmd=['ros2', 'run', 'gazebo_ros', 'spawn_entity.py',
              '-topic', 'robot_description',
              '-entity', 'nova_robot',
-             '-z', '0.1'],
+             '-z', LaunchConfiguration('spawn_z')],
         output='screen'
     )
 
     return LaunchDescription([
         world_arg,
         urdf_file_arg,
+        spawn_z_arg,
         gazebo_launch,
         tf_world_base,
         tf_footprint_base,

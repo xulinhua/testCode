@@ -226,11 +226,33 @@ void MoveIt2ArmExecutorCpp::on_gripper_goal(const std_msgs::msg::String::SharedP
 
 void MoveIt2ArmExecutorCpp::publish_command(const std::unordered_map<std::string, double> & command_map)
 {
+  constexpr double kJointDeadband = 3e-4;
+  bool has_meaningful_change = !has_last_command_;
+  if (!has_meaningful_change) {
+    for (const auto & joint : control_joint_order_) {
+      const auto it_new = command_map.find(joint);
+      const double new_val = (it_new == command_map.end()) ? 0.0 : it_new->second;
+      const auto it_old = last_published_command_map_.find(joint);
+      const double old_val = (it_old == last_published_command_map_.end()) ? 0.0 : it_old->second;
+      if (std::abs(new_val - old_val) > kJointDeadband) {
+        has_meaningful_change = true;
+        break;
+      }
+    }
+  }
+
+  if (!has_meaningful_change) {
+    return;
+  }
+
   std_msgs::msg::Float64MultiArray msg;
   msg.data.reserve(control_joint_order_.size());
   for (const auto & joint : control_joint_order_) {
     const auto it = command_map.find(joint);
-    msg.data.push_back(it == command_map.end() ? 0.0 : it->second);
+    const double value = (it == command_map.end()) ? 0.0 : it->second;
+    msg.data.push_back(value);
+    last_published_command_map_[joint] = value;
   }
+  has_last_command_ = true;
   command_pub_->publish(msg);
 }

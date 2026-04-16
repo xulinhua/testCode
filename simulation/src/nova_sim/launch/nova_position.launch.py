@@ -21,6 +21,11 @@ def generate_launch_description():
         description='URDF/xacro file absolute path',
         default_value=PathJoinSubstitution([FindPackageShare('nova_sim'), 'urdf', 'nova_robot_position.urdf'])
     )
+    spawn_z_arg = DeclareLaunchArgument(
+        name='spawn_z',
+        default_value='0.06',
+        description='Initial spawn Z offset for Gazebo entity',
+    )
 
     rvizconfig_arg = DeclareLaunchArgument(
         name='rvizconfig',
@@ -52,7 +57,8 @@ def generate_launch_description():
         PathJoinSubstitution([FindPackageShare('nova_sim'), 'launch', 'gazebo_only.launch.py']),
         launch_arguments=[
             ('world', LaunchConfiguration('world')),
-            ('urdf_file', LaunchConfiguration('urdf_file'))
+            ('urdf_file', LaunchConfiguration('urdf_file')),
+            ('spawn_z', LaunchConfiguration('spawn_z')),
         ]
     )
 
@@ -101,11 +107,16 @@ def generate_launch_description():
         executable='moveit2_arm_executor_cpp',
         output='screen',
         condition=IfCondition(LaunchConfiguration('with_control_tools')),
+        sigterm_timeout='2',
+        sigkill_timeout='2',
     )
-    control_ui_process = ExecuteProcess(
-        cmd=['ros2', 'run', 'nova_sim', 'nova_control_ui_qt'],
+    control_ui_process = Node(
+        package='nova_sim',
+        executable='nova_control_ui_qt',
         output='screen',
         condition=IfCondition(LaunchConfiguration('with_control_tools')),
+        sigterm_timeout='2',
+        sigkill_timeout='2',
     )
     start_control_tools = TimerAction(
         period=3.5,
@@ -116,6 +127,7 @@ def generate_launch_description():
     return LaunchDescription([
         world_arg,
         urdf_file_arg,
+        spawn_z_arg,
         rvizconfig_arg,
         control_tools_arg,
         moveit_arg,
