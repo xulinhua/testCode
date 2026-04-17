@@ -49,3 +49,6 @@ simulation/src/nova_sim/meshes/sensor/camera/realsense/d415.dae
 simulation/src/nova_test/
 simulation/src/Universal_Robots_ROS2_Description/
 simulation/src/Universal_Robots_ROS2_Gazebo_Simulation/
+
+# Calibration outputs (local run artifacts)
+simulation/calib_output/
