@@ -16,10 +16,12 @@ include_directories(include)
 find_package(ament_cmake REQUIRED)
 find_package(gazebo_ros REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(moveit_msgs REQUIRED)
+find_package(calib_sim REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
@@ -59,6 +61,19 @@ ament_target_dependencies(nova_control_ui_qt
 )
 target_link_libraries(nova_control_ui_qt Qt5::Widgets Qt5::Concurrent)
 
+add_executable(calib_sim_bridge_node
+  src/calib_sim_bridge_node.cpp
+)
+ament_target_dependencies(calib_sim_bridge_node
+  rclcpp
+  ament_index_cpp
+  std_msgs
+  geometry_msgs
+  calib_sim
+  tf2_ros
+  tf2
+)
+
 # 安装资源文件
 install(DIRECTORY
   include
@@ -87,6 +102,7 @@ install(TARGETS
   moveit2_arm_executor_cpp
   nova_control_ui_cpp
   nova_control_ui_qt
+  calib_sim_bridge_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

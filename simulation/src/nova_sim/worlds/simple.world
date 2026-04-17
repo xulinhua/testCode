@@ -2,6 +2,13 @@
 <sdf version="1.6">
   <world name="simple_world">
 
+    <scene>
+      <!-- Add soft global ambient light to reduce harsh local contrast. -->
+      <ambient>0.45 0.45 0.45 1.0</ambient>
+      <background>0.7 0.7 0.7 1.0</background>
+      <shadows>false</shadows>
+    </scene>
+
     <!-- 使用 Gazebo 内置模型（与 urdf_sim_tutorial 保持一致） -->
     <include>
       <uri>model://sun</uri>
@@ -10,6 +17,26 @@
     <include>
       <uri>model://ground_plane</uri>
     </include>
+
+    <!-- 顶部补光：提升 ArUco 边缘对比度与清晰度 -->
+    <light name="aruco_top_fill" type="spot">
+      <cast_shadows>false</cast_shadows>
+      <pose>0.23 -0.29 3.00 0.0 0.0 0.0</pose>
+      <diffuse>0.72 0.72 0.72 1.0</diffuse>
+      <specular>0.01 0.01 0.01 1.0</specular>
+      <attenuation>
+        <range>10.0</range>
+        <constant>0.95</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>0 0 -1</direction>
+      <spot>
+        <inner_angle>1.0</inner_angle>
+        <outer_angle>1.45</outer_angle>
+        <falloff>0.35</falloff>
+      </spot>
+    </light>
 
     <!-- 物理引擎配置：略降仿真步频、加强求解与接触层，减轻网格碰撞引起的高频抖 -->
     <physics type="ode">

@@ -2,13 +2,15 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.actions import IncludeLaunchDescription
 from launch.actions import ExecuteProcess, TimerAction
-from launch.conditions import IfCondition
+from launch.actions import SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    disable_color_log = SetEnvironmentVariable('RCUTILS_COLORIZED_OUTPUT', '0')
+
     # 定义启动参数
     world_arg = DeclareLaunchArgument(
         name='world',
@@ -30,16 +32,6 @@ def generate_launch_description():
     rvizconfig_arg = DeclareLaunchArgument(
         name='rvizconfig',
         default_value=PathJoinSubstitution([FindPackageShare('nova_sim'), 'config', 'nova_sim.rviz']),
-    )
-    control_tools_arg = DeclareLaunchArgument(
-        name='with_control_tools',
-        default_value='true',
-        description='Start moveit2_arm_executor_cpp and control UI',
-    )
-    moveit_arg = DeclareLaunchArgument(
-        name='with_moveit',
-        default_value='true',
-        description='Start MoveIt move_group launch',
     )
     moveit_pkg_arg = DeclareLaunchArgument(
         name='moveit_launch_package',
@@ -93,20 +85,24 @@ def generate_launch_description():
             LaunchConfiguration('moveit_launch_file'),
         ],
         output='screen',
-        condition=IfCondition(LaunchConfiguration('with_moveit')),
     )
     start_moveit = TimerAction(
         period=1.5,
         actions=[moveit_process],
-        condition=IfCondition(LaunchConfiguration('with_moveit')),
     )
 
-    # 可选启动控制工具（IK执行节点 + UI）
+    # 启动控制工具（IK执行节点 + 桥接 + UI）
     moveit2_executor_node = Node(
         package='nova_sim',
         executable='moveit2_arm_executor_cpp',
         output='screen',
-        condition=IfCondition(LaunchConfiguration('with_control_tools')),
+        sigterm_timeout='2',
+        sigkill_timeout='2',
+    )
+    bridge_node = Node(
+        package='nova_sim',
+        executable='calib_sim_bridge_node',
+        output='screen',
         sigterm_timeout='2',
         sigkill_timeout='2',
     )
@@ -114,23 +110,20 @@ def generate_launch_description():
         package='nova_sim',
         executable='nova_control_ui_qt',
         output='screen',
-        condition=IfCondition(LaunchConfiguration('with_control_tools')),
         sigterm_timeout='2',
         sigkill_timeout='2',
     )
     start_control_tools = TimerAction(
         period=3.5,
-        actions=[moveit2_executor_node, control_ui_process],
-        condition=IfCondition(LaunchConfiguration('with_control_tools')),
+        actions=[moveit2_executor_node, bridge_node, control_ui_process],
     )
 
     return LaunchDescription([
+        disable_color_log,
         world_arg,
         urdf_file_arg,
         spawn_z_arg,
         rvizconfig_arg,
-        control_tools_arg,
-        moveit_arg,
         moveit_pkg_arg,
         moveit_file_arg,
         gazebo_launch,

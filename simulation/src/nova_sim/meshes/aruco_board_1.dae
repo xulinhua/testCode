@@ -10,7 +10,7 @@
 
   <library_images>
     <image id="aruco_png" name="aruco_png">
-      <init_from>6x6_1000-0.png</init_from>
+      <init_from>6x6_1000-1.png</init_from>
     </image>
   </library_images>
 
@@ -47,7 +47,6 @@
   <library_geometries>
     <geometry id="aruco_plane" name="aruco_plane">
       <mesh>
-        <!-- 10cm x 10cm, centered at origin, near-zero thickness plane -->
         <source id="aruco_positions">
           <float_array id="aruco_positions_array" count="12">
             -0.05 -0.05 0
@@ -100,7 +99,6 @@
           <input semantic="VERTEX" source="#aruco_vertices" offset="0"/>
           <input semantic="NORMAL" source="#aruco_normals" offset="1"/>
           <input semantic="TEXCOORD" source="#aruco_uvs" offset="2" set="0"/>
-          <!-- single front face only, avoid coplanar back-face z-fighting -->
           <p>0 0 0 1 0 1 2 0 2 0 0 0 2 0 2 3 0 3</p>
         </triangles>
       </mesh>

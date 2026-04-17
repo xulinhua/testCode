@@ -1,0 +1,598 @@
+#include "calib_sim/calib_qt_ui.hpp"
+
+#include <atomic>
+#include <algorithm>
+#include <filesystem>
+#include <mutex>
+#include <thread>
+
+#include <QApplication>
+#include <QComboBox>
+#include <QFile>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QImage>
+#include <QLabel>
+#include <QMainWindow>
+#include <QPixmap>
+#include <QPushButton>
+#include <QTextStream>
+#include <QTextCursor>
+#include <QTextEdit>
+#include <QTimer>
+#include <QVBoxLayout>
+#include <QWheelEvent>
+#include <QPainter>
+#include <QMouseEvent>
+
+namespace calib_sim
+{
+
+class ZoomableImageLabel : public QLabel
+{
+public:
+  explicit ZoomableImageLabel(const QString & text = QString(), QWidget * parent = nullptr)
+  : QLabel(text, parent)
+  {
+    setAlignment(Qt::AlignCenter);
+  }
+
+  void setImage(const QImage & image)
+  {
+    original_image_ = image;
+    update();
+  }
+
+protected:
+  void wheelEvent(QWheelEvent * event) override
+  {
+    if (original_image_.isNull()) {
+      QLabel::wheelEvent(event);
+      return;
+    }
+    const QPoint delta = event->angleDelta();
+    if (delta.y() == 0) {
+      return;
+    }
+    const QPointF cursor = event->position();
+    const QPointF old_center(width() * 0.5, height() * 0.5);
+    const QPointF old_rel = cursor - old_center - QPointF(pan_offset_);
+    const double old_scale = scale_;
+    const double step = (delta.y() > 0) ? 1.1 : (1.0 / 1.1);
+    scale_ = std::max(0.2, std::min(8.0, scale_ * step));
+    if (old_scale > 1e-9) {
+      const double ratio = scale_ / old_scale;
+      const QPointF new_pan = cursor - old_center - old_rel * ratio;
+      pan_offset_.setX(static_cast<int>(std::round(new_pan.x())));
+      pan_offset_.setY(static_cast<int>(std::round(new_pan.y())));
+    }
+    update();
+    event->accept();
+  }
+
+  void mouseDoubleClickEvent(QMouseEvent * event) override
+  {
+    Q_UNUSED(event);
+    scale_ = 1.0;
+    pan_offset_ = QPoint(0, 0);
+    update();
+  }
+
+  void mousePressEvent(QMouseEvent * event) override
+  {
+    if (event->button() == Qt::LeftButton) {
+      dragging_ = true;
+      last_mouse_pos_ = event->pos();
+      setCursor(Qt::ClosedHandCursor);
+      event->accept();
+      return;
+    }
+    QLabel::mousePressEvent(event);
+  }
+
+  void mouseMoveEvent(QMouseEvent * event) override
+  {
+    if (dragging_) {
+      const QPoint delta = event->pos() - last_mouse_pos_;
+      pan_offset_ += delta;
+      last_mouse_pos_ = event->pos();
+      update();
+      event->accept();
+      return;
+    }
+    QLabel::mouseMoveEvent(event);
+  }
+
+  void mouseReleaseEvent(QMouseEvent * event) override
+  {
+    if (event->button() == Qt::LeftButton && dragging_) {
+      dragging_ = false;
+      setCursor(Qt::ArrowCursor);
+      event->accept();
+      return;
+    }
+    QLabel::mouseReleaseEvent(event);
+  }
+
+  void resizeEvent(QResizeEvent * event) override
+  {
+    QLabel::resizeEvent(event);
+    update();
+  }
+
+  void paintEvent(QPaintEvent * event) override
+  {
+    QLabel::paintEvent(event);
+    if (original_image_.isNull()) {
+      return;
+    }
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    const QSize base = size();
+    const QSize target_size(
+      std::max(1, static_cast<int>(base.width() * scale_)),
+      std::max(1, static_cast<int>(base.height() * scale_)));
+    const QPixmap pix = QPixmap::fromImage(original_image_).scaled(
+      target_size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const int x = (width() - pix.width()) / 2 + pan_offset_.x();
+    const int y = (height() - pix.height()) / 2 + pan_offset_.y();
+    painter.drawPixmap(x, y, pix);
+    event->accept();
+  }
+
+  QImage original_image_;
+  double scale_{1.0};
+  QPoint pan_offset_{0, 0};
+  bool dragging_{false};
+  QPoint last_mouse_pos_{0, 0};
+};
+
+CalibQtUiRosNode::CalibQtUiRosNode(const rclcpp::NodeOptions & options)
+: Node("calib_qt_ui_node", options)
+{
+  status_sub_ = create_subscription<std_msgs::msg::String>(
+    "/calib_sim/status", 20, [this](const std_msgs::msg::String::SharedPtr msg) {
+      std::lock_guard<std::mutex> lk(mu_);
+      status_ = msg->data;
+    });
+  log_sub_ = create_subscription<std_msgs::msg::String>(
+    "/calib_sim/log", 50, [this](const std_msgs::msg::String::SharedPtr msg) {
+      std::lock_guard<std::mutex> lk(mu_);
+      logs_.push_back(msg->data);
+      if (logs_.size() > 200) {
+        logs_.erase(logs_.begin());
+      }
+    });
+  reach_error_sub_ = create_subscription<std_msgs::msg::String>(
+    "/calib_sim/reach_error", 20, [this](const std_msgs::msg::String::SharedPtr msg) {
+      std::lock_guard<std::mutex> lk(mu_);
+      reach_error_ = msg->data;
+    });
+  result_text_sub_ = create_subscription<std_msgs::msg::String>(
+    "/calib_sim/result_text", 10, [this](const std_msgs::msg::String::SharedPtr msg) {
+      std::lock_guard<std::mutex> lk(mu_);
+      result_text_ = msg->data;
+    });
+  raw_sub_ = create_subscription<sensor_msgs::msg::Image>(
+    "/calib_sim/raw_image", 10, [this](const sensor_msgs::msg::Image::SharedPtr msg) {
+      std::lock_guard<std::mutex> lk(mu_);
+      raw_ = *msg;
+    });
+  result_sub_ = create_subscription<sensor_msgs::msg::Image>(
+    "/calib_sim/result_image", 10, [this](const sensor_msgs::msg::Image::SharedPtr msg) {
+      std::lock_guard<std::mutex> lk(mu_);
+      result_ = *msg;
+    });
+  ctrl_pub_ = create_publisher<std_msgs::msg::String>("/calib_sim/control", 10);
+}
+
+void CalibQtUiRosNode::sendCmd(const std::string & cmd)
+{
+  std_msgs::msg::String m;
+  m.data = cmd;
+  ctrl_pub_->publish(m);
+}
+
+std::string CalibQtUiRosNode::status()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return status_;
+}
+
+std::vector<std::string> CalibQtUiRosNode::logs()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return logs_;
+}
+
+std::string CalibQtUiRosNode::reachError()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return reach_error_;
+}
+
+std::string CalibQtUiRosNode::resultText()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return result_text_;
+}
+
+sensor_msgs::msg::Image CalibQtUiRosNode::raw()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return raw_;
+}
+
+sensor_msgs::msg::Image CalibQtUiRosNode::result()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return result_;
+}
+
+static QImage toQImage(const sensor_msgs::msg::Image & msg)
+{
+  if (msg.width == 0 || msg.height == 0 || msg.data.empty()) {
+    return QImage();
+  }
+  if (msg.encoding == "bgr8" || msg.encoding == "rgb8") {
+    QImage img(
+      msg.data.data(), static_cast<int>(msg.width), static_cast<int>(msg.height),
+      static_cast<int>(msg.step), QImage::Format_RGB888);
+    if (msg.encoding == "bgr8") {
+      return img.rgbSwapped().copy();
+    }
+    return img.copy();
+  }
+  return QImage();
+}
+
+int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc, char ** argv)
+{
+  namespace fs = std::filesystem;
+  QApplication app(argc, argv);
+  QMainWindow win;
+  win.setWindowTitle("calib_sim_qt_ui");
+  auto * central = new QWidget(&win);
+  auto * root = new QVBoxLayout(central);
+
+  auto * status_label = new QLabel("Status: waiting");
+  auto * reach_label = new QLabel("Reach: reach_err pos_mm=0 ang_deg=0");
+  auto * arm_select = new QComboBox();
+  arm_select->addItem("机械臂0", 0);
+  arm_select->addItem("机械臂1", 1);
+  auto * btn_init = new QPushButton("初始化标定");
+  auto * btn_step = new QPushButton("单步标定");
+  auto * btn_auto = new QPushButton("自动标定");
+  auto * btn_pause = new QPushButton("暂停");
+  auto * result_view = new QTextEdit();
+  result_view->setReadOnly(true);
+  result_view->setMinimumHeight(220);
+  result_view->setPlainText("等待标定结果...");
+
+  auto * img_group = new QGroupBox("图像区域");
+  auto * img_row = new QHBoxLayout(img_group);
+  auto * raw_label = new ZoomableImageLabel("RAW");
+  auto * res_label = new ZoomableImageLabel("RESULT");
+  raw_label->setMinimumSize(480, 320);
+  res_label->setMinimumSize(480, 320);
+  raw_label->setStyleSheet("background:black;color:white;");
+  res_label->setStyleSheet("background:black;color:white;");
+  img_row->addWidget(raw_label);
+  img_row->addWidget(res_label);
+
+  auto * log_group = new QGroupBox("日志");
+  auto * log_layout = new QVBoxLayout(log_group);
+  auto * log_view = new QTextEdit();
+  log_view->setReadOnly(true);
+  log_view->setMinimumHeight(180);
+  log_layout->addWidget(log_view);
+
+  auto * bottom_row = new QHBoxLayout();
+  auto * ops_group = new QGroupBox("操作区");
+  auto * ops_layout = new QVBoxLayout(ops_group);
+  ops_layout->addWidget(arm_select);
+  ops_layout->addWidget(btn_init);
+  ops_layout->addWidget(btn_step);
+  ops_layout->addWidget(btn_auto);
+  ops_layout->addWidget(btn_pause);
+  ops_layout->addWidget(new QLabel("标定结果"));
+  ops_layout->addWidget(result_view);
+  ops_group->setMinimumWidth(220);
+  ops_group->setMaximumWidth(260);
+
+  auto * history_group = new QGroupBox("历史结果");
+  auto * history_layout = new QVBoxLayout(history_group);
+  auto * run_select = new QComboBox();
+  auto * btn_refresh_runs = new QPushButton("刷新列表");
+  auto * btn_load_run = new QPushButton("加载结果");
+  auto * sample_index_label = new QLabel("样本图: -/-");
+  auto * btn_prev_sample = new QPushButton("上一张");
+  auto * btn_next_sample = new QPushButton("下一张");
+  auto * btn_back_live = new QPushButton("回到实时图像");
+  history_layout->addWidget(new QLabel("历史 run"));
+  history_layout->addWidget(run_select);
+  history_layout->addWidget(btn_refresh_runs);
+  history_layout->addWidget(btn_load_run);
+  history_layout->addSpacing(8);
+  history_layout->addWidget(new QLabel("单次结果图切换"));
+  history_layout->addWidget(sample_index_label);
+  history_layout->addWidget(btn_prev_sample);
+  history_layout->addWidget(btn_next_sample);
+  history_layout->addWidget(btn_back_live);
+
+  auto * right_panel = new QWidget();
+  auto * right_layout = new QHBoxLayout(right_panel);
+  right_layout->setContentsMargins(0, 0, 0, 0);
+  right_layout->addWidget(ops_group, 1);
+  right_layout->addWidget(history_group, 1);
+
+  bottom_row->addWidget(log_group, 3);
+  bottom_row->addWidget(right_panel, 3);
+
+  root->addWidget(status_label);
+  root->addWidget(reach_label);
+  root->addWidget(img_group);
+  root->addLayout(bottom_row);
+  win.setCentralWidget(central);
+  win.resize(1100, 780);
+
+  QObject::connect(arm_select, QOverload<int>::of(&QComboBox::currentIndexChanged), [ros_node, arm_select](int) {
+    const int arm = arm_select->currentData().toInt();
+    ros_node->sendCmd("set_arm:" + std::to_string(arm));
+  });
+  QObject::connect(btn_init, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("init"); });
+  QObject::connect(btn_step, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("step"); });
+  QObject::connect(btn_auto, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("auto"); });
+  QObject::connect(btn_pause, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("pause"); });
+
+  struct UiCache
+  {
+    std::string status;
+    std::string reach_error;
+    std::string result_text;
+    std::vector<std::string> logs;
+    sensor_msgs::msg::Image raw;
+    sensor_msgs::msg::Image result;
+  };
+  std::mutex cache_mu;
+  UiCache cache;
+  std::atomic<bool> cache_running{true};
+  std::vector<std::string> rendered_logs_snapshot;
+  bool showing_history_image = false;
+  std::vector<std::string> selected_sample_images;
+  int selected_sample_index = -1;
+  std::string last_result_text_for_auto_pick;
+  const fs::path output_root("/home/hs/testCode/simulation/calib_output");
+
+  const auto parseRunDirFromResultText = [](const std::string & result_text) -> std::string {
+    const std::string key = "result_image_samples_dir:";
+    const std::size_t pos = result_text.rfind(key);
+    if (pos == std::string::npos) {
+      return "";
+    }
+    std::string path = result_text.substr(pos + key.size());
+    const auto first = path.find_first_not_of(" \t\r\n");
+    const auto last = path.find_last_not_of(" \t\r\n");
+    if (first == std::string::npos || last == std::string::npos) {
+      return "";
+    }
+    return path.substr(first, last - first + 1);
+  };
+
+  const auto collectSampleImages = [](const std::string & run_dir) {
+    std::vector<std::string> files;
+    if (run_dir.empty()) {
+      return files;
+    }
+    std::error_code ec;
+    if (!fs::exists(run_dir, ec) || ec) {
+      return files;
+    }
+    for (const auto & entry : fs::directory_iterator(run_dir, ec)) {
+      if (ec || !entry.is_regular_file()) {
+        continue;
+      }
+      const std::string name = entry.path().filename().string();
+      if (name.rfind("result_sample_", 0) == 0 && entry.path().extension() == ".png") {
+        files.push_back(entry.path().string());
+      }
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+  };
+
+  const auto refreshRunList = [&]() {
+    run_select->clear();
+    std::error_code ec;
+    if (!fs::exists(output_root, ec) || ec) {
+      return;
+    }
+    std::vector<std::string> run_dirs;
+    for (const auto & entry : fs::directory_iterator(output_root, ec)) {
+      if (ec || !entry.is_directory()) {
+        continue;
+      }
+      const std::string name = entry.path().filename().string();
+      if (name.rfind("calib_run_", 0) == 0) {
+        run_dirs.push_back(entry.path().string());
+      }
+    }
+    std::sort(run_dirs.begin(), run_dirs.end(), std::greater<std::string>());
+    for (const auto & path : run_dirs) {
+      run_select->addItem(
+        QString::fromStdString(fs::path(path).filename().string()),
+        QString::fromStdString(path));
+    }
+  };
+
+  const auto setSampleIndexText = [&]() {
+    if (selected_sample_images.empty() || selected_sample_index < 0) {
+      sample_index_label->setText("样本图: -/-");
+      return;
+    }
+    sample_index_label->setText(
+      QString("样本图: %1/%2")
+      .arg(selected_sample_index + 1)
+      .arg(static_cast<int>(selected_sample_images.size())));
+  };
+
+  const auto showSampleAt = [&](int idx) {
+    if (idx < 0 || idx >= static_cast<int>(selected_sample_images.size())) {
+      return;
+    }
+    QImage img(QString::fromStdString(selected_sample_images[static_cast<std::size_t>(idx)]));
+    if (img.isNull()) {
+      return;
+    }
+    selected_sample_index = idx;
+    showing_history_image = true;
+    setSampleIndexText();
+    res_label->setImage(img);
+  };
+
+  const auto loadRunResult = [&](const std::string & run_dir) {
+    if (run_dir.empty()) {
+      return;
+    }
+    std::string yaml_file = run_dir + "/calib_result_eye_to_hand.yaml";
+    if (!fs::exists(yaml_file)) {
+      const std::string fallback = run_dir + "/calib_result_eye_in_hand.yaml";
+      if (fs::exists(fallback)) {
+        yaml_file = fallback;
+      }
+    }
+    if (fs::exists(yaml_file)) {
+      QFile f(QString::fromStdString(yaml_file));
+      if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&f);
+        result_view->setPlainText(in.readAll());
+      }
+    }
+    selected_sample_images = collectSampleImages(run_dir);
+    if (!selected_sample_images.empty()) {
+      showSampleAt(static_cast<int>(selected_sample_images.size()) - 1);
+    } else {
+      selected_sample_index = -1;
+      setSampleIndexText();
+    }
+  };
+
+  refreshRunList();
+
+  QObject::connect(btn_refresh_runs, &QPushButton::clicked, [&]() { refreshRunList(); });
+  QObject::connect(btn_load_run, &QPushButton::clicked, [&]() {
+    const std::string run_dir = run_select->currentData().toString().toStdString();
+    loadRunResult(run_dir);
+  });
+  QObject::connect(btn_prev_sample, &QPushButton::clicked, [&]() {
+    if (selected_sample_images.empty()) {
+      return;
+    }
+    int idx = selected_sample_index;
+    if (idx < 0) {
+      idx = 0;
+    } else {
+      idx = (idx - 1 + static_cast<int>(selected_sample_images.size())) %
+        static_cast<int>(selected_sample_images.size());
+    }
+    showSampleAt(idx);
+  });
+  QObject::connect(btn_next_sample, &QPushButton::clicked, [&]() {
+    if (selected_sample_images.empty()) {
+      return;
+    }
+    int idx = selected_sample_index;
+    if (idx < 0) {
+      idx = 0;
+    } else {
+      idx = (idx + 1) % static_cast<int>(selected_sample_images.size());
+    }
+    showSampleAt(idx);
+  });
+  QObject::connect(btn_back_live, &QPushButton::clicked, [&]() {
+    showing_history_image = false;
+    selected_sample_index = -1;
+    setSampleIndexText();
+  });
+
+  // Worker thread: pull ROS data periodically, keep UI thread lightweight.
+  std::thread cache_thread([&]() {
+    while (cache_running.load()) {
+      UiCache snap;
+      snap.status = ros_node->status();
+      snap.reach_error = ros_node->reachError();
+      snap.result_text = ros_node->resultText();
+      snap.logs = ros_node->logs();
+      snap.raw = ros_node->raw();
+      snap.result = ros_node->result();
+      {
+        std::lock_guard<std::mutex> lk(cache_mu);
+        cache = std::move(snap);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+  });
+
+  QTimer ui_timer;
+  QObject::connect(&ui_timer, &QTimer::timeout, [&]() {
+    UiCache local;
+    {
+      std::lock_guard<std::mutex> lk(cache_mu);
+      local = cache;
+    }
+    status_label->setText(QString::fromStdString("Status: " + local.status));
+    reach_label->setText(QString::fromStdString("Reach: " + local.reach_error));
+    if (result_view->toPlainText().toStdString() != local.result_text) {
+      result_view->setPlainText(QString::fromStdString(local.result_text));
+    }
+    if (local.result_text != last_result_text_for_auto_pick) {
+      last_result_text_for_auto_pick = local.result_text;
+      const std::string run_dir = parseRunDirFromResultText(local.result_text);
+      if (!run_dir.empty()) {
+        selected_sample_images = collectSampleImages(run_dir);
+        selected_sample_index = selected_sample_images.empty() ? -1 :
+          static_cast<int>(selected_sample_images.size()) - 1;
+        setSampleIndexText();
+      }
+    }
+    auto raw = toQImage(local.raw);
+    auto res = toQImage(local.result);
+    if (!raw.isNull()) {
+      raw_label->setImage(raw);
+    }
+    if (!showing_history_image && !res.isNull()) {
+      res_label->setImage(res);
+    }
+    const bool user_is_selecting = log_view->textCursor().hasSelection();
+    if (!user_is_selecting) {
+      if (local.logs != rendered_logs_snapshot) {
+        log_view->clear();
+        for (const auto & line : local.logs) {
+          log_view->append(QString::fromStdString(line));
+        }
+        rendered_logs_snapshot = local.logs;
+        log_view->moveCursor(QTextCursor::End);
+      }
+    }
+  });
+  ui_timer.start(100);
+
+  // Ensure Ctrl+C (ROS shutdown) also closes Qt UI.
+  QTimer shutdown_watchdog;
+  QObject::connect(&shutdown_watchdog, &QTimer::timeout, [&app]() {
+    if (!rclcpp::ok()) {
+      app.quit();
+    }
+  });
+  shutdown_watchdog.start(100);
+
+  win.show();
+  const int rc = app.exec();
+  cache_running.store(false);
+  if (cache_thread.joinable()) {
+    cache_thread.join();
+  }
+  return rc;
+}
+
+}  // namespace calib_sim

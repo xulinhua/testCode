@@ -1021,15 +1021,15 @@
   
   <link name="camera0_optical_frame"/>
   
-  <!-- Camera0 RGB相机Gazebo配置 -->
+  <!-- Camera0 RGB相机Gazebo配置（参考 Orbbec Gemini335） -->
   <gazebo reference="camera0_link">
     <sensor type="camera" name="camera0_rgb_sensor">
       <update_rate>30.0</update_rate>
       <camera>
-        <horizontal_fov>1.39626</horizontal_fov>
+        <horizontal_fov>1.22173</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
+          <width>1280</width>
+          <height>720</height>
           <format>R8G8B8</format>
         </image>
         <clip>
@@ -1043,20 +1043,20 @@
     </sensor>
   </gazebo>
 
-  <!-- Camera0 深度相机Gazebo配置 -->
+  <!-- Camera0 深度相机Gazebo配置（参考 Orbbec Gemini335） -->
   <gazebo reference="camera0_link">
     <sensor type="depth" name="camera0_depth_sensor">
-      <update_rate>10.0</update_rate>
+      <update_rate>30.0</update_rate>
       <camera>
         <horizontal_fov>1.5009831567</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
+          <width>1280</width>
+          <height>800</height>
           <format>R8G8B8</format>
         </image>
         <clip>
-          <near>0.25</near>
-          <far>1.2</far>
+          <near>0.15</near>
+          <far>10.0</far>
         </clip>
         <distortion>
           <k1>0.0</k1>
@@ -1149,8 +1149,8 @@
       <camera>
         <horizontal_fov>1.39626</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
+          <width>1280</width>
+          <height>720</height>
           <format>R8G8B8</format>
         </image>
         <clip>
@@ -1171,8 +1171,8 @@
       <camera>
         <horizontal_fov>1.5009831567</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
+          <width>1280</width>
+          <height>720</height>
           <format>R8G8B8</format>
         </image>
         <clip>
@@ -1240,8 +1240,8 @@
       <camera>
         <horizontal_fov>1.39626</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
+          <width>1280</width>
+          <height>720</height>
           <format>R8G8B8</format>
         </image>
         <clip>
@@ -1262,8 +1262,8 @@
       <camera>
         <horizontal_fov>1.5009831567</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
+          <width>1280</width>
+          <height>720</height>
           <format>R8G8B8</format>
         </image>
         <clip>
@@ -1421,6 +1421,7 @@
   <xacro:property name="aruco_cali_roll" value="0.0"/>
   <xacro:property name="aruco_cali_pitch" value="0.0"/>
   <xacro:property name="aruco_cali_yaw" value="0.0"/>
+  <xacro:property name="aruco_mesh_file" value="package://nova_sim/meshes/aruco_board.dae"/>
   
   <xacro:include filename="$(find nova_sim)/urdf/aruco_cali.xacro"/>
   <xacro:aruco_cali 
@@ -1432,6 +1433,7 @@
     cali_roll="${aruco_cali_roll}"
     cali_pitch="${aruco_cali_pitch}"
     cali_yaw="${aruco_cali_yaw}"
+    mesh_file="${aruco_mesh_file}"
   />
 
 </robot>
