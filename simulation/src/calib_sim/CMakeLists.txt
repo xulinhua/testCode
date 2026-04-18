@@ -60,17 +60,11 @@ target_link_libraries(calib_sim_core
 rosidl_target_interfaces(calib_sim_core
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
-add_executable(calib_eye_to_hand_node
-  src/calib_eye_to_hand_node.cpp
+add_executable(calib_sim_node
+  src/calib_sim_node.cpp
 )
-target_link_libraries(calib_eye_to_hand_node calib_sim_core)
-ament_target_dependencies(calib_eye_to_hand_node rclcpp ament_index_cpp)
-
-add_executable(calib_eye_in_hand_node
-  src/calib_eye_in_hand_node.cpp
-)
-target_link_libraries(calib_eye_in_hand_node calib_sim_core)
-ament_target_dependencies(calib_eye_in_hand_node rclcpp ament_index_cpp)
+target_link_libraries(calib_sim_node calib_sim_core)
+ament_target_dependencies(calib_sim_node rclcpp ament_index_cpp)
 
 add_executable(calib_sim_ui_node
   src/calib_sim_ui_node.cpp
@@ -99,8 +93,7 @@ target_link_libraries(calib_qt_ui_node
 )
 
 install(TARGETS
-  calib_eye_to_hand_node
-  calib_eye_in_hand_node
+  calib_sim_node
   calib_sim_ui_node
   calib_qt_ui_node
   DESTINATION lib/${PROJECT_NAME}

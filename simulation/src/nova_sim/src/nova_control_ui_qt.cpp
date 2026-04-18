@@ -25,7 +25,10 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPalette>
 #include <QPushButton>
+#include <QTextCharFormat>
+#include <QTextCursor>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -978,12 +981,26 @@ private:
     if (!pose_log_text_) {
       return;
     }
+    QString line;
     if (text.startsWith("[ERROR]") || text.startsWith("[INFO]")) {
-      pose_log_text_->appendPlainText(text);
-      return;
+      line = text;
+    } else {
+      line = (is_error ? QStringLiteral("[ERROR] ") : QStringLiteral("[INFO] ")) + text;
     }
-    const QString prefix = is_error ? "[ERROR] " : "[INFO] ";
-    pose_log_text_->appendPlainText(prefix + text);
+    const bool line_is_error =
+      is_error || line.startsWith(QStringLiteral("[ERROR]"));
+
+    QTextCursor cursor(pose_log_text_->document());
+    cursor.movePosition(QTextCursor::End);
+    QTextCharFormat fmt;
+    if (line_is_error) {
+      fmt.setForeground(QBrush(QColor(200, 40, 40)));
+    } else {
+      fmt.setForeground(QBrush(pose_log_text_->palette().color(QPalette::WindowText)));
+    }
+    cursor.setCharFormat(fmt);
+    cursor.insertText(line + QLatin1Char('\n'));
+    pose_log_text_->moveCursor(QTextCursor::End);
   }
 
   int current_arm_id() const

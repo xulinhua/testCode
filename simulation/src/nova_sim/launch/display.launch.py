@@ -6,7 +6,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     pkg_share = FindPackageShare('nova_sim').find('nova_sim')
-    urdf_file = os.path.join(pkg_share, 'urdf', 'nova_robot.urdf')
+    urdf_file = os.path.join(pkg_share, 'urdf', 'nova_robot_position.urdf')
     
     # 直接读取 URDF 文件（不需要 xacro）
     with open(urdf_file, 'r') as f:

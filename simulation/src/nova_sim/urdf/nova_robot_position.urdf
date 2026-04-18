@@ -1436,6 +1436,29 @@
   <xacro:property name="aruco2_cali_pitch" value="0.0"/>
   <xacro:property name="aruco2_cali_yaw" value="0.0"/>
   <xacro:property name="aruco2_mesh_file" value="package://nova_sim/meshes/aruco_board_1.dae"/>
+
+  <!-- 板3：base_link 固定，DICT_6X6_1000 ID=3（aruco_board_2）；略偏 J1 工作区 (y-)，便于 camera1 俯视 -->
+  <!-- 与臂上板 1/2 同理：dae 法线 -Z；绕 X 转 π 使标记面朝上(+Z) -->
+  <xacro:property name="aruco3_parent_link" value="base_link"/>
+  <xacro:property name="aruco3_child_link" value="aruco_board_base_mid"/>
+  <xacro:property name="aruco3_cali_x" value="0.47"/>
+  <xacro:property name="aruco3_cali_y" value="-0.14"/>
+  <xacro:property name="aruco3_cali_z" value="0.02"/>
+  <xacro:property name="aruco3_cali_roll" value="3.141592653589793"/>
+  <xacro:property name="aruco3_cali_pitch" value="0.0"/>
+  <xacro:property name="aruco3_cali_yaw" value="0.0"/>
+  <xacro:property name="aruco3_mesh_file" value="package://nova_sim/meshes/aruco_board_2.dae"/>
+
+  <!-- 板4：base_link 固定，ID=1（aruco_board_1 / 6x6_1000-1）；略偏 J2 工作区 (y+)，与板3 分离，眼在手上 arm1 专用 -->
+  <xacro:property name="aruco4_parent_link" value="base_link"/>
+  <xacro:property name="aruco4_child_link" value="aruco_board_base_arm1"/>
+  <xacro:property name="aruco4_cali_x" value="0.55"/>
+  <xacro:property name="aruco4_cali_y" value="0.15"/>
+  <xacro:property name="aruco4_cali_z" value="0.02"/>
+  <xacro:property name="aruco4_cali_roll" value="3.141592653589793"/>
+  <xacro:property name="aruco4_cali_pitch" value="0.0"/>
+  <xacro:property name="aruco4_cali_yaw" value="0.0"/>
+  <xacro:property name="aruco4_mesh_file" value="package://nova_sim/meshes/aruco_board_1.dae"/>
   
   <xacro:include filename="$(find nova_sim)/urdf/aruco_cali.xacro"/>
   <xacro:aruco_cali
@@ -1460,6 +1483,30 @@
     cali_pitch="${aruco2_cali_pitch}"
     cali_yaw="${aruco2_cali_yaw}"
     mesh_file="${aruco2_mesh_file}"
+  />
+
+  <xacro:aruco_cali
+    parent_link="${aruco3_parent_link}"
+    child_link="${aruco3_child_link}"
+    cali_x="${aruco3_cali_x}"
+    cali_y="${aruco3_cali_y}"
+    cali_z="${aruco3_cali_z}"
+    cali_roll="${aruco3_cali_roll}"
+    cali_pitch="${aruco3_cali_pitch}"
+    cali_yaw="${aruco3_cali_yaw}"
+    mesh_file="${aruco3_mesh_file}"
+  />
+
+  <xacro:aruco_cali
+    parent_link="${aruco4_parent_link}"
+    child_link="${aruco4_child_link}"
+    cali_x="${aruco4_cali_x}"
+    cali_y="${aruco4_cali_y}"
+    cali_z="${aruco4_cali_z}"
+    cali_roll="${aruco4_cali_roll}"
+    cali_pitch="${aruco4_cali_pitch}"
+    cali_yaw="${aruco4_cali_yaw}"
+    mesh_file="${aruco4_mesh_file}"
   />
 
 </robot>

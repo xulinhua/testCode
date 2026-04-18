@@ -17,6 +17,11 @@ struct CalibConfigData
   int min_samples{8};
   double marker_length_m{0.1};
   double state_timeout_sec{2.0};
+  /// /robot_reached 仍为 true 时允许的最大消息年龄（秒）
+  /// 发布目标后等待到位的最长时间；≤0 时用 state_timeout_sec
+  double reached_wait_timeout_sec{-1.0};
+  /// 单点采图等待检测成功的超时；≤0 时用 state_timeout_sec
+  double capture_wait_timeout_sec{-1.0};
   std::string image_topic{"/camera/image_raw"};
   std::string depth_topic{"/camera/depth/image_raw"};
   std::string camera_info_topic{"/camera/camera_info"};
@@ -59,6 +64,13 @@ class EyeInHandConfigDataManager
 public:
   CalibConfigData load(rclcpp::Node & node) const;
 };
+
+/// 从带前缀的参数（如 eth0.arm_id）加载；用于 calib_unified.yaml。
+CalibConfigData loadCalibConfigPrefixed(
+  rclcpp::Node & node, const std::string & prefix, const CalibConfigData & defaults);
+
+CalibConfigData defaultCalibConfigEyeToHand();
+CalibConfigData defaultCalibConfigEyeInHand();
 
 }  // namespace calib_sim
 

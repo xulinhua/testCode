@@ -32,6 +32,10 @@ public:
     const std::string & node_name, bool eye_in_hand,
     const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
+  /// 统一标定节点：从 calib_unified.yaml 加载 eth0/eth1/eih0/eih1，需 unified_mode:=true。
+  explicit CalibNode(
+    const std::string & node_name, const rclcpp::NodeOptions & options);
+
   /// 在 std::make_shared 之后调用，用于创建 TF 监听器（构造函数内不可用 shared_from_this）。
   void initAfterSharedPtr(const std::shared_ptr<CalibNode> & self);
 
@@ -57,7 +61,13 @@ private:
   };
 
   void declareAndLoadParameters();
+  void applyCalibConfigData(const CalibConfigData & cfg);
+  void loadUnifiedModeConfigs();
+  void applyActiveModeConfig();
+  void switchCalibMode(const std::string & mode);
   void initRosEntities();
+  /// 统一模式下切换 eth0/eth1/eih0/eih1 时必须重建订阅，否则会一直接收旧相机话题。
+  void renewCameraSubscriptions();
   void controlTimerCallback();
 
   void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg);
@@ -108,6 +118,10 @@ private:
   void cancelInitDelayTimer();
   void republishLastCameraImagesToUi();
   void publishInitPoseAfterResetDelay();
+
+  bool unified_mode_{false};
+  std::unordered_map<std::string, CalibConfigData> mode_configs_;
+  std::string active_mode_;
 
   bool eye_in_hand_;
   int arm_id_;

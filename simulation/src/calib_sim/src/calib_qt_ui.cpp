@@ -26,6 +26,10 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QMouseEvent>
+#include <QBrush>
+#include <QColor>
+#include <QPalette>
+#include <QTextCharFormat>
 
 namespace calib_sim
 {
@@ -299,7 +303,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     QLabel { color: #252b38; }
   )"));
   QMainWindow win;
-  win.setWindowTitle("calib_sim_qt_ui");
+  win.setWindowTitle(QString::fromUtf8("手眼标定"));
   auto * central = new QWidget(&win);
   central->setObjectName(QStringLiteral("CentralCalib"));
   auto * root = new QVBoxLayout(central);
@@ -309,12 +313,16 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   auto * status_label = new QLabel("Status: waiting");
   auto * reach_label = new QLabel("Reach: reach_err pos_mm=0 ang_deg=0");
   auto * arm_select = new QComboBox();
-  arm_select->addItem("机械臂0", 0);
-  arm_select->addItem("机械臂1", 1);
+  arm_select->setToolTip(QString::fromUtf8(
+    "眼在手外：固定相机看机械臂；眼在手上：腕部相机。切换后会重新订阅对应相机话题。"));
+  arm_select->addItem(QString::fromUtf8("眼在手外 · 机械臂0"), QStringLiteral("eth0"));
+  arm_select->addItem(QString::fromUtf8("眼在手外 · 机械臂1"), QStringLiteral("eth1"));
+  arm_select->addItem(QString::fromUtf8("眼在手上 · 机械臂0"), QStringLiteral("eih0"));
+  arm_select->addItem(QString::fromUtf8("眼在手上 · 机械臂1"), QStringLiteral("eih1"));
   auto * btn_init = new QPushButton("初始化标定");
   auto * btn_step = new QPushButton("单步标定");
   auto * btn_auto = new QPushButton("自动标定");
-  auto * btn_pause = new QPushButton("暂停");
+  auto * btn_pause = new QPushButton(QString::fromUtf8("暂停标定"));
   auto * result_view = new QTextEdit();
   result_view->setReadOnly(true);
   result_view->setMinimumHeight(220);
@@ -364,6 +372,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   auto * control_group = new QGroupBox("操作与历史");
   auto * ctrl_layout = new QVBoxLayout(control_group);
   ctrl_layout->setSpacing(4);
+  ctrl_layout->addWidget(new QLabel(QString::fromUtf8("标定模式")));
   ctrl_layout->addWidget(arm_select);
   ctrl_layout->addWidget(btn_init);
   ctrl_layout->addWidget(btn_step);
@@ -428,6 +437,16 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
 
   const auto parseRunDirFromResultText = [&](const std::string & result_text) -> std::string {
     {
+      const std::string key = "calib_run_dir:";
+      const std::size_t pos = result_text.rfind(key);
+      if (pos != std::string::npos) {
+        const std::string dir = trimStr(result_text.substr(pos + key.size()));
+        if (!dir.empty()) {
+          return dir;
+        }
+      }
+    }
+    {
       const std::string key = "calib_run_stamp:";
       const std::size_t pos = result_text.rfind(key);
       if (pos != std::string::npos) {
@@ -475,7 +494,8 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       if (line.contains(QLatin1String("sample_manifest_file")) ||
         line.contains(QLatin1String("result_file:")) ||
         line.contains(QLatin1String("result_image_samples_dir:")) ||
-        line.contains(QLatin1String("calib_result_file:")))
+        line.contains(QLatin1String("calib_result_file:")) ||
+        line.contains(QLatin1String("calib_run_dir:")))
       {
         continue;
       }
@@ -483,6 +503,21 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       out += QLatin1Char('\n');
     }
     return out;
+  };
+
+  const auto appendLogLineColored = [](QTextEdit * te, const QString & line) {
+    QTextCursor cursor(te->document());
+    cursor.movePosition(QTextCursor::End);
+    QTextCharFormat fmt;
+    const bool err = line.startsWith(QLatin1String("[ERROR]")) ||
+      line.contains(QLatin1String("calibration_failed"));
+    if (err) {
+      fmt.setForeground(QBrush(QColor(200, 40, 40)));
+    } else {
+      fmt.setForeground(QBrush(te->palette().color(QPalette::WindowText)));
+    }
+    cursor.setCharFormat(fmt);
+    cursor.insertText(line + QLatin1Char('\n'));
   };
 
   const auto refreshRunList = [&]() {
@@ -604,8 +639,8 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
 
   QObject::connect(arm_select, QOverload<int>::of(&QComboBox::activated), [&, ros_node, arm_select](int) {
     clearLocalUiData();
-    const int arm = arm_select->currentData().toInt();
-    ros_node->sendCmd("set_arm:" + std::to_string(arm));
+    const std::string mode = arm_select->currentData().toString().toStdString();
+    ros_node->sendCmd("set_mode:" + mode);
   });
   QObject::connect(btn_init, &QPushButton::clicked, [&, ros_node]() {
     clearLocalUiData();
@@ -745,7 +780,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       if (display_logs != rendered_logs_snapshot) {
         log_view->clear();
         for (const auto & line : display_logs) {
-          log_view->append(QString::fromStdString(line));
+          appendLogLineColored(log_view, QString::fromStdString(line));
         }
         rendered_logs_snapshot = std::move(display_logs);
         log_view->moveCursor(QTextCursor::End);
