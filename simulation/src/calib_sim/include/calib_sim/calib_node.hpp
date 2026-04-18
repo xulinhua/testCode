@@ -8,6 +8,9 @@
 #include <std_msgs/msg/empty.hpp>
 #include <std_msgs/msg/string.hpp>
 
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+
 #include <opencv2/aruco.hpp>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
@@ -28,6 +31,9 @@ public:
   explicit CalibNode(
     const std::string & node_name, bool eye_in_hand,
     const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
+
+  /// 在 std::make_shared 之后调用，用于创建 TF 监听器（构造函数内不可用 shared_from_this）。
+  void initAfterSharedPtr(const std::shared_ptr<CalibNode> & self);
 
 private:
   struct Sample
@@ -61,7 +67,11 @@ private:
   void controlCallback(const std_msgs::msg::String::ConstSharedPtr msg);
 
   bool tryCaptureSample(
-    const cv::Mat & frame_bgr, cv::Mat & annotated, std::vector<int> & detected_ids);
+    const cv::Mat & frame_bgr, cv::Mat & annotated, std::vector<int> & detected_ids,
+    const rclcpp::Time & image_stamp);
+  bool tryFillGripperPoseFromTf(
+    const rclcpp::Time & image_stamp, cv::Mat & r_gripper_to_base, cv::Mat & t_gripper_to_base,
+    calib_sim::msg::ArmPose * out_manifest_pose);
   bool detectTargetPoseInCamera(
     const cv::Mat & frame_bgr, cv::Mat & r_target_to_cam, cv::Mat & t_target_to_cam,
     double & out_mean_corner_reproj_px,
@@ -95,7 +105,10 @@ private:
     const cv::Mat & t_cam_gripper,
     bool has_cam_gripper);
 
-private:
+  void cancelInitDelayTimer();
+  void republishLastCameraImagesToUi();
+  void publishInitPoseAfterResetDelay();
+
   bool eye_in_hand_;
   int arm_id_;
   int marker_id_;
@@ -138,6 +151,12 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr raw_image_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr result_image_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
+  rclcpp::TimerBase::SharedPtr init_after_reset_timer_;
+  calib_sim::msg::ArmPose init_pose_pending_;
+
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  bool sample_pose_logged_source_{false};
 
   cv::aruco::Dictionary aruco_dict_;
   cv::Mat camera_matrix_;
@@ -169,6 +188,14 @@ private:
   std::unordered_map<int, calib_sim::msg::ArmPose> initial_pose_by_arm_;
   double known_mount_trans_consistency_m_;
   double known_mount_rot_consistency_deg_;
+  bool use_tf_for_sample_pose_;
+  std::string tf_base_frame_;
+  std::string tf_ee_frame_arm0_;
+  std::string tf_ee_frame_arm1_;
+  double known_mount_quality_max_m_;
+  int init_reset_burst_count_;
+  int init_reset_burst_period_ms_;
+  int init_delay_ms_after_reset_;
 };
 
 }  // namespace calib_sim

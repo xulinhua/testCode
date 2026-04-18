@@ -20,6 +20,7 @@
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QTimer>
+#include <QSizePolicy>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QMessageBox>
@@ -260,10 +261,50 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
 {
   namespace fs = std::filesystem;
   QApplication app(argc, argv);
+  app.setStyleSheet(QString::fromUtf8(R"(
+    QMainWindow { background: #eef1f6; }
+    QWidget#CentralCalib { background: #eef1f6; }
+    QGroupBox {
+      font-weight: 600;
+      font-size: 13px;
+      border: 1px solid #c5cad6;
+      border-radius: 8px;
+      margin-top: 12px;
+      padding: 10px 12px 12px 12px;
+      background: #ffffff;
+    }
+    QGroupBox::title {
+      subcontrol-origin: margin;
+      left: 12px;
+      padding: 0 6px;
+      color: #1e2430;
+    }
+    QPushButton {
+      padding: 7px 14px;
+      border-radius: 5px;
+      border: 1px solid #b4bac7;
+      background: #f8f9fc;
+      min-height: 22px;
+    }
+    QPushButton:hover { background: #e9ecf4; border-color: #9aa3b4; }
+    QPushButton:pressed { background: #dde2ee; }
+    QTextEdit, QComboBox {
+      border: 1px solid #c5cad6;
+      border-radius: 5px;
+      background: #ffffff;
+      padding: 4px;
+      selection-background-color: #c9d8f0;
+    }
+    QTextEdit { padding: 6px; }
+    QLabel { color: #252b38; }
+  )"));
   QMainWindow win;
   win.setWindowTitle("calib_sim_qt_ui");
   auto * central = new QWidget(&win);
+  central->setObjectName(QStringLiteral("CentralCalib"));
   auto * root = new QVBoxLayout(central);
+  root->setContentsMargins(14, 12, 14, 12);
+  root->setSpacing(10);
 
   auto * status_label = new QLabel("Status: waiting");
   auto * reach_label = new QLabel("Reach: reach_err pos_mm=0 ang_deg=0");
@@ -281,6 +322,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
 
   auto * img_group = new QGroupBox("图像区域");
   auto * img_row = new QHBoxLayout(img_group);
+  img_row->setSpacing(10);
   auto * raw_label = new ZoomableImageLabel("RAW");
   auto * res_label = new ZoomableImageLabel("RESULT");
   raw_label->setMinimumSize(480, 320);
@@ -292,52 +334,60 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
 
   auto * log_group = new QGroupBox("日志");
   auto * log_layout = new QVBoxLayout(log_group);
+  log_layout->setSpacing(6);
   auto * log_view = new QTextEdit();
   log_view->setReadOnly(true);
-  log_view->setMinimumHeight(180);
+  log_view->setMinimumHeight(160);
   log_layout->addWidget(log_view);
 
-  auto * bottom_row = new QHBoxLayout();
-  auto * ops_group = new QGroupBox("操作区");
-  auto * ops_layout = new QVBoxLayout(ops_group);
-  ops_layout->addWidget(arm_select);
-  ops_layout->addWidget(btn_init);
-  ops_layout->addWidget(btn_step);
-  ops_layout->addWidget(btn_auto);
-  ops_layout->addWidget(btn_pause);
-  ops_layout->addWidget(new QLabel("标定结果"));
-  ops_layout->addWidget(result_view);
-  ops_group->setMinimumWidth(220);
-  ops_group->setMaximumWidth(260);
+  auto * result_group = new QGroupBox("标定结果");
+  auto * result_layout = new QVBoxLayout(result_group);
+  result_layout->setSpacing(6);
+  result_layout->addWidget(result_view);
 
-  auto * history_group = new QGroupBox("历史数据");
-  auto * history_layout = new QVBoxLayout(history_group);
   auto * run_select = new QComboBox();
+  run_select->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   auto * btn_load_run = new QPushButton("加载结果");
   auto * btn_clear_current_data = new QPushButton("清空当前数据");
   auto * btn_clear_all_data = new QPushButton("清空所有数据");
-  auto * sample_index_label = new QLabel("样本图: -/-");
   auto * btn_prev_sample = new QPushButton("上一张");
   auto * btn_next_sample = new QPushButton("下一张");
-  history_layout->addWidget(new QLabel("历史标定 run"));
-  history_layout->addWidget(run_select);
-  history_layout->addWidget(btn_load_run);
-  history_layout->addWidget(btn_clear_current_data);
-  history_layout->addWidget(btn_clear_all_data);
-  history_layout->addSpacing(8);
-  history_layout->addWidget(new QLabel("单次样本原图/结果图"));
-  history_layout->addWidget(sample_index_label);
-  history_layout->addWidget(btn_prev_sample);
-  history_layout->addWidget(btn_next_sample);
 
-  auto * right_panel = new QWidget();
-  auto * right_layout = new QHBoxLayout(right_panel);
-  right_layout->setContentsMargins(0, 0, 0, 0);
-  right_layout->addWidget(ops_group, 1);
-  right_layout->addWidget(history_group, 1);
+  auto * left_column = new QWidget();
+  auto * left_col_layout = new QVBoxLayout(left_column);
+  left_col_layout->setContentsMargins(0, 0, 0, 0);
+  left_col_layout->setSpacing(10);
+  left_col_layout->addWidget(log_group, 1);
+  left_col_layout->addWidget(result_group, 2);
 
-  bottom_row->addWidget(log_group, 3);
-  bottom_row->addWidget(right_panel, 3);
+  auto * bottom_row = new QHBoxLayout();
+  auto * control_group = new QGroupBox("操作与历史");
+  auto * ctrl_layout = new QVBoxLayout(control_group);
+  ctrl_layout->setSpacing(4);
+  ctrl_layout->addWidget(arm_select);
+  ctrl_layout->addWidget(btn_init);
+  ctrl_layout->addWidget(btn_step);
+  ctrl_layout->addWidget(btn_auto);
+  ctrl_layout->addWidget(btn_pause);
+  ctrl_layout->addSpacing(8);
+  ctrl_layout->addWidget(new QLabel("历史标定 run"));
+  ctrl_layout->addWidget(run_select);
+  ctrl_layout->addWidget(btn_load_run);
+  ctrl_layout->addWidget(btn_clear_current_data);
+  ctrl_layout->addWidget(btn_clear_all_data);
+  ctrl_layout->addSpacing(6);
+  auto * sample_nav_row = new QHBoxLayout();
+  sample_nav_row->setSpacing(8);
+  sample_nav_row->addWidget(btn_prev_sample, 1);
+  sample_nav_row->addWidget(btn_next_sample, 1);
+  ctrl_layout->addLayout(sample_nav_row);
+  control_group->setMinimumWidth(240);
+  control_group->setMaximumWidth(300);
+  control_group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+
+  bottom_row->setSpacing(12);
+  bottom_row->addWidget(left_column, 5, Qt::AlignTop);
+  bottom_row->addWidget(control_group, 2, Qt::AlignTop);
 
   root->addWidget(status_label);
   root->addWidget(reach_label);
@@ -459,20 +509,9 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     }
   };
 
-  const auto setSampleIndexText = [&]() {
-    const int n = static_cast<int>(selected_result_images.size());
-    if (n <= 0 || selected_sample_index < 0) {
-      sample_index_label->setText(QString::fromUtf8("样本图: -/-"));
-      return;
-    }
-    sample_index_label->setText(
-      QString::fromUtf8("样本图: %1/%2").arg(selected_sample_index + 1).arg(n));
-  };
-
   const auto backToLiveView = [&]() {
     showing_history_image = false;
     selected_sample_index = -1;
-    setSampleIndexText();
   };
 
   const auto showSampleAt = [&](int idx) {
@@ -486,7 +525,6 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     }
     selected_sample_index = idx;
     showing_history_image = true;
-    setSampleIndexText();
     res_label->setImage(res_img);
     if (idx < static_cast<int>(selected_raw_images.size())) {
       const QImage raw_img(QString::fromStdString(selected_raw_images[static_cast<std::size_t>(idx)]));
@@ -533,7 +571,6 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       appendUiLog("[历史数据] 加载完成，可切换「上一张/下一张」浏览原图与结果图");
     } else {
       selected_sample_index = -1;
-      setSampleIndexText();
       appendUiLog("[历史数据] 无样本 PNG，仅显示 YAML 文本");
     }
   };
@@ -563,7 +600,6 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     selected_sample_index = -1;
     selected_result_images.clear();
     selected_raw_images.clear();
-    setSampleIndexText();
   };
 
   QObject::connect(arm_select, QOverload<int>::of(&QComboBox::activated), [&, ros_node, arm_select](int) {
@@ -680,7 +716,6 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
         selected_raw_images = collectSampleImages(run_dir, "raw_sample_");
         selected_sample_index = selected_result_images.empty() ? -1 :
           static_cast<int>(selected_result_images.size()) - 1;
-        setSampleIndexText();
       }
       refreshRunList();
     }

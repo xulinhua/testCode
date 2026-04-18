@@ -19,6 +19,8 @@ find_package(ament_index_cpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
@@ -46,6 +48,8 @@ ament_target_dependencies(calib_sim_core
   std_msgs
   sensor_msgs
   geometry_msgs
+  tf2
+  tf2_ros
 )
 
 target_link_libraries(calib_sim_core
@@ -118,6 +122,8 @@ ament_export_dependencies(
   std_msgs
   sensor_msgs
   geometry_msgs
+  tf2
+  tf2_ros
 )
 ament_export_include_directories(include)
 

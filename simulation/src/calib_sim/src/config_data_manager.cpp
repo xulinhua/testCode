@@ -31,6 +31,14 @@ CalibConfigData loadCommon(rclcpp::Node & node, const CalibConfigData & defaults
   node.declare_parameter("target_to_gripper_pose", cfg.target_to_gripper_pose);
   node.declare_parameter("marker_bbox_ratio_min", cfg.marker_bbox_ratio_min);
   node.declare_parameter("marker_bbox_ratio_max", cfg.marker_bbox_ratio_max);
+  node.declare_parameter("use_tf_for_sample_pose", cfg.use_tf_for_sample_pose);
+  node.declare_parameter("tf_base_frame", cfg.tf_base_frame);
+  node.declare_parameter("tf_ee_frame_arm0", cfg.tf_ee_frame_arm0);
+  node.declare_parameter("tf_ee_frame_arm1", cfg.tf_ee_frame_arm1);
+  node.declare_parameter("known_mount_quality_max_m", cfg.known_mount_quality_max_m);
+  node.declare_parameter("init_reset_burst_count", cfg.init_reset_burst_count);
+  node.declare_parameter("init_reset_burst_period_ms", cfg.init_reset_burst_period_ms);
+  node.declare_parameter("init_delay_ms_after_reset", cfg.init_delay_ms_after_reset);
 
   cfg.arm_id = node.get_parameter("arm_id").as_int();
   cfg.target_marker_id = node.get_parameter("target_marker_id").as_int();
@@ -50,6 +58,14 @@ CalibConfigData loadCommon(rclcpp::Node & node, const CalibConfigData & defaults
   cfg.target_to_gripper_pose = node.get_parameter("target_to_gripper_pose").as_double_array();
   cfg.marker_bbox_ratio_min = node.get_parameter("marker_bbox_ratio_min").as_double();
   cfg.marker_bbox_ratio_max = node.get_parameter("marker_bbox_ratio_max").as_double();
+  cfg.use_tf_for_sample_pose = node.get_parameter("use_tf_for_sample_pose").as_bool();
+  cfg.tf_base_frame = node.get_parameter("tf_base_frame").as_string();
+  cfg.tf_ee_frame_arm0 = node.get_parameter("tf_ee_frame_arm0").as_string();
+  cfg.tf_ee_frame_arm1 = node.get_parameter("tf_ee_frame_arm1").as_string();
+  cfg.known_mount_quality_max_m = node.get_parameter("known_mount_quality_max_m").as_double();
+  cfg.init_reset_burst_count = node.get_parameter("init_reset_burst_count").as_int();
+  cfg.init_reset_burst_period_ms = node.get_parameter("init_reset_burst_period_ms").as_int();
+  cfg.init_delay_ms_after_reset = node.get_parameter("init_delay_ms_after_reset").as_int();
 
   rclcpp::Parameter target_poses_param;
   if (node.get_parameter("target_poses", target_poses_param) &&

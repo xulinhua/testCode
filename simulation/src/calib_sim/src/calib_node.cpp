@@ -3,6 +3,10 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <tf2/exceptions.h>
+#include <tf2_ros/transform_listener.h>
+
 #include <chrono>
 #include <cmath>
 #include <array>
@@ -193,7 +197,15 @@ CalibNode::CalibNode(
   waiting_init_pose_(false),
   last_status_text_(""),
   known_mount_trans_consistency_m_(0.0),
-  known_mount_rot_consistency_deg_(0.0)
+  known_mount_rot_consistency_deg_(0.0),
+  use_tf_for_sample_pose_(true),
+  tf_base_frame_("base_link"),
+  tf_ee_frame_arm0_("J1_6"),
+  tf_ee_frame_arm1_("J2_6"),
+  known_mount_quality_max_m_(0.20),
+  init_reset_burst_count_(6),
+  init_reset_burst_period_ms_(50),
+  init_delay_ms_after_reset_(500)
 {
   declareAndLoadParameters();
   initRosEntities();
@@ -237,6 +249,14 @@ void CalibNode::declareAndLoadParameters()
   target_to_gripper_pose_ = cfg.target_to_gripper_pose;
   marker_bbox_ratio_min_ = cfg.marker_bbox_ratio_min;
   marker_bbox_ratio_max_ = cfg.marker_bbox_ratio_max;
+  use_tf_for_sample_pose_ = cfg.use_tf_for_sample_pose;
+  tf_base_frame_ = cfg.tf_base_frame;
+  tf_ee_frame_arm0_ = cfg.tf_ee_frame_arm0;
+  tf_ee_frame_arm1_ = cfg.tf_ee_frame_arm1;
+  known_mount_quality_max_m_ = cfg.known_mount_quality_max_m;
+  init_reset_burst_count_ = std::max(1, cfg.init_reset_burst_count);
+  init_reset_burst_period_ms_ = std::max(0, cfg.init_reset_burst_period_ms);
+  init_delay_ms_after_reset_ = std::max(0, cfg.init_delay_ms_after_reset);
 
   if (!target_poses_arm0_.empty() && (target_poses_arm0_.size() % kPoseDims) != 0U) {
     throw std::runtime_error("target_poses must be [x,y,z,qx,qy,qz,qw] * N");
@@ -303,6 +323,75 @@ void CalibNode::initRosEntities()
   result_image_pub_ = create_publisher<sensor_msgs::msg::Image>("/calib_sim/result_image", 10);
   control_timer_ = create_wall_timer(
     std::chrono::milliseconds(200), std::bind(&CalibNode::controlTimerCallback, this));
+  if (use_tf_for_sample_pose_) {
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+  }
+}
+
+void CalibNode::initAfterSharedPtr(const std::shared_ptr<CalibNode> & self)
+{
+  if (!use_tf_for_sample_pose_ || !tf_buffer_ || tf_listener_) {
+    return;
+  }
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(
+    *tf_buffer_, std::static_pointer_cast<rclcpp::Node>(self), false);
+  RCLCPP_INFO(
+    get_logger(),
+    "TF sample poses enabled: %s -> arm0:%s arm1:%s (time-sync with image)",
+    tf_base_frame_.c_str(), tf_ee_frame_arm0_.c_str(), tf_ee_frame_arm1_.c_str());
+}
+
+void CalibNode::cancelInitDelayTimer()
+{
+  if (init_after_reset_timer_) {
+    init_after_reset_timer_->cancel();
+    init_after_reset_timer_.reset();
+  }
+}
+
+void CalibNode::republishLastCameraImagesToUi()
+{
+  auto publish_bgr = [this](const cv::Mat & bgr, const rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr & pub) {
+    if (bgr.empty() || !pub) {
+      return;
+    }
+    cv::Mat cont;
+    if (bgr.isContinuous()) {
+      cont = bgr;
+    } else {
+      bgr.copyTo(cont);
+    }
+    sensor_msgs::msg::Image msg;
+    msg.header.stamp = now();
+    msg.header.frame_id = "camera";
+    msg.height = static_cast<uint32_t>(cont.rows);
+    msg.width = static_cast<uint32_t>(cont.cols);
+    msg.encoding = "bgr8";
+    msg.step = static_cast<uint32_t>(cont.cols * 3);
+    msg.data.assign(cont.data, cont.data + cont.total() * cont.elemSize());
+    pub->publish(msg);
+  };
+  publish_bgr(last_raw_frame_, raw_image_pub_);
+  // 结果图与当前原图一致（复位/刷新 UI 时不保留旧标注）
+  if (!last_raw_frame_.empty()) {
+    last_result_frame_ = last_raw_frame_.clone();
+  }
+  publish_bgr(last_raw_frame_, result_image_pub_);
+}
+
+void CalibNode::publishInitPoseAfterResetDelay()
+{
+  cancelInitDelayTimer();
+  init_pose_pending_.pose.header.stamp = now();
+  init_pose_pending_.pose.header.frame_id = "base_link";
+  target_pose_pub_->publish(init_pose_pending_);
+  waiting_arm_reached_ = true;
+  waiting_capture_ = false;
+  waiting_init_pose_ = true;
+  target_sent_time_ = now();
+  publishStatus("moving_to_initial_pose_arm_" + std::to_string(arm_id_));
+  publishLog("cmd:init move_to_initial_pose (async, UI refreshed)");
+  republishLastCameraImagesToUi();
 }
 
 void CalibNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::ConstSharedPtr msg)
@@ -447,6 +536,7 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
   };
 
   if (cmd.rfind("set_arm:", 0) == 0) {
+    cancelInitDelayTimer();
     const std::string arm_text = cmd.substr(std::string("set_arm:").size());
     int new_arm = arm_id_;
     try {
@@ -477,14 +567,20 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
   }
 
   if (cmd == "init") {
+    cancelInitDelayTimer();
     reset_runtime_state();
     auto_mode_ = false;
     pending_step_ = false;
     {
       std_msgs::msg::Empty reset_signal;
-      nova_all_joints_reset_pub_->publish(reset_signal);
-      publishLog("cmd:init nova_all_joints_reset topic=" + nova_all_joints_reset_topic_);
+      for (int i = 0; i < init_reset_burst_count_; ++i) {
+        nova_all_joints_reset_pub_->publish(reset_signal);
+      }
+      publishLog(
+        "cmd:init burst reset n=" + std::to_string(init_reset_burst_count_) + " topic=" +
+        nova_all_joints_reset_topic_);
     }
+    republishLastCameraImagesToUi();
     const auto it = initial_pose_by_arm_.find(arm_id_);
     if (it == initial_pose_by_arm_.end()) {
       publishStatus("init_failed_no_initial_pose");
@@ -492,16 +588,19 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
       return;
     }
 
-    calib_sim::msg::ArmPose init_cmd = it->second;
-    init_cmd.pose.header.stamp = now();
-    init_cmd.pose.header.frame_id = "base_link";
-    target_pose_pub_->publish(init_cmd);
-    waiting_arm_reached_ = true;
-    waiting_capture_ = false;
-    waiting_init_pose_ = true;
-    target_sent_time_ = now();
-    publishStatus("moving_to_initial_pose_arm_" + std::to_string(arm_id_));
-    publishLog("cmd:init move_to_initial_pose");
+    init_pose_pending_ = it->second;
+    init_pose_pending_.arm_id = arm_id_;
+    publishLog(
+      "cmd:init scheduling initial pose after delay_ms=" + std::to_string(init_delay_ms_after_reset_) +
+      " (non-blocking; camera keeps updating)");
+
+    if (init_delay_ms_after_reset_ <= 0) {
+      publishInitPoseAfterResetDelay();
+      return;
+    }
+    init_after_reset_timer_ = create_wall_timer(
+      std::chrono::milliseconds(std::max(1, init_delay_ms_after_reset_)),
+      std::bind(&CalibNode::publishInitPoseAfterResetDelay, this));
     return;
   }
   if (cmd == "step") {
@@ -615,7 +714,8 @@ bool CalibNode::ensureTargetsPrepared()
 void CalibNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
 {
   raw_image_pub_->publish(*msg);
-  if (!waiting_capture_ || !has_camera_info_ || !has_arm_pose_) {
+  const bool pose_ok = has_arm_pose_ || (use_tf_for_sample_pose_ && tf_buffer_);
+  if (!waiting_capture_ || !has_camera_info_ || !pose_ok) {
     return;
   }
   cv::Mat bgr = convertImageToBgr(msg);
@@ -626,7 +726,10 @@ void CalibNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
 
   cv::Mat annotated;
   std::vector<int> detected_ids;
-  if (tryCaptureSample(bgr, annotated, detected_ids)) {
+  const rclcpp::Time img_stamp =
+    (msg->header.stamp.sec != 0 || msg->header.stamp.nanosec != 0) ?
+    rclcpp::Time(msg->header.stamp) : now();
+  if (tryCaptureSample(bgr, annotated, detected_ids, img_stamp)) {
     waiting_capture_ = false;
     ++target_index_;
     RCLCPP_INFO(get_logger(), "Captured sample %zu", samples_.size());
@@ -664,8 +767,47 @@ void CalibNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
   publishLog(ids_ss.str());
 }
 
+bool CalibNode::tryFillGripperPoseFromTf(
+  const rclcpp::Time & image_stamp, cv::Mat & r_gripper_to_base, cv::Mat & t_gripper_to_base,
+  calib_sim::msg::ArmPose * out_manifest_pose)
+{
+  if (!use_tf_for_sample_pose_ || !tf_buffer_) {
+    return false;
+  }
+  const std::string & ee = (arm_id_ == 1) ? tf_ee_frame_arm1_ : tf_ee_frame_arm0_;
+  geometry_msgs::msg::TransformStamped tf_msg;
+  try {
+    tf2::TimePoint tp = tf2::TimePointZero;
+    if (image_stamp.nanoseconds() > 0) {
+      tp = tf2::TimePoint(std::chrono::nanoseconds(image_stamp.nanoseconds()));
+    }
+    tf_msg = tf_buffer_->lookupTransform(tf_base_frame_, ee, tp);
+  } catch (const tf2::TransformException &) {
+    try {
+      tf_msg = tf_buffer_->lookupTransform(tf_base_frame_, ee, tf2::TimePointZero);
+    } catch (const tf2::TransformException &) {
+      return false;
+    }
+  }
+  const auto & tr = tf_msg.transform.translation;
+  const auto & q = tf_msg.transform.rotation;
+  r_gripper_to_base = quatToRot(q.x, q.y, q.z, q.w);
+  t_gripper_to_base = (cv::Mat_<double>(3, 1) << tr.x, tr.y, tr.z);
+  if (out_manifest_pose) {
+    out_manifest_pose->arm_id = arm_id_;
+    out_manifest_pose->pose.header.stamp = image_stamp.nanoseconds() != 0u ? image_stamp : now();
+    out_manifest_pose->pose.header.frame_id = tf_base_frame_;
+    out_manifest_pose->pose.pose.position.x = tr.x;
+    out_manifest_pose->pose.pose.position.y = tr.y;
+    out_manifest_pose->pose.pose.position.z = tr.z;
+    out_manifest_pose->pose.pose.orientation = q;
+  }
+  return true;
+}
+
 bool CalibNode::tryCaptureSample(
-  const cv::Mat & frame_bgr, cv::Mat & annotated, std::vector<int> & detected_ids)
+  const cv::Mat & frame_bgr, cv::Mat & annotated, std::vector<int> & detected_ids,
+  const rclcpp::Time & image_stamp)
 {
   cv::Mat r_target_to_cam, t_target_to_cam;
   double mean_corner_reproj_px = 0.0;
@@ -684,19 +826,30 @@ bool CalibNode::tryCaptureSample(
   }
   last_detect_fail_reason_ = "ok";
 
+  Sample sample;
+  calib_sim::msg::ArmPose manifest_pose;
+  const bool used_tf = tryFillGripperPoseFromTf(
+    image_stamp, sample.r_gripper_to_base, sample.t_gripper_to_base, &manifest_pose);
+  if (!used_tf) {
+    if (!has_arm_pose_) {
+      return false;
+    }
+    manifest_pose = last_arm_pose_;
+    const auto & p = last_arm_pose_.pose.pose.position;
+    const auto & q = last_arm_pose_.pose.pose.orientation;
+    sample.r_gripper_to_base = quatToRot(q.x, q.y, q.z, q.w);
+    sample.t_gripper_to_base = (cv::Mat_<double>(3, 1) << p.x, p.y, p.z);
+  } else if (!sample_pose_logged_source_) {
+    sample_pose_logged_source_ = true;
+    publishLog("sample_gripper_pose_source=tf (time-sync with image)");
+  }
+
   cv::putText(
     annotated, "captured_sample_" + std::to_string(samples_.size() + 1),
     cv::Point(20, 35), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0), 2);
   captured_raw_frames_.push_back(frame_bgr.clone());
   captured_result_frames_.push_back(annotated.clone());
-  captured_arm_poses_.push_back(last_arm_pose_);
-
-  const auto & p = last_arm_pose_.pose.pose.position;
-  const auto & q = last_arm_pose_.pose.pose.orientation;
-
-  Sample sample;
-  sample.r_gripper_to_base = quatToRot(q.x, q.y, q.z, q.w);
-  sample.t_gripper_to_base = (cv::Mat_<double>(3, 1) << p.x, p.y, p.z);
+  captured_arm_poses_.push_back(manifest_pose);
   sample.r_target_to_cam = r_target_to_cam;
   sample.t_target_to_cam = t_target_to_cam;
   sample.mean_corner_reproj_px = mean_corner_reproj_px;
@@ -1086,11 +1239,13 @@ bool CalibNode::runCalibration()
     publishLog("calibration_failed: degenerate identity result detected");
     return false;
   }
-  if (!eye_in_hand_ && use_known_target_mount_ && quality_error_m > 0.08 && quality_error_m <= 0.20) {
+  if (!eye_in_hand_ && use_known_target_mount_ && quality_error_m > 0.08 &&
+    quality_error_m <= known_mount_quality_max_m_)
+  {
     publishStatus("calibration_warn_medium_quality");
     publishLog("calibration_warning: medium quality result accepted");
   }
-  if (trans_norm > 5.0 || quality_error_m > 0.20) {
+  if (trans_norm > 5.0 || quality_error_m > known_mount_quality_max_m_) {
     publishStatus("calibration_failed_poor_quality");
     publishLog("calibration_failed: poor quality, increase pose diversity and check marker scale");
     return false;

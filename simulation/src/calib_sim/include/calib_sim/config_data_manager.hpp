@@ -35,6 +35,17 @@ struct CalibConfigData
   std::vector<double> target_to_gripper_pose{0.0, -0.12, -0.01, 0.0, 0.0, 0.0, 1.0};
   double marker_bbox_ratio_min{0.012};
   double marker_bbox_ratio_max{0.030};
+  /// 采样时用 TF(base->末端) 与图像时间对齐；需与 calib_sim_bridge 的 ee_frame 一致
+  bool use_tf_for_sample_pose{true};
+  std::string tf_base_frame{"base_link"};
+  std::string tf_ee_frame_arm0{"J1_6"};
+  std::string tf_ee_frame_arm1{"J2_6"};
+  /// 眼在手外 + use_known_target_mount 时，known_mount 平移不一致阈值 (m)
+  double known_mount_quality_max_m{0.20};
+  /// 初始化标定：先发全零关节，再延时后发缓存初始位姿（避免 IK 立刻覆盖复位）
+  int init_reset_burst_count{6};
+  int init_reset_burst_period_ms{50};
+  int init_delay_ms_after_reset{500};
 };
 
 class EyeToHandConfigDataManager

@@ -11,6 +11,7 @@ int main(int argc, char ** argv)
   rclcpp::NodeOptions calib_options;
   calib_options.arguments({"--ros-args", "--params-file", pkg_share + "/config/eye_to_hand.yaml"});
   auto calib_node = std::make_shared<calib_sim::CalibNode>("calib_eye_to_hand_node", false, calib_options);
+  calib_node->initAfterSharedPtr(calib_node);
   auto ui_node = std::make_shared<calib_sim::CalibQtUiRosNode>(rclcpp::NodeOptions{});
 
   rclcpp::executors::MultiThreadedExecutor exec;
