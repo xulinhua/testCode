@@ -24,7 +24,9 @@ CalibConfigData loadCommon(rclcpp::Node & node, const CalibConfigData & defaults
   node.declare_parameter("output_dir", cfg.output_dir);
   node.declare_parameter("use_current_pose_as_center", cfg.use_current_pose_as_center);
   node.declare_parameter("target_poses", std::vector<double>{});
+  node.declare_parameter("target_poses_arm1", std::vector<double>{});
   node.declare_parameter("target_position_offsets", std::vector<double>{});
+  node.declare_parameter("target_orientation_offsets_rpy_deg", std::vector<double>{});
   node.declare_parameter("use_known_target_mount", cfg.use_known_target_mount);
   node.declare_parameter("target_to_gripper_pose", cfg.target_to_gripper_pose);
   node.declare_parameter("marker_bbox_ratio_min", cfg.marker_bbox_ratio_min);
@@ -56,11 +58,25 @@ CalibConfigData loadCommon(rclcpp::Node & node, const CalibConfigData & defaults
     cfg.target_poses = target_poses_param.as_double_array();
   }
 
+  rclcpp::Parameter target_poses_arm1_param;
+  if (node.get_parameter("target_poses_arm1", target_poses_arm1_param) &&
+    target_poses_arm1_param.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY)
+  {
+    cfg.target_poses_arm1 = target_poses_arm1_param.as_double_array();
+  }
+
   rclcpp::Parameter offsets_param;
   if (node.get_parameter("target_position_offsets", offsets_param) &&
     offsets_param.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY)
   {
     cfg.target_position_offsets = offsets_param.as_double_array();
+  }
+
+  rclcpp::Parameter orient_param;
+  if (node.get_parameter("target_orientation_offsets_rpy_deg", orient_param) &&
+    orient_param.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY)
+  {
+    cfg.target_orientation_offsets_rpy_deg = orient_param.as_double_array();
   }
 
   return cfg;

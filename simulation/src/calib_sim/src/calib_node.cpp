@@ -4,6 +4,7 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -20,6 +21,85 @@ namespace
 constexpr int kPoseDims = 7;
 constexpr double kEps = 1e-9;
 constexpr double kRad2Deg = 57.29577951308232;
+constexpr double kDeg2Rad = 0.017453292519943295;
+
+cv::Mat rotXRad(double a)
+{
+  const double c = std::cos(a);
+  const double s = std::sin(a);
+  return (cv::Mat_<double>(3, 3) <<
+    1.0, 0.0, 0.0,
+    0.0, c, -s,
+    0.0, s, c);
+}
+
+cv::Mat rotYRad(double a)
+{
+  const double c = std::cos(a);
+  const double s = std::sin(a);
+  return (cv::Mat_<double>(3, 3) <<
+    c, 0.0, s,
+    0.0, 1.0, 0.0,
+    -s, 0.0, c);
+}
+
+cv::Mat rotZRad(double a)
+{
+  const double c = std::cos(a);
+  const double s = std::sin(a);
+  return (cv::Mat_<double>(3, 3) <<
+    c, -s, 0.0,
+    s, c, 0.0,
+    0.0, 0.0, 1.0);
+}
+
+/// R_delta = Rz(yaw) * Ry(pitch) * Rx(roll)，与 ensureTargetsPrepared 中 R_out = R_base * R_delta 联用
+cv::Mat rpyDegToRdelta(double roll_deg, double pitch_deg, double yaw_deg)
+{
+  const double r = roll_deg * kDeg2Rad;
+  const double p = pitch_deg * kDeg2Rad;
+  const double y = yaw_deg * kDeg2Rad;
+  return rotZRad(y) * rotYRad(p) * rotXRad(r);
+}
+
+void mat3ToQuat(const cv::Mat & R, double & qx, double & qy, double & qz, double & qw)
+{
+  const double m00 = R.at<double>(0, 0);
+  const double m01 = R.at<double>(0, 1);
+  const double m02 = R.at<double>(0, 2);
+  const double m10 = R.at<double>(1, 0);
+  const double m11 = R.at<double>(1, 1);
+  const double m12 = R.at<double>(1, 2);
+  const double m20 = R.at<double>(2, 0);
+  const double m21 = R.at<double>(2, 1);
+  const double m22 = R.at<double>(2, 2);
+  const double tr = m00 + m11 + m22;
+  if (tr > 0.0) {
+    const double S = std::sqrt(tr + 1.0) * 2.0;
+    qw = 0.25 * S;
+    qx = (m21 - m12) / S;
+    qy = (m02 - m20) / S;
+    qz = (m10 - m01) / S;
+  } else if (m00 > m11 && m00 > m22) {
+    const double S = std::sqrt(1.0 + m00 - m11 - m22) * 2.0;
+    qw = (m21 - m12) / S;
+    qx = 0.25 * S;
+    qy = (m01 + m10) / S;
+    qz = (m02 + m20) / S;
+  } else if (m11 > m22) {
+    const double S = std::sqrt(1.0 + m11 - m00 - m22) * 2.0;
+    qw = (m02 - m20) / S;
+    qx = (m01 + m10) / S;
+    qy = 0.25 * S;
+    qz = (m12 + m21) / S;
+  } else {
+    const double S = std::sqrt(1.0 + m22 - m00 - m11) * 2.0;
+    qw = (m10 - m01) / S;
+    qx = (m02 + m20) / S;
+    qy = (m12 + m21) / S;
+    qz = 0.25 * S;
+  }
+}
 
 std::string formatMat4(const cv::Mat & m)
 {
@@ -66,9 +146,9 @@ double rotationAngleRadBetween(const cv::Mat & r1, const cv::Mat & r2)
 
 bool getUrdfReferenceTcamBaseForArm(int arm_id, cv::Mat & t_cam_base_ref)
 {
-  // Reference from nova_robot_position.urdf fixed joints:
-  // base_link -> camera0_optical_frame (vision solvePnP optical frame)
-  if (arm_id == 0) {
+  // base_link -> camera0_optical_frame（nova_robot_position.urdf，龙门架固定相机）
+  // 机械臂 0/1 标定均使用同一套 cam0 图像，与 URDF 对比时用同一参考外参。
+  if (arm_id == 0 || arm_id == 1) {
     const std::array<double, 16> t = {
        0.999998,  0.001589, -0.000796, -0.528377,
        0.001589, -0.999999, -0.000001, -0.500299,
@@ -148,19 +228,36 @@ void CalibNode::declareAndLoadParameters()
   robot_state_topic_ = cfg.robot_state_topic;
   robot_target_topic_ = cfg.robot_target_topic;
   output_dir_ = cfg.output_dir;
-  target_poses_flat_ = cfg.target_poses;
+  target_poses_arm0_ = cfg.target_poses;
+  target_poses_arm1_ = cfg.target_poses_arm1.empty() ? cfg.target_poses : cfg.target_poses_arm1;
   use_current_pose_as_center_ = cfg.use_current_pose_as_center;
   target_position_offsets_ = cfg.target_position_offsets;
+  target_orientation_offsets_rpy_deg_ = cfg.target_orientation_offsets_rpy_deg;
   use_known_target_mount_ = cfg.use_known_target_mount;
   target_to_gripper_pose_ = cfg.target_to_gripper_pose;
   marker_bbox_ratio_min_ = cfg.marker_bbox_ratio_min;
   marker_bbox_ratio_max_ = cfg.marker_bbox_ratio_max;
 
-  if (!target_poses_flat_.empty() && (target_poses_flat_.size() % kPoseDims) != 0U) {
+  if (!target_poses_arm0_.empty() && (target_poses_arm0_.size() % kPoseDims) != 0U) {
     throw std::runtime_error("target_poses must be [x,y,z,qx,qy,qz,qw] * N");
   }
+  if (!target_poses_arm1_.empty() && (target_poses_arm1_.size() % kPoseDims) != 0U) {
+    throw std::runtime_error("target_poses_arm1 must be [x,y,z,qx,qy,qz,qw] * N");
+  }
+  applyTargetPosesForCurrentArm();
   if (!target_position_offsets_.empty() && (target_position_offsets_.size() % 3U) != 0U) {
     throw std::runtime_error("target_position_offsets must be [dx,dy,dz] * N");
+  }
+  if (!target_orientation_offsets_rpy_deg_.empty()) {
+    if ((target_orientation_offsets_rpy_deg_.size() % 3U) != 0U) {
+      throw std::runtime_error("target_orientation_offsets_rpy_deg must be [roll,pitch,yaw_deg] * N");
+    }
+    if (!target_position_offsets_.empty() &&
+      target_orientation_offsets_rpy_deg_.size() != target_position_offsets_.size())
+    {
+      throw std::runtime_error(
+        "target_orientation_offsets_rpy_deg length must match target_position_offsets");
+    }
   }
   if (use_known_target_mount_ && target_to_gripper_pose_.size() != kPoseDims) {
     throw std::runtime_error("target_to_gripper_pose must be [x,y,z,qx,qy,qz,qw]");
@@ -172,6 +269,14 @@ void CalibNode::declareAndLoadParameters()
     throw std::runtime_error("target_poses is empty when use_current_pose_as_center=false");
   }
   aruco_dict_ = cv::aruco::getPredefinedDictionary(aruco_dict_id_);
+}
+
+void CalibNode::applyTargetPosesForCurrentArm()
+{
+  if (use_current_pose_as_center_) {
+    return;
+  }
+  target_poses_flat_ = (arm_id_ == 1) ? target_poses_arm1_ : target_poses_arm0_;
 }
 
 void CalibNode::initRosEntities()
@@ -187,6 +292,10 @@ void CalibNode::initRosEntities()
   control_sub_ = create_subscription<std_msgs::msg::String>(
     "/calib_sim/control", 20, std::bind(&CalibNode::controlCallback, this, std::placeholders::_1));
   target_pose_pub_ = create_publisher<calib_sim::msg::ArmPose>(robot_target_topic_, 10);
+  this->declare_parameter("nova_all_joints_reset_topic", std::string("/nova_sim/reset_all_joints"));
+  nova_all_joints_reset_topic_ = this->get_parameter("nova_all_joints_reset_topic").as_string();
+  nova_all_joints_reset_pub_ =
+    create_publisher<std_msgs::msg::Empty>(nova_all_joints_reset_topic_, 10);
   status_pub_ = create_publisher<std_msgs::msg::String>("/calib_sim/status", 10);
   log_pub_ = create_publisher<std_msgs::msg::String>("/calib_sim/log", 30);
   result_text_pub_ = create_publisher<std_msgs::msg::String>("/calib_sim/result_text", 10);
@@ -354,6 +463,7 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
     arm_id_ = new_arm;
     // Default convention: marker id follows arm id (arm0->id0, arm1->id1).
     marker_id_ = new_arm;
+    applyTargetPosesForCurrentArm();
     has_arm_pose_ = false;
     has_arm_state_ = false;
     arm_reached_ = false;
@@ -370,6 +480,11 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
     reset_runtime_state();
     auto_mode_ = false;
     pending_step_ = false;
+    {
+      std_msgs::msg::Empty reset_signal;
+      nova_all_joints_reset_pub_->publish(reset_signal);
+      publishLog("cmd:init nova_all_joints_reset topic=" + nova_all_joints_reset_topic_);
+    }
     const auto it = initial_pose_by_arm_.find(arm_id_);
     if (it == initial_pose_by_arm_.end()) {
       publishStatus("init_failed_no_initial_pose");
@@ -458,15 +573,36 @@ bool CalibNode::ensureTargetsPrepared()
   }
 
   target_poses_flat_.clear();
+  if (!target_orientation_offsets_rpy_deg_.empty() &&
+    target_orientation_offsets_rpy_deg_.size() != offsets.size())
+  {
+    throw std::runtime_error(
+      "target_orientation_offsets_rpy_deg must have the same length as the expanded "
+      "position offsets (built-in default uses 24 floats: 8 waypoints)");
+  }
+
+  const cv::Mat R_base = CalibNode::quatToRot(q.x, q.y, q.z, q.w);
   target_poses_flat_.reserve((offsets.size() / 3U) * kPoseDims);
   for (std::size_t i = 0; i < offsets.size(); i += 3U) {
     target_poses_flat_.push_back(base_pose.position.x + offsets[i + 0]);
     target_poses_flat_.push_back(base_pose.position.y + offsets[i + 1]);
     target_poses_flat_.push_back(base_pose.position.z + offsets[i + 2]);
-    target_poses_flat_.push_back(q.x);
-    target_poses_flat_.push_back(q.y);
-    target_poses_flat_.push_back(q.z);
-    target_poses_flat_.push_back(q.w);
+    double qx = q.x;
+    double qy = q.y;
+    double qz = q.z;
+    double qw = q.w;
+    if (!target_orientation_offsets_rpy_deg_.empty()) {
+      const std::size_t j = i / 3U;
+      const double roll_deg = target_orientation_offsets_rpy_deg_[j * 3U + 0];
+      const double pitch_deg = target_orientation_offsets_rpy_deg_[j * 3U + 1];
+      const double yaw_deg = target_orientation_offsets_rpy_deg_[j * 3U + 2];
+      const cv::Mat R_out = R_base * rpyDegToRdelta(roll_deg, pitch_deg, yaw_deg);
+      mat3ToQuat(R_out, qx, qy, qz, qw);
+    }
+    target_poses_flat_.push_back(qx);
+    target_poses_flat_.push_back(qy);
+    target_poses_flat_.push_back(qz);
+    target_poses_flat_.push_back(qw);
   }
   targets_prepared_ = true;
   RCLCPP_INFO(
@@ -532,9 +668,11 @@ bool CalibNode::tryCaptureSample(
   const cv::Mat & frame_bgr, cv::Mat & annotated, std::vector<int> & detected_ids)
 {
   cv::Mat r_target_to_cam, t_target_to_cam;
+  double mean_corner_reproj_px = 0.0;
   std::string fail_reason;
   if (!detectTargetPoseInCamera(
-      frame_bgr, r_target_to_cam, t_target_to_cam, fail_reason, annotated, detected_ids))
+      frame_bgr, r_target_to_cam, t_target_to_cam, mean_corner_reproj_px, fail_reason, annotated,
+      detected_ids))
   {
     last_detect_fail_reason_ = fail_reason;
     if (!annotated.empty()) {
@@ -561,6 +699,7 @@ bool CalibNode::tryCaptureSample(
   sample.t_gripper_to_base = (cv::Mat_<double>(3, 1) << p.x, p.y, p.z);
   sample.r_target_to_cam = r_target_to_cam;
   sample.t_target_to_cam = t_target_to_cam;
+  sample.mean_corner_reproj_px = mean_corner_reproj_px;
   samples_.push_back(sample);
   publishStatus("sample_captured_" + std::to_string(samples_.size()));
   return true;
@@ -568,8 +707,10 @@ bool CalibNode::tryCaptureSample(
 
 bool CalibNode::detectTargetPoseInCamera(
   const cv::Mat & frame_bgr, cv::Mat & r_target_to_cam, cv::Mat & t_target_to_cam,
+  double & out_mean_corner_reproj_px,
   std::string & fail_reason, cv::Mat & annotated, std::vector<int> & detected_ids)
 {
+  out_mean_corner_reproj_px = 0.0;
   annotated = frame_bgr.clone();
   cv::Mat gray;
   cv::cvtColor(frame_bgr, gray, cv::COLOR_BGR2GRAY);
@@ -776,6 +917,7 @@ bool CalibNode::detectTargetPoseInCamera(
   }
   cv::Rodrigues(rvec, r_target_to_cam);
   t_target_to_cam = tvec.clone();
+  out_mean_corner_reproj_px = reproj_err_px;
   fail_reason = "ok";
   return true;
 }
@@ -914,16 +1056,15 @@ bool CalibNode::runCalibration()
   }
 
   cv::Mat t_base_cam = invertTransform(t_cam_base);
-  const auto per_point_errors = computePerPointErrors(t_cam_base, t_cam_gripper, has_cam_gripper);
-  const double mean_error = per_point_errors.empty() ? 0.0 :
-    std::accumulate(per_point_errors.begin(), per_point_errors.end(), 0.0) / per_point_errors.size();
+  HandEyeQualityMetrics quality;
+  computeHandEyeChainResiduals(t_cam_base, t_cam_gripper, has_cam_gripper, quality);
 
   cv::Mat r_cam_base, t_cam_base_v;
   splitTransform(t_cam_base, r_cam_base, t_cam_base_v);
   const double tr = r_cam_base.at<double>(0, 0) + r_cam_base.at<double>(1, 1) + r_cam_base.at<double>(2, 2);
   const double rot_angle_deg = std::acos(clampUnit((tr - 1.0) * 0.5)) * kRad2Deg;
   const double trans_norm = cv::norm(t_cam_base_v);
-  double quality_error_m = mean_error;
+  double quality_error_m = quality.mean_chain_translation_m;
   if (!eye_in_hand_ && use_known_target_mount_) {
     quality_error_m = known_mount_trans_consistency_m_;
   }
@@ -932,11 +1073,15 @@ bool CalibNode::runCalibration()
     oss << std::fixed << std::setprecision(6)
         << "calib_quality trans_norm_m=" << trans_norm
         << " rot_angle_deg=" << rot_angle_deg
-        << " mean_error_m=" << mean_error
-        << " quality_error_m=" << quality_error_m;
+        << " mean_corner_reprojection_error_px=" << std::setprecision(4) << quality.mean_corner_reproj_px
+        << " mean_handeye_chain_translation_residual_mm=" << std::setprecision(3)
+        << (quality.mean_chain_translation_m * 1000.0)
+        << " mean_handeye_chain_rotation_residual_deg=" << std::setprecision(4)
+        << quality.mean_chain_rotation_deg
+        << std::setprecision(6) << " quality_error_m=" << quality_error_m;
     publishLog(oss.str());
   }
-  if (trans_norm < 1e-4 && rot_angle_deg < 0.2 && mean_error > 1e-3) {
+  if (trans_norm < 1e-4 && rot_angle_deg < 0.2 && quality.mean_chain_translation_m > 1e-3) {
     publishStatus("calibration_failed_degenerate_identity_result");
     publishLog("calibration_failed: degenerate identity result detected");
     return false;
@@ -951,7 +1096,7 @@ bool CalibNode::runCalibration()
     return false;
   }
 
-  return saveResult(t_cam_base, t_base_cam, per_point_errors, t_cam_gripper, has_cam_gripper);
+  return saveResult(t_cam_base, t_base_cam, quality, t_cam_gripper, has_cam_gripper);
 }
 
 bool CalibNode::runEyeToHandCalibration(cv::Mat & t_cam_base)
@@ -1174,13 +1319,20 @@ bool CalibNode::runEyeInHandCalibration(cv::Mat & t_cam_base, cv::Mat & t_cam_gr
   return true;
 }
 
-std::vector<double> CalibNode::computePerPointErrors(
+void CalibNode::computeHandEyeChainResiduals(
   const cv::Mat & t_cam_base,
   const cv::Mat & t_cam_gripper,
-  bool has_cam_gripper) const
+  bool has_cam_gripper,
+  HandEyeQualityMetrics & out) const
 {
-  std::vector<double> errors;
-  errors.reserve(samples_.size());
+  out = HandEyeQualityMetrics{};
+  const std::size_t n = samples_.size();
+  if (n == 0U) {
+    return;
+  }
+  out.per_point_corner_reproj_px.reserve(n);
+  out.per_point_chain_translation_m.reserve(n);
+  out.per_point_chain_rotation_deg.reserve(n);
 
   cv::Mat anchor = cv::Mat::eye(4, 4, CV_64F);
   if (eye_in_hand_ && has_cam_gripper) {
@@ -1193,7 +1345,13 @@ std::vector<double> CalibNode::computePerPointErrors(
     anchor = invertTransform(t_g_b0) * t_cam_base * t_t_c0;  // target in gripper
   }
 
+  double sum_reproj = 0.0;
+  double sum_trans = 0.0;
+  double sum_rot = 0.0;
   for (const auto & s : samples_) {
+    out.per_point_corner_reproj_px.push_back(s.mean_corner_reproj_px);
+    sum_reproj += s.mean_corner_reproj_px;
+
     const cv::Mat t_g_b = makeTransform(s.r_gripper_to_base, s.t_gripper_to_base);
     const cv::Mat t_t_c_obs = makeTransform(s.r_target_to_cam, s.t_target_to_cam);
     cv::Mat t_t_c_pred;
@@ -1203,16 +1361,25 @@ std::vector<double> CalibNode::computePerPointErrors(
     } else {
       t_t_c_pred = invertTransform(t_cam_base) * t_g_b * anchor;
     }
-    cv::Mat delta = t_t_c_pred(cv::Rect(3, 0, 1, 3)) - t_t_c_obs(cv::Rect(3, 0, 1, 3));
-    errors.push_back(cv::norm(delta));
+    const cv::Mat r_pred = t_t_c_pred(cv::Rect(0, 0, 3, 3));
+    const double rot_err_deg = rotationAngleRadBetween(r_pred, s.r_target_to_cam) * kRad2Deg;
+    out.per_point_chain_rotation_deg.push_back(rot_err_deg);
+    sum_rot += rot_err_deg;
+
+    const cv::Mat delta = t_t_c_pred(cv::Rect(3, 0, 1, 3)) - t_t_c_obs(cv::Rect(3, 0, 1, 3));
+    const double trans_err = cv::norm(delta);
+    out.per_point_chain_translation_m.push_back(trans_err);
+    sum_trans += trans_err;
   }
-  return errors;
+  out.mean_corner_reproj_px = sum_reproj / static_cast<double>(n);
+  out.mean_chain_translation_m = sum_trans / static_cast<double>(n);
+  out.mean_chain_rotation_deg = sum_rot / static_cast<double>(n);
 }
 
 bool CalibNode::saveResult(
   const cv::Mat & t_cam_base,
   const cv::Mat & t_base_cam,
-  const std::vector<double> & per_point_errors,
+  const HandEyeQualityMetrics & quality,
   const cv::Mat & t_cam_gripper,
   bool has_cam_gripper)
 {
@@ -1228,17 +1395,25 @@ bool CalibNode::saveResult(
     return false;
   }
 
-  const double mean_error = per_point_errors.empty() ? 0.0 :
-    std::accumulate(per_point_errors.begin(), per_point_errors.end(), 0.0) / per_point_errors.size();
+  std::vector<double> per_point_chain_trans_mm;
+  per_point_chain_trans_mm.reserve(quality.per_point_chain_translation_m.size());
+  for (double e : quality.per_point_chain_translation_m) {
+    per_point_chain_trans_mm.push_back(e * 1000.0);
+  }
+  const double mean_chain_trans_mm = quality.mean_chain_translation_m * 1000.0;
 
   fs << "mode" << (eye_in_hand_ ? "eye_in_hand" : "eye_to_hand");
   fs << "timestamp" << run_stamp;
+  fs << "calib_run_stamp" << run_stamp;
   fs << "arm_id" << arm_id_;
   fs << "target_marker_id" << marker_id_;
   fs << "sample_count" << static_cast<int>(samples_.size());
-  fs << "mean_reprojection_error_m" << mean_error;
-  fs << "per_point_error_m" << per_point_errors;
-  fs << "sample_manifest_file" << std::filesystem::absolute(manifest_file).string();
+  fs << "mean_corner_reprojection_error_px" << quality.mean_corner_reproj_px;
+  fs << "per_point_corner_reprojection_error_px" << quality.per_point_corner_reproj_px;
+  fs << "mean_handeye_chain_translation_residual_mm" << mean_chain_trans_mm;
+  fs << "per_point_handeye_chain_translation_residual_mm" << per_point_chain_trans_mm;
+  fs << "mean_handeye_chain_rotation_residual_deg" << quality.mean_chain_rotation_deg;
+  fs << "per_point_handeye_chain_rotation_residual_deg" << quality.per_point_chain_rotation_deg;
   fs << "T_cam_base" << mat44ToVec16(t_cam_base);
   fs << "T_base_cam" << mat44ToVec16(t_base_cam);
   if (has_cam_gripper) {
@@ -1251,9 +1426,10 @@ bool CalibNode::saveResult(
     splitTransform(t_cam_base, r_est, t_est);
     splitTransform(t_cam_base_ref, r_ref, t_ref);
     const double trans_err = cv::norm(t_est - t_ref);
+    const double trans_err_mm = trans_err * 1000.0;
     const double rot_err_deg = rotationAngleRadBetween(r_est, r_ref) * kRad2Deg;
     fs << "T_cam_base_urdf_ref" << mat44ToVec16(t_cam_base_ref);
-    fs << "T_cam_base_vs_urdf_translation_error_m" << trans_err;
+    fs << "T_cam_base_vs_urdf_translation_error_mm" << trans_err_mm;
     fs << "T_cam_base_vs_urdf_rotation_error_deg" << rot_err_deg;
   }
   fs.release();
@@ -1307,11 +1483,17 @@ bool CalibNode::saveResult(
 
   std_msgs::msg::String result_msg;
   std::ostringstream oss;
+  oss << std::fixed;
   oss << "mode: " << (eye_in_hand_ ? "eye_in_hand" : "eye_to_hand") << "\n"
       << "arm_id: " << arm_id_ << "\n"
       << "target_marker_id: " << marker_id_ << "\n"
       << "sample_count: " << samples_.size() << "\n"
-      << "mean_reprojection_error_m: " << mean_error << "\n"
+      << std::setprecision(4) << "mean_corner_reprojection_error_px: " << quality.mean_corner_reproj_px
+      << "\n"
+      << std::setprecision(3) << "mean_handeye_chain_translation_residual_mm: " << mean_chain_trans_mm
+      << "\n"
+      << std::setprecision(4) << "mean_handeye_chain_rotation_residual_deg: "
+      << quality.mean_chain_rotation_deg << "\n"
       << "T_cam_base:\n" << formatMat4(t_cam_base) << "\n"
       << "T_base_cam:\n" << formatMat4(t_base_cam);
   if (has_cam_gripper) {
@@ -1322,19 +1504,18 @@ bool CalibNode::saveResult(
     splitTransform(t_cam_base, r_est, t_est);
     splitTransform(t_cam_base_ref, r_ref, t_ref);
     const double trans_err = cv::norm(t_est - t_ref);
+    const double trans_err_mm = trans_err * 1000.0;
     const double rot_err_deg = rotationAngleRadBetween(r_est, r_ref) * kRad2Deg;
+    oss << std::fixed << std::setprecision(3);
     oss << "\nT_cam_base_urdf_ref:\n" << formatMat4(t_cam_base_ref)
-        << "\nT_cam_base_vs_urdf_translation_error_m: " << trans_err
-        << "\nT_cam_base_vs_urdf_rotation_error_deg: " << rot_err_deg;
+        << "\nT_cam_base_vs_urdf_translation_error_mm: " << trans_err_mm
+        << "\nT_cam_base_vs_urdf_rotation_error_deg: " << std::setprecision(4) << rot_err_deg;
   }
-  oss << "\nresult_file: " << std::filesystem::absolute(file_name).string()
-      << "\nsample_manifest_file: " << std::filesystem::absolute(manifest_file).string()
-      << "\nresult_image_samples_dir: " << std::filesystem::absolute(run_dir).string();
+  oss << "\ncalib_run_stamp: " << run_stamp << "\n";
   result_msg.data = oss.str();
   result_text_pub_->publish(result_msg);
 
   RCLCPP_INFO(get_logger(), "Calibration result saved: %s", file_name.c_str());
-  publishLog("calib_result_file: " + std::filesystem::absolute(file_name).string());
   return true;
 }
 

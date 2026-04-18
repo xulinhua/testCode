@@ -18,6 +18,8 @@ public:
   explicit CalibQtUiRosNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
   void sendCmd(const std::string & cmd);
+  /// 清空订阅累积的日志与标定结果文本，并清空最近图像缓存（供 UI 重置显示）
+  void clearLogsAndResult();
   std::string status();
   std::string reachError();
   std::string resultText();

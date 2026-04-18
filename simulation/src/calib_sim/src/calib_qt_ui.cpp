@@ -22,6 +22,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
+#include <QMessageBox>
 #include <QPainter>
 #include <QMouseEvent>
 
@@ -193,6 +194,15 @@ void CalibQtUiRosNode::sendCmd(const std::string & cmd)
   ctrl_pub_->publish(m);
 }
 
+void CalibQtUiRosNode::clearLogsAndResult()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  logs_.clear();
+  result_text_ = "等待标定结果...";
+  raw_ = sensor_msgs::msg::Image{};
+  result_ = sensor_msgs::msg::Image{};
+}
+
 std::string CalibQtUiRosNode::status()
 {
   std::lock_guard<std::mutex> lk(mu_);
@@ -300,25 +310,25 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   ops_group->setMinimumWidth(220);
   ops_group->setMaximumWidth(260);
 
-  auto * history_group = new QGroupBox("历史结果");
+  auto * history_group = new QGroupBox("历史数据");
   auto * history_layout = new QVBoxLayout(history_group);
   auto * run_select = new QComboBox();
-  auto * btn_refresh_runs = new QPushButton("刷新列表");
   auto * btn_load_run = new QPushButton("加载结果");
+  auto * btn_clear_current_data = new QPushButton("清空当前数据");
+  auto * btn_clear_all_data = new QPushButton("清空所有数据");
   auto * sample_index_label = new QLabel("样本图: -/-");
   auto * btn_prev_sample = new QPushButton("上一张");
   auto * btn_next_sample = new QPushButton("下一张");
-  auto * btn_back_live = new QPushButton("回到实时图像");
-  history_layout->addWidget(new QLabel("历史 run"));
+  history_layout->addWidget(new QLabel("历史标定 run"));
   history_layout->addWidget(run_select);
-  history_layout->addWidget(btn_refresh_runs);
   history_layout->addWidget(btn_load_run);
+  history_layout->addWidget(btn_clear_current_data);
+  history_layout->addWidget(btn_clear_all_data);
   history_layout->addSpacing(8);
-  history_layout->addWidget(new QLabel("单次结果图切换"));
+  history_layout->addWidget(new QLabel("单次样本原图/结果图"));
   history_layout->addWidget(sample_index_label);
   history_layout->addWidget(btn_prev_sample);
   history_layout->addWidget(btn_next_sample);
-  history_layout->addWidget(btn_back_live);
 
   auto * right_panel = new QWidget();
   auto * right_layout = new QHBoxLayout(right_panel);
@@ -336,15 +346,6 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   win.setCentralWidget(central);
   win.resize(1100, 780);
 
-  QObject::connect(arm_select, QOverload<int>::of(&QComboBox::currentIndexChanged), [ros_node, arm_select](int) {
-    const int arm = arm_select->currentData().toInt();
-    ros_node->sendCmd("set_arm:" + std::to_string(arm));
-  });
-  QObject::connect(btn_init, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("init"); });
-  QObject::connect(btn_step, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("step"); });
-  QObject::connect(btn_auto, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("auto"); });
-  QObject::connect(btn_pause, &QPushButton::clicked, [ros_node]() { ros_node->sendCmd("pause"); });
-
   struct UiCache
   {
     std::string status;
@@ -358,28 +359,43 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   UiCache cache;
   std::atomic<bool> cache_running{true};
   std::vector<std::string> rendered_logs_snapshot;
+  std::vector<std::string> ui_log_extra;
   bool showing_history_image = false;
-  std::vector<std::string> selected_sample_images;
+  std::vector<std::string> selected_result_images;
+  std::vector<std::string> selected_raw_images;
   int selected_sample_index = -1;
   std::string last_result_text_for_auto_pick;
   const fs::path output_root("/home/hs/testCode/simulation/calib_output");
 
-  const auto parseRunDirFromResultText = [](const std::string & result_text) -> std::string {
+  const auto trimStr = [](std::string s) -> std::string {
+    const auto first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+      return "";
+    }
+    const auto last = s.find_last_not_of(" \t\r\n");
+    return s.substr(first, last - first + 1);
+  };
+
+  const auto parseRunDirFromResultText = [&](const std::string & result_text) -> std::string {
+    {
+      const std::string key = "calib_run_stamp:";
+      const std::size_t pos = result_text.rfind(key);
+      if (pos != std::string::npos) {
+        std::string stamp = trimStr(result_text.substr(pos + key.size()));
+        if (!stamp.empty()) {
+          return (output_root / ("calib_run_" + stamp)).string();
+        }
+      }
+    }
     const std::string key = "result_image_samples_dir:";
     const std::size_t pos = result_text.rfind(key);
     if (pos == std::string::npos) {
       return "";
     }
-    std::string path = result_text.substr(pos + key.size());
-    const auto first = path.find_first_not_of(" \t\r\n");
-    const auto last = path.find_last_not_of(" \t\r\n");
-    if (first == std::string::npos || last == std::string::npos) {
-      return "";
-    }
-    return path.substr(first, last - first + 1);
+    return trimStr(result_text.substr(pos + key.size()));
   };
 
-  const auto collectSampleImages = [](const std::string & run_dir) {
+  const auto collectSampleImages = [](const std::string & run_dir, const char * prefix) {
     std::vector<std::string> files;
     if (run_dir.empty()) {
       return files;
@@ -388,17 +404,35 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     if (!fs::exists(run_dir, ec) || ec) {
       return files;
     }
+    const std::string pre(prefix);
     for (const auto & entry : fs::directory_iterator(run_dir, ec)) {
       if (ec || !entry.is_regular_file()) {
         continue;
       }
       const std::string name = entry.path().filename().string();
-      if (name.rfind("result_sample_", 0) == 0 && entry.path().extension() == ".png") {
+      if (name.rfind(pre, 0) == 0 && entry.path().extension() == ".png") {
         files.push_back(entry.path().string());
       }
     }
     std::sort(files.begin(), files.end());
     return files;
+  };
+
+  const auto filterYamlLinesForDisplay = [](const QString & yaml_text) -> QString {
+    QString out;
+    const QStringList lines = yaml_text.split('\n');
+    for (const QString & line : lines) {
+      if (line.contains(QLatin1String("sample_manifest_file")) ||
+        line.contains(QLatin1String("result_file:")) ||
+        line.contains(QLatin1String("result_image_samples_dir:")) ||
+        line.contains(QLatin1String("calib_result_file:")))
+      {
+        continue;
+      }
+      out += line;
+      out += QLatin1Char('\n');
+    }
+    return out;
   };
 
   const auto refreshRunList = [&]() {
@@ -426,34 +460,52 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   };
 
   const auto setSampleIndexText = [&]() {
-    if (selected_sample_images.empty() || selected_sample_index < 0) {
-      sample_index_label->setText("样本图: -/-");
+    const int n = static_cast<int>(selected_result_images.size());
+    if (n <= 0 || selected_sample_index < 0) {
+      sample_index_label->setText(QString::fromUtf8("样本图: -/-"));
       return;
     }
     sample_index_label->setText(
-      QString("样本图: %1/%2")
-      .arg(selected_sample_index + 1)
-      .arg(static_cast<int>(selected_sample_images.size())));
+      QString::fromUtf8("样本图: %1/%2").arg(selected_sample_index + 1).arg(n));
+  };
+
+  const auto backToLiveView = [&]() {
+    showing_history_image = false;
+    selected_sample_index = -1;
+    setSampleIndexText();
   };
 
   const auto showSampleAt = [&](int idx) {
-    if (idx < 0 || idx >= static_cast<int>(selected_sample_images.size())) {
+    const int n = static_cast<int>(selected_result_images.size());
+    if (idx < 0 || idx >= n) {
       return;
     }
-    QImage img(QString::fromStdString(selected_sample_images[static_cast<std::size_t>(idx)]));
-    if (img.isNull()) {
+    const QImage res_img(QString::fromStdString(selected_result_images[static_cast<std::size_t>(idx)]));
+    if (res_img.isNull()) {
       return;
     }
     selected_sample_index = idx;
     showing_history_image = true;
     setSampleIndexText();
-    res_label->setImage(img);
+    res_label->setImage(res_img);
+    if (idx < static_cast<int>(selected_raw_images.size())) {
+      const QImage raw_img(QString::fromStdString(selected_raw_images[static_cast<std::size_t>(idx)]));
+      if (!raw_img.isNull()) {
+        raw_label->setImage(raw_img);
+      }
+    }
+  };
+
+  const auto appendUiLog = [&](const std::string & line) {
+    ui_log_extra.push_back(line);
   };
 
   const auto loadRunResult = [&](const std::string & run_dir) {
     if (run_dir.empty()) {
+      appendUiLog("[历史数据] 未选择 run 目录");
       return;
     }
+    appendUiLog(std::string("[历史数据] 开始加载: ") + run_dir);
     std::string yaml_file = run_dir + "/calib_result_eye_to_hand.yaml";
     if (!fs::exists(yaml_file)) {
       const std::string fallback = run_dir + "/calib_result_eye_in_hand.yaml";
@@ -465,54 +517,131 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       QFile f(QString::fromStdString(yaml_file));
       if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QTextStream in(&f);
-        result_view->setPlainText(in.readAll());
+        result_view->setPlainText(filterYamlLinesForDisplay(in.readAll()));
+        appendUiLog(std::string("[历史数据] 已读取标定 YAML: ") + yaml_file);
       }
+    } else {
+      appendUiLog("[历史数据] 未找到 calib_result_eye_to_hand.yaml / eye_in_hand.yaml");
     }
-    selected_sample_images = collectSampleImages(run_dir);
-    if (!selected_sample_images.empty()) {
-      showSampleAt(static_cast<int>(selected_sample_images.size()) - 1);
+    selected_result_images = collectSampleImages(run_dir, "result_sample_");
+    selected_raw_images = collectSampleImages(run_dir, "raw_sample_");
+    appendUiLog(
+      std::string("[历史数据] 结果图 ") + std::to_string(selected_result_images.size()) + " 张, 原图 " +
+      std::to_string(selected_raw_images.size()) + " 张");
+    if (!selected_result_images.empty()) {
+      showSampleAt(static_cast<int>(selected_result_images.size()) - 1);
+      appendUiLog("[历史数据] 加载完成，可切换「上一张/下一张」浏览原图与结果图");
     } else {
       selected_sample_index = -1;
       setSampleIndexText();
+      appendUiLog("[历史数据] 无样本 PNG，仅显示 YAML 文本");
     }
   };
 
   refreshRunList();
 
-  QObject::connect(btn_refresh_runs, &QPushButton::clicked, [&]() { refreshRunList(); });
+  QObject::connect(btn_step, &QPushButton::clicked, [&, ros_node]() {
+    backToLiveView();
+    ros_node->sendCmd("step");
+  });
+  QObject::connect(btn_auto, &QPushButton::clicked, [&, ros_node]() {
+    backToLiveView();
+    ros_node->sendCmd("auto");
+  });
+  QObject::connect(btn_pause, &QPushButton::clicked, [&, ros_node]() {
+    backToLiveView();
+    ros_node->sendCmd("pause");
+  });
+
+  const auto clearLocalUiData = [&]() {
+    ros_node->clearLogsAndResult();
+    log_view->clear();
+    result_view->setPlainText(QString::fromUtf8("等待标定结果..."));
+    rendered_logs_snapshot.clear();
+    ui_log_extra.clear();
+    showing_history_image = false;
+    selected_sample_index = -1;
+    selected_result_images.clear();
+    selected_raw_images.clear();
+    setSampleIndexText();
+  };
+
+  QObject::connect(arm_select, QOverload<int>::of(&QComboBox::activated), [&, ros_node, arm_select](int) {
+    clearLocalUiData();
+    const int arm = arm_select->currentData().toInt();
+    ros_node->sendCmd("set_arm:" + std::to_string(arm));
+  });
+  QObject::connect(btn_init, &QPushButton::clicked, [&, ros_node]() {
+    clearLocalUiData();
+    ros_node->sendCmd("init");
+  });
+
   QObject::connect(btn_load_run, &QPushButton::clicked, [&]() {
     const std::string run_dir = run_select->currentData().toString().toStdString();
     loadRunResult(run_dir);
   });
+  QObject::connect(btn_clear_current_data, &QPushButton::clicked, [&]() {
+    clearLocalUiData();
+    appendUiLog("[历史数据] 已清空当前界面上的日志与标定结果（内存）");
+  });
+  QObject::connect(btn_clear_all_data, &QPushButton::clicked, [&]() {
+    const auto r = QMessageBox::question(
+      &win, QString::fromUtf8("确认"),
+      QString::fromUtf8("将永久删除 calib_output 下所有 calib_run_* 目录，是否继续？"),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (r != QMessageBox::Yes) {
+      return;
+    }
+    std::error_code ec;
+    if (!fs::exists(output_root, ec) || ec) {
+      appendUiLog("[历史数据] calib_output 不存在，跳过删除");
+      refreshRunList();
+      return;
+    }
+    int dirs_removed = 0;
+    for (const auto & entry : fs::directory_iterator(output_root, ec)) {
+      if (ec || !entry.is_directory()) {
+        continue;
+      }
+      const std::string name = entry.path().filename().string();
+      if (name.rfind("calib_run_", 0) != 0) {
+        continue;
+      }
+      std::error_code rm_ec;
+      fs::remove_all(entry.path(), rm_ec);
+      if (!rm_ec) {
+        ++dirs_removed;
+      }
+    }
+    clearLocalUiData();
+    refreshRunList();
+    appendUiLog(
+      std::string("[历史数据] 已清空磁盘标定目录，已删除 run 目录数 ") + std::to_string(dirs_removed));
+  });
   QObject::connect(btn_prev_sample, &QPushButton::clicked, [&]() {
-    if (selected_sample_images.empty()) {
+    if (selected_result_images.empty()) {
       return;
     }
     int idx = selected_sample_index;
     if (idx < 0) {
       idx = 0;
     } else {
-      idx = (idx - 1 + static_cast<int>(selected_sample_images.size())) %
-        static_cast<int>(selected_sample_images.size());
+      idx = (idx - 1 + static_cast<int>(selected_result_images.size())) %
+        static_cast<int>(selected_result_images.size());
     }
     showSampleAt(idx);
   });
   QObject::connect(btn_next_sample, &QPushButton::clicked, [&]() {
-    if (selected_sample_images.empty()) {
+    if (selected_result_images.empty()) {
       return;
     }
     int idx = selected_sample_index;
     if (idx < 0) {
       idx = 0;
     } else {
-      idx = (idx + 1) % static_cast<int>(selected_sample_images.size());
+      idx = (idx + 1) % static_cast<int>(selected_result_images.size());
     }
     showSampleAt(idx);
-  });
-  QObject::connect(btn_back_live, &QPushButton::clicked, [&]() {
-    showing_history_image = false;
-    selected_sample_index = -1;
-    setSampleIndexText();
   });
 
   // Worker thread: pull ROS data periodically, keep UI thread lightweight.
@@ -542,35 +671,48 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     }
     status_label->setText(QString::fromStdString("Status: " + local.status));
     reach_label->setText(QString::fromStdString("Reach: " + local.reach_error));
-    if (result_view->toPlainText().toStdString() != local.result_text) {
-      result_view->setPlainText(QString::fromStdString(local.result_text));
-    }
     if (local.result_text != last_result_text_for_auto_pick) {
       last_result_text_for_auto_pick = local.result_text;
+      showing_history_image = false;
       const std::string run_dir = parseRunDirFromResultText(local.result_text);
       if (!run_dir.empty()) {
-        selected_sample_images = collectSampleImages(run_dir);
-        selected_sample_index = selected_sample_images.empty() ? -1 :
-          static_cast<int>(selected_sample_images.size()) - 1;
+        selected_result_images = collectSampleImages(run_dir, "result_sample_");
+        selected_raw_images = collectSampleImages(run_dir, "raw_sample_");
+        selected_sample_index = selected_result_images.empty() ? -1 :
+          static_cast<int>(selected_result_images.size()) - 1;
         setSampleIndexText();
       }
+      refreshRunList();
     }
-    auto raw = toQImage(local.raw);
+    {
+      const QString filtered_result =
+        filterYamlLinesForDisplay(QString::fromStdString(local.result_text));
+      if (!showing_history_image) {
+        if (result_view->toPlainText() != filtered_result) {
+          result_view->setPlainText(filtered_result);
+        }
+      }
+    }
     auto res = toQImage(local.result);
-    if (!raw.isNull()) {
-      raw_label->setImage(raw);
-    }
-    if (!showing_history_image && !res.isNull()) {
-      res_label->setImage(res);
+    if (!showing_history_image) {
+      auto raw = toQImage(local.raw);
+      if (!raw.isNull()) {
+        raw_label->setImage(raw);
+      }
+      if (!res.isNull()) {
+        res_label->setImage(res);
+      }
     }
     const bool user_is_selecting = log_view->textCursor().hasSelection();
     if (!user_is_selecting) {
-      if (local.logs != rendered_logs_snapshot) {
+      std::vector<std::string> display_logs = ui_log_extra;
+      display_logs.insert(display_logs.end(), local.logs.begin(), local.logs.end());
+      if (display_logs != rendered_logs_snapshot) {
         log_view->clear();
-        for (const auto & line : local.logs) {
+        for (const auto & line : display_logs) {
           log_view->append(QString::fromStdString(line));
         }
-        rendered_logs_snapshot = local.logs;
+        rendered_logs_snapshot = std::move(display_logs);
         log_view->moveCursor(QTextCursor::End);
       }
     }

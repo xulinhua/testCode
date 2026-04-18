@@ -74,6 +74,14 @@ ament_target_dependencies(calib_sim_bridge_node
   tf2
 )
 
+add_executable(all_joints_reset_node
+  src/all_joints_reset_node.cpp
+)
+ament_target_dependencies(all_joints_reset_node
+  rclcpp
+  std_msgs
+)
+
 # 安装资源文件
 install(DIRECTORY
   include
@@ -103,6 +111,7 @@ install(TARGETS
   nova_control_ui_cpp
   nova_control_ui_qt
   calib_sim_bridge_node
+  all_joints_reset_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

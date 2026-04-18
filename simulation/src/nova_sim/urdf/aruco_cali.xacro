@@ -20,6 +20,7 @@
     <!-- 主链接 -->
     <link name="${child_link}">
       <visual>
+        <!-- 翻面已在 aruco_board*.dae 内用法线/绕序完成；此处勿再 rpy 转 180°，否则易镜像。 -->
         <origin xyz="0 0 0" rpy="0 0 0"/>
         <geometry>
           <!-- 使用带UV的平面网格贴图，Gazebo 对这种方式兼容性更好 -->
@@ -52,10 +53,6 @@
         <emissive>0 0 0 1</emissive>
       </material>
     </gazebo>
-    
-    <!-- ArUco 标记可视化（使用白色板子，实际识别由视觉系统处理） -->
-    <!-- 注意：Gazebo 原生不支持直接渲染 ArUco 图案，需要在视觉系统中添加真实相机图像识别 -->
-  
   </xacro:macro>
 
 </robot>

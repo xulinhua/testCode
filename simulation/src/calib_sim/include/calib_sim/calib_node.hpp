@@ -5,6 +5,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <std_msgs/msg/string.hpp>
 
 #include <opencv2/aruco.hpp>
@@ -35,6 +36,18 @@ private:
     cv::Mat t_gripper_to_base;
     cv::Mat r_target_to_cam;
     cv::Mat t_target_to_cam;
+    /// Mean |projected−detected| over 4 marker corners (pixels), from PnP self-check
+    double mean_corner_reproj_px{0.0};
+  };
+
+  struct HandEyeQualityMetrics
+  {
+    double mean_corner_reproj_px{0.0};
+    std::vector<double> per_point_corner_reproj_px;
+    double mean_chain_translation_m{0.0};
+    std::vector<double> per_point_chain_translation_m;
+    double mean_chain_rotation_deg{0.0};
+    std::vector<double> per_point_chain_rotation_deg;
   };
 
   void declareAndLoadParameters();
@@ -51,6 +64,7 @@ private:
     const cv::Mat & frame_bgr, cv::Mat & annotated, std::vector<int> & detected_ids);
   bool detectTargetPoseInCamera(
     const cv::Mat & frame_bgr, cv::Mat & r_target_to_cam, cv::Mat & t_target_to_cam,
+    double & out_mean_corner_reproj_px,
     std::string & fail_reason, cv::Mat & annotated, std::vector<int> & detected_ids);
   cv::Mat convertImageToBgr(const sensor_msgs::msg::Image::ConstSharedPtr & msg) const;
 
@@ -61,6 +75,7 @@ private:
   static std::string nowString();
   static std::vector<double> mat44ToVec16(const cv::Mat & m);
   bool ensureTargetsPrepared();
+  void applyTargetPosesForCurrentArm();
   void publishStatus(const std::string & status);
   void publishLog(const std::string & text);
 
@@ -68,14 +83,15 @@ private:
   bool runCalibration();
   bool runEyeToHandCalibration(cv::Mat & t_cam_base);
   bool runEyeInHandCalibration(cv::Mat & t_cam_base, cv::Mat & t_cam_gripper);
-  std::vector<double> computePerPointErrors(
+  void computeHandEyeChainResiduals(
     const cv::Mat & t_cam_base,
     const cv::Mat & t_cam_gripper,
-    bool has_cam_gripper) const;
+    bool has_cam_gripper,
+    HandEyeQualityMetrics & out) const;
   bool saveResult(
     const cv::Mat & t_cam_base,
     const cv::Mat & t_base_cam,
-    const std::vector<double> & per_point_errors,
+    const HandEyeQualityMetrics & quality,
     const cv::Mat & t_cam_gripper,
     bool has_cam_gripper);
 
@@ -95,10 +111,14 @@ private:
   std::string robot_pose_topic_;
   std::string robot_state_topic_;
   std::string robot_target_topic_;
+  std::string nova_all_joints_reset_topic_;
   std::string output_dir_;
   std::vector<double> target_poses_flat_;
+  std::vector<double> target_poses_arm0_;
+  std::vector<double> target_poses_arm1_;
   bool use_current_pose_as_center_;
   std::vector<double> target_position_offsets_;
+  std::vector<double> target_orientation_offsets_rpy_deg_;
   bool use_known_target_mount_;
   std::vector<double> target_to_gripper_pose_;
   double marker_bbox_ratio_min_;
@@ -111,6 +131,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr arm_state_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr control_sub_;
   rclcpp::Publisher<calib_sim::msg::ArmPose>::SharedPtr target_pose_pub_;
+  rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr nova_all_joints_reset_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr log_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr result_text_pub_;

@@ -66,7 +66,7 @@
 
         <source id="aruco_normals">
           <float_array id="aruco_normals_array" count="3">
-            0 0 1
+            0 0 -1
           </float_array>
           <technique_common>
             <accessor source="#aruco_normals_array" count="1" stride="3">
@@ -77,12 +77,13 @@
           </technique_common>
         </source>
 
+        <!-- 相对标准 UV 绕纹理中心转 180°：(u,v)->(1-u,1-v)，配合法线 -Z 与绕序 -->
         <source id="aruco_uvs">
           <float_array id="aruco_uvs_array" count="8">
-            0 1
-            1 1
             1 0
             0 0
+            0 1
+            1 1
           </float_array>
           <technique_common>
             <accessor source="#aruco_uvs_array" count="4" stride="2">
@@ -100,8 +101,8 @@
           <input semantic="VERTEX" source="#aruco_vertices" offset="0"/>
           <input semantic="NORMAL" source="#aruco_normals" offset="1"/>
           <input semantic="TEXCOORD" source="#aruco_uvs" offset="2" set="0"/>
-          <!-- single front face only, avoid coplanar back-face z-fighting -->
-          <p>0 0 0 1 0 1 2 0 2 0 0 0 2 0 2 3 0 3</p>
+          <!-- 绕边翻面：法线 -Z，三角绕序与 +Z 时相反，从 +Z 看向平面可见贴图 -->
+          <p>0 0 0 2 0 2 1 0 1 0 0 0 3 0 3 2 0 2</p>
         </triangles>
       </mesh>
     </geometry>

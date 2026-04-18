@@ -106,6 +106,13 @@ def generate_launch_description():
         sigterm_timeout='2',
         sigkill_timeout='2',
     )
+    all_joints_reset_node = Node(
+        package='nova_sim',
+        executable='all_joints_reset_node',
+        output='screen',
+        sigterm_timeout='2',
+        sigkill_timeout='2',
+    )
     control_ui_process = Node(
         package='nova_sim',
         executable='nova_control_ui_qt',
@@ -115,7 +122,7 @@ def generate_launch_description():
     )
     start_control_tools = TimerAction(
         period=3.5,
-        actions=[moveit2_executor_node, bridge_node, control_ui_process],
+        actions=[moveit2_executor_node, bridge_node, all_joints_reset_node, control_ui_process],
     )
 
     return LaunchDescription([

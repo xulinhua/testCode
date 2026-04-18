@@ -26,7 +26,11 @@ struct CalibConfigData
   std::string output_dir{"calib_output"};
   bool use_current_pose_as_center{true};
   std::vector<double> target_poses;
+  /// 机械臂 1 专用轨迹（与 target_poses 同格式）；为空则回退为 target_poses
+  std::vector<double> target_poses_arm1;
   std::vector<double> target_position_offsets;
+  /// Degrees [roll,pitch,yaw] per waypoint; paired with target_position_offsets (same length). Applied as R_out = R_base * (Rz*Ry*Rx).
+  std::vector<double> target_orientation_offsets_rpy_deg;
   bool use_known_target_mount{true};
   std::vector<double> target_to_gripper_pose{0.0, -0.12, -0.01, 0.0, 0.0, 0.0, 1.0};
   double marker_bbox_ratio_min{0.012};
