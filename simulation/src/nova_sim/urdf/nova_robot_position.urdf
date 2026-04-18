@@ -1441,7 +1441,7 @@
   <!-- 与臂上板 1/2 同理：dae 法线 -Z；绕 X 转 π 使标记面朝上(+Z) -->
   <xacro:property name="aruco3_parent_link" value="base_link"/>
   <xacro:property name="aruco3_child_link" value="aruco_board_base_mid"/>
-  <xacro:property name="aruco3_cali_x" value="0.47"/>
+  <xacro:property name="aruco3_cali_x" value="0.42"/>
   <xacro:property name="aruco3_cali_y" value="-0.14"/>
   <xacro:property name="aruco3_cali_z" value="0.02"/>
   <xacro:property name="aruco3_cali_roll" value="3.141592653589793"/>
@@ -1452,8 +1452,8 @@
   <!-- 板4：base_link 固定，ID=1（aruco_board_1 / 6x6_1000-1）；略偏 J2 工作区 (y+)，与板3 分离，眼在手上 arm1 专用 -->
   <xacro:property name="aruco4_parent_link" value="base_link"/>
   <xacro:property name="aruco4_child_link" value="aruco_board_base_arm1"/>
-  <xacro:property name="aruco4_cali_x" value="0.55"/>
-  <xacro:property name="aruco4_cali_y" value="0.15"/>
+  <xacro:property name="aruco4_cali_x" value="0.65"/>
+  <xacro:property name="aruco4_cali_y" value="-0.14"/>
   <xacro:property name="aruco4_cali_z" value="0.02"/>
   <xacro:property name="aruco4_cali_roll" value="3.141592653589793"/>
   <xacro:property name="aruco4_cali_pitch" value="0.0"/>

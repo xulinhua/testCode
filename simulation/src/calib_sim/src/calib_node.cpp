@@ -22,6 +22,43 @@ namespace calib_sim
 
 namespace
 {
+const char * handEyeMethodName(cv::HandEyeCalibrationMethod m)
+{
+  switch (m) {
+    case cv::CALIB_HAND_EYE_TSAI:
+      return "TSAI";
+    case cv::CALIB_HAND_EYE_PARK:
+      return "PARK";
+    case cv::CALIB_HAND_EYE_HORAUD:
+      return "HORAUD";
+    case cv::CALIB_HAND_EYE_ANDREFF:
+      return "ANDREFF";
+    case cv::CALIB_HAND_EYE_DANIILIDIS:
+      return "DANIILIDIS";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+bool handEyeTransformUsable(const cv::Mat & r3, const cv::Mat & t3)
+{
+  if (r3.rows != 3 || r3.cols != 3 || t3.rows != 3 || t3.cols != 1) {
+    return false;
+  }
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      const double v = r3.at<double>(i, j);
+      if (!std::isfinite(v)) {
+        return false;
+      }
+    }
+    if (!std::isfinite(t3.at<double>(i, 0))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 constexpr int kPoseDims = 7;
 /// 与 cv::flip 的 flipCode 区分：不对输入图做翻转
 constexpr int kArucoNoInputFlip = -1000;
@@ -189,10 +226,11 @@ bool getUrdfReferenceTcamBaseForArm(int arm_id, cv::Mat & t_cam_base_ref)
   return false;
 }
 
-/// 眼在手上：OpenCV calibrateHandEye 输出 P_gripper = T * P_cam（cam = camera*_optical_frame，与 PnP 一致）。
-/// URDF nova_robot_position.urdf：camera1/camera2_joint 同为 parent=J*_6, xyz 0,-0.08,0.041, rpy 0,-1.57,1.5708；
-/// camera*_optical_joint：rpy -1.57079632679,0,-1.57079632679。R_ref=Rz*Ry*Rx 与关节 rpy 一致。
-/// ^{J}T_{opt} = ^{J}T_{link} * ^{link}T_{opt}，且 P_J = ^{J}T_{opt} P_opt，故 T_cam_gripper_ref = ^{J}T_{opt}（勿用逆）。
+/// 眼在手上：OpenCV solvePnP / calibrateHandEye 的「相机」轴与常用光学系一致（Z 前向等），
+/// 与 URDF 的 camera*_optical_frame 对齐；与 Gazebo RGB 的 frame_id=camera*_link 仅差固定关节
+/// camera*_optical_joint，不可用 ^{J}T_{link} 作参考（会与解差约 120°）。
+/// URDF：camera*_joint + camera*_optical_joint 复合得 ^{J}T_{opt}；R_joint=Rz*Ry*Rx。
+/// P_gripper = ^{gripper}T_{cam} P_cam，故 T_cam_gripper_ref = ^{J}T_{opt}。
 bool getUrdfReferenceTcamGripperForEyeInHand(int arm_id, cv::Mat & t_cam_gripper_ref)
 {
   if (arm_id == 0) {
@@ -207,8 +245,7 @@ bool getUrdfReferenceTcamGripperForEyeInHand(int arm_id, cv::Mat & t_cam_gripper
     return true;
   }
   if (arm_id == 1) {
-    // arm1: J2_6 -> camera2_optical_frame
-    // 目前与 arm0 相同；保留独立分支便于未来仅修改 arm1 安装位。
+    // arm1: J2_6 -> camera2_optical_frame（与 arm0 安装相同）
     const std::array<double, 16> t_arm1 = {
       0.9999999999932537, -3.673203938690185e-06, -2.929967908670559e-09, 0.0,
       3.673205107245858e-06, 0.9999996829250922, 0.0007963267058312859, -0.08,
@@ -1189,6 +1226,19 @@ bool CalibNode::detectTargetPoseInCamera(
     }
   }
 
+  if (found_index >= 0 && ids.size() > 1U) {
+    std::ostringstream multi_ss;
+    multi_ss << "detect_diag multi_marker using_id=" << marker_id_ << " raw_ids=[";
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+      if (i > 0U) {
+        multi_ss << ",";
+      }
+      multi_ss << ids[i];
+    }
+    multi_ss << "] (pnp uses target id only)";
+    publishLog(multi_ss.str());
+  }
+
   detected_ids = ids;
   if (found_index < 0) {
     if (ids.empty()) {
@@ -1215,21 +1265,17 @@ bool CalibNode::detectTargetPoseInCamera(
     return false;
   }
 
-  if (!ids.empty()) {
-    for (std::size_t i = 0; i < corners.size(); ++i) {
-      const auto & c = corners[i];
-      if (c.size() == 4U) {
-        cv::line(annotated, c[0], c[1], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-        cv::line(annotated, c[1], c[2], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-        cv::line(annotated, c[2], c[3], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-        cv::line(annotated, c[3], c[0], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-        cv::circle(annotated, c[0], 3, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
-      }
-      if (i < ids.size()) {
-        cv::putText(
-          annotated, std::to_string(ids[i]), c[0] + cv::Point2f(2.0F, -6.0F),
-          cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-      }
+  if (found_index >= 0 && static_cast<std::size_t>(found_index) < corners.size()) {
+    const auto & c = corners[static_cast<std::size_t>(found_index)];
+    if (c.size() == 4U) {
+      cv::line(annotated, c[0], c[1], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+      cv::line(annotated, c[1], c[2], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+      cv::line(annotated, c[2], c[3], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+      cv::line(annotated, c[3], c[0], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+      cv::circle(annotated, c[0], 3, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
+      cv::putText(
+        annotated, std::to_string(marker_id_), c[0] + cv::Point2f(2.0F, -6.0F),
+        cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
     }
   }
 
@@ -1333,6 +1379,8 @@ bool CalibNode::detectTargetPoseInCamera(
   t_target_to_cam = tvec.clone();
   out_mean_corner_reproj_px = reproj_err_px;
   fail_reason = "ok";
+  detected_ids.clear();
+  detected_ids.push_back(marker_id_);
   return true;
 }
 
@@ -1712,7 +1760,8 @@ bool CalibNode::runEyeInHandCalibration(cv::Mat & t_cam_base, cv::Mat & t_cam_gr
   }
 
   auto solve_with_indices = [&](const std::vector<int> & indices, cv::Mat & out_t_cam_gripper,
-                           std::vector<double> * out_trans_errs_m) -> bool {
+                           std::vector<double> * out_trans_errs_m,
+                           cv::HandEyeCalibrationMethod method) -> bool {
       if (indices.size() < 3U) {
         return false;
       }
@@ -1735,7 +1784,10 @@ bool CalibNode::runEyeInHandCalibration(cv::Mat & t_cam_base, cv::Mat & t_cam_gr
       cv::Mat r_cam_gripper, t_cam_gripper_v;
       cv::calibrateHandEye(
         r_gripper_to_base, t_gripper_to_base, r_target_to_cam, t_target_to_cam,
-        r_cam_gripper, t_cam_gripper_v, cv::CALIB_HAND_EYE_PARK);
+        r_cam_gripper, t_cam_gripper_v, method);
+      if (!handEyeTransformUsable(r_cam_gripper, t_cam_gripper_v)) {
+        return false;
+      }
       out_t_cam_gripper = makeTransform(r_cam_gripper, t_cam_gripper_v);
 
       if (!out_trans_errs_m) {
@@ -1761,7 +1813,8 @@ bool CalibNode::runEyeInHandCalibration(cv::Mat & t_cam_base, cv::Mat & t_cam_gr
 
   cv::Mat robust_t_cam_gripper;
   std::vector<double> per_errs_m;
-  if (!solve_with_indices(active_indices, robust_t_cam_gripper, &per_errs_m)) {
+  constexpr cv::HandEyeCalibrationMethod kRobustMethod = cv::CALIB_HAND_EYE_PARK;
+  if (!solve_with_indices(active_indices, robust_t_cam_gripper, &per_errs_m, kRobustMethod)) {
     return false;
   }
   // 轻量稳健：最多剔除 2 个明显离群点，避免单点误匹配把平移解拉偏（尤其 arm0）。
@@ -1793,11 +1846,39 @@ bool CalibNode::runEyeInHandCalibration(cv::Mat & t_cam_base, cv::Mat & t_cam_gr
           << " trans_err_mm=" << (worst_err * 1000.0);
       publishLog(oss.str());
     }
-    if (!solve_with_indices(active_indices, robust_t_cam_gripper, &per_errs_m)) {
+    if (!solve_with_indices(active_indices, robust_t_cam_gripper, &per_errs_m, kRobustMethod)) {
       return false;
     }
   }
-  t_cam_gripper = robust_t_cam_gripper;
+
+  static const cv::HandEyeCalibrationMethod kMethodCandidates[] = {
+    cv::CALIB_HAND_EYE_PARK,
+    cv::CALIB_HAND_EYE_ANDREFF,
+    cv::CALIB_HAND_EYE_DANIILIDIS,
+    cv::CALIB_HAND_EYE_HORAUD,
+    cv::CALIB_HAND_EYE_TSAI,
+  };
+  cv::Mat best_t_cam_gripper = robust_t_cam_gripper;
+  cv::HandEyeCalibrationMethod best_method = kRobustMethod;
+  double best_mean_m = std::numeric_limits<double>::infinity();
+  for (cv::HandEyeCalibrationMethod method : kMethodCandidates) {
+    cv::Mat t_try;
+    std::vector<double> errs_m;
+    if (!solve_with_indices(active_indices, t_try, &errs_m, method) || errs_m.empty()) {
+      continue;
+    }
+    double sum = 0.0;
+    for (double e : errs_m) {
+      sum += e;
+    }
+    const double mean_m = sum / static_cast<double>(errs_m.size());
+    if (mean_m < best_mean_m) {
+      best_mean_m = mean_m;
+      best_t_cam_gripper = t_try;
+      best_method = method;
+    }
+  }
+  t_cam_gripper = best_t_cam_gripper;
   {
     cv::Mat r_cam_gripper, t_cam_gripper_v;
     splitTransform(t_cam_gripper, r_cam_gripper, t_cam_gripper_v);
@@ -1810,7 +1891,11 @@ bool CalibNode::runEyeInHandCalibration(cv::Mat & t_cam_base, cv::Mat & t_cam_gr
         "PnP convention");
       publishLog("[WARN] hand_eye_degenerate_T_cam_gripper_near_identity");
     } else {
-      publishLog("hand_eye_solver=PARK");
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(3)
+          << "hand_eye_solver=" << handEyeMethodName(best_method)
+          << " mean_chain_trans_mm=" << (best_mean_m * 1000.0);
+      publishLog(oss.str());
     }
   }
 
@@ -2035,7 +2120,9 @@ bool CalibNode::saveResult(
     const double trans_err_mm = trans_err * 1000.0;
     const double rot_err_deg = rotationAngleRadBetween(r_est, r_ref) * kRad2Deg;
     oss << std::fixed << std::setprecision(3);
-    oss << "\nT_cam_gripper_urdf_ref (eye_in_hand, vs J" << arm_id_ + 1 << "_6 chain):\n"
+    oss << "\nT_cam_gripper_urdf_ref (eye_in_hand, URDF "
+        << (arm_id_ == 1 ? "camera2_optical_frame" : "camera1_optical_frame") << " vs J"
+        << arm_id_ + 1 << "_6; matches OpenCV cam axes, not RGB frame_id link):\n"
         << formatMat4(t_cam_gripper_ref)
         << "\nT_cam_gripper_vs_urdf_translation_error_mm: " << trans_err_mm
         << "\nT_cam_gripper_vs_urdf_rotation_error_deg: " << std::setprecision(4) << rot_err_deg;
