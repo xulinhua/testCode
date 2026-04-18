@@ -328,17 +328,24 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   result_view->setMinimumHeight(220);
   result_view->setPlainText("等待标定结果...");
 
-  auto * img_group = new QGroupBox("图像区域");
-  auto * img_row = new QHBoxLayout(img_group);
+  auto * img_row = new QHBoxLayout();
   img_row->setSpacing(10);
+  auto * raw_group = new QGroupBox(QString::fromUtf8("原始图像"));
+  auto * raw_box_layout = new QVBoxLayout(raw_group);
+  raw_box_layout->setContentsMargins(8, 8, 8, 8);
+  auto * res_group = new QGroupBox(QString::fromUtf8("检测结果"));
+  auto * res_box_layout = new QVBoxLayout(res_group);
+  res_box_layout->setContentsMargins(8, 8, 8, 8);
   auto * raw_label = new ZoomableImageLabel("RAW");
   auto * res_label = new ZoomableImageLabel("RESULT");
   raw_label->setMinimumSize(480, 320);
   res_label->setMinimumSize(480, 320);
   raw_label->setStyleSheet("background:black;color:white;");
   res_label->setStyleSheet("background:black;color:white;");
-  img_row->addWidget(raw_label);
-  img_row->addWidget(res_label);
+  raw_box_layout->addWidget(raw_label);
+  res_box_layout->addWidget(res_label);
+  img_row->addWidget(raw_group, 1);
+  img_row->addWidget(res_group, 1);
 
   auto * log_group = new QGroupBox("日志");
   auto * log_layout = new QVBoxLayout(log_group);
@@ -400,7 +407,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
 
   root->addWidget(status_label);
   root->addWidget(reach_label);
-  root->addWidget(img_group);
+  root->addLayout(img_row);
   root->addLayout(bottom_row);
   win.setCentralWidget(central);
   win.resize(1100, 780);

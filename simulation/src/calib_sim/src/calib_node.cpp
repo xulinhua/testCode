@@ -211,14 +211,15 @@ double rotationAngleRadBetween(const cv::Mat & r1, const cv::Mat & r2)
 
 bool getUrdfReferenceTcamBaseForArm(int arm_id, cv::Mat & t_cam_base_ref)
 {
-  // base_link -> camera0_optical_frame（nova_robot_position.urdf，龙门架固定相机）
-  // 仅眼在手外：与标定输出的 T_cam_base 对比。
+  // ^{base}T_{cam}：p_base = T * p_cam（与 tryFillGripperPoseFromTf / TF 约定一致）
+  // 数值与运行中 `tf2_echo base_link camera0_optical_frame` 对齐（龙门固定 camera0）。
+  // 旧版平移 X 与 TF 反号会导致 vs_urdf 误报约 1 m。
   if (arm_id == 0 || arm_id == 1) {
     const std::array<double, 16> t = {
-       0.999998,  0.001589, -0.000796, -0.528377,
-       0.001589, -0.999999, -0.000001, -0.500299,
-      -0.000796, -0.000001, -1.000000,  1.040421,
-       0.000000,  0.000000,  0.000000, 1.000000
+       1.000000,  0.002000, -0.001000,  0.530000,
+       0.002000, -1.000000, -0.000000, -0.499000,
+      -0.001000, -0.000000, -1.000000,  1.040000,
+       0.000000,  0.000000,  0.000000,  1.000000
     };
     t_cam_base_ref = vec16ToMat44(t);
     return true;
@@ -1637,12 +1638,13 @@ bool CalibNode::runEyeToHandCalibration(cv::Mat & t_cam_base)
         std::vector<cv::Mat> t_c_b_all;
         t_c_b_all.reserve(samples_.size());
         for (const auto & s : samples_) {
-          // arm pose topic provides base->gripper, convert to gripper->base for this chain.
-          const cv::Mat t_b_g = makeTransform(s.r_gripper_to_base, s.t_gripper_to_base);
-          const cv::Mat t_g_b = invertTransform(t_b_g);
-          // solvePnP/aruco gives target->camera (i.e. T_cam_target) directly.
+          // Sample fields are T_gripper_to_base (p_base = T_g_b * p_gripper).
+          // PnP gives T_target_to_cam (p_cam = T_t_c * p_target).
+          // Board on gripper: p_base = T_g_b * T_target_to_gripper * p_target = T_cam_base * T_t_c * p_target
+          // => T_cam_base = T_g_b * T_target_to_gripper * inv(T_t_c).
+          const cv::Mat t_gripper_to_base = makeTransform(s.r_gripper_to_base, s.t_gripper_to_base);
           const cv::Mat t_c_t = makeTransform(s.r_target_to_cam, s.t_target_to_cam);
-          const cv::Mat t_c_b_i = t_c_t * t_t_g_4 * t_g_b;
+          const cv::Mat t_c_b_i = t_gripper_to_base * t_t_g_4 * invertTransform(t_c_t);
           cv::Mat r_i, t_i;
           splitTransform(t_c_b_i, r_i, t_i);
           r_sum += r_i;
