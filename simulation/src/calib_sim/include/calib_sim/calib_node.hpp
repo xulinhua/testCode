@@ -1,6 +1,9 @@
 #ifndef CALIB_SIM__CALIB_NODE_HPP_
 #define CALIB_SIM__CALIB_NODE_HPP_
 
+// 手眼标定核心节点：订阅相机图、机械臂位姿与到位状态，采集多组样本后调用 OpenCV 手眼算法，
+// 输出 T_cam_base / T_cam_gripper 等并写入 YAML；支持眼在手外、眼在手上及 unified 多模式切换。
+
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
@@ -25,6 +28,7 @@
 namespace calib_sim
 {
 
+/// ROS2 节点：ArUco 检测 + TF/话题位姿 + 手眼求解 + 结果发布（供 Qt/OpenCV UI 显示）。
 class CalibNode : public rclcpp::Node
 {
 public:
@@ -40,6 +44,7 @@ public:
   void initAfterSharedPtr(const std::shared_ptr<CalibNode> & self);
 
 private:
+  /// 单次采样：末端相对基座、标靶相对相机，及该帧角点重投影误差（像素）。
   struct Sample
   {
     cv::Mat r_gripper_to_base;
@@ -50,6 +55,7 @@ private:
     double mean_corner_reproj_px{0.0};
   };
 
+  /// 标定质量汇总：重投影、手眼链平移/旋转残差（均值与逐点）。
   struct HandEyeQualityMetrics
   {
     double mean_corner_reproj_px{0.0};

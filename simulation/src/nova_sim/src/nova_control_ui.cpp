@@ -1,3 +1,4 @@
+// 终端交互式 nova 控制：关节、笛卡尔目标、夹爪命令行发布（无 GUI）。
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -19,6 +20,7 @@ const std::vector<std::string> kJointOrder = {
   "J4_1_joint", "J4_2_joint", "J4_3_joint", "J4_4_joint", "J4_5_joint", "J4_6_joint"};
 }  // namespace
 
+/// 简单 CLI：向 /arm_controller/commands、/nova_arm_id、/nova_target_pose、/nova_gripper_goal 发消息。
 class NovaControlUiCpp : public rclcpp::Node
 {
 public:

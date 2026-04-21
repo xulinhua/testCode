@@ -1,5 +1,7 @@
 #pragma once
 
+// MoveIt2 IK 执行器：订阅目标位姿与夹爪命令，调用 /compute_ik，向 /arm_controller/commands 发布关节指令。
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -14,6 +16,7 @@
 #include "std_msgs/msg/int32.hpp"
 #include "std_msgs/msg/string.hpp"
 
+/// 多臂 nova：arm_id 选择 planning group，IK 种子来自当前 /joint_states。
 class MoveIt2ArmExecutorCpp : public rclcpp::Node
 {
 public:

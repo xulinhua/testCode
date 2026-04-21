@@ -1,3 +1,4 @@
+// MoveIt2ArmExecutorCpp：GetPositionIK 请求构造、关节顺序与夹爪开合阈值。
 #include "nova_sim/moveit2_arm_executor.hpp"
 
 #include <chrono>
@@ -13,7 +14,7 @@ using namespace std::chrono_literals;
 MoveIt2ArmExecutorCpp::MoveIt2ArmExecutorCpp()
 : Node("moveit2_arm_executor_cpp"), arm_id_(0)
 {
-  // Match current nova_moveit_config SRDF groups.
+  // 与当前 nova_moveit_config 中 SRDF 的 group / 末端 link 命名保持一致。
   arm_groups_ = {{0, "l_arm"}, {1, "r_arm"}, {2, "j3_arm"}, {3, "j4_arm"}};
   ee_links_ = {{0, "J1_6"}, {1, "J2_6"}, {2, "J3_6"}, {3, "J4_6"}};
   arm_prefix_ = {{0, "J1_"}, {1, "J2_"}, {2, "J3_"}, {3, "J4_"}};

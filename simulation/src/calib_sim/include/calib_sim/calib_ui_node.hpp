@@ -1,6 +1,8 @@
 #ifndef CALIB_SIM__CALIB_UI_NODE_HPP_
 #define CALIB_SIM__CALIB_UI_NODE_HPP_
 
+// 轻量 OpenCV 高窗 UI：订阅标定状态与原始/结果图，定时刷新显示（无 Qt 依赖）。
+
 #include <opencv2/core.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -11,6 +13,7 @@
 namespace calib_sim
 {
 
+/// OpenCV 窗口 UI 节点：参数指定 status/raw/result 话题与窗口名。
 class CalibSimUiNode : public rclcpp::Node
 {
 public:

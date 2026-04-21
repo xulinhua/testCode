@@ -1,3 +1,4 @@
+// CalibSimUiNode：订阅图像与状态字符串，定时 imshow 刷新。
 #include "calib_sim/calib_ui_node.hpp"
 
 #include <chrono>

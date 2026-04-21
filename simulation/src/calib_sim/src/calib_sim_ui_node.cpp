@@ -1,3 +1,4 @@
+// OpenCV 高窗 UI 入口：从 share/calib_sim/config/ui.yaml 读订阅话题名。
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "calib_sim/calib_ui_node.hpp"
 #include "rclcpp/rclcpp.hpp"

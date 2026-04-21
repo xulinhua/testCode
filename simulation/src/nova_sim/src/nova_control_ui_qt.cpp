@@ -1,3 +1,4 @@
+// Qt 图形界面：多臂关节滑动条、位姿输入、夹爪与 IK 调用（与 moveit2_arm_executor 协同）。
 #include <memory>
 #include <atomic>
 #include <chrono>

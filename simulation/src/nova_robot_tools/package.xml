@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypen="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>nova_robot_tools</name>
+  <version>1.0.0</version>
+  <description>ROS2 机器人辅助工具集 - 参考 calib_sim 架构</description>
+  
+  <maintainer email="developer@example.com">Nova Robot Team</maintainer>
+  <license>MIT</license>
+  
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  
+  <depend>rclcpp</depend>
+  <depend>kdl-parser</depend>
+  <depend>liborocos-kdl-dev</depend>
+  <depend>tf2</depend>
+  <depend>tf2-geometry-msgs</depend>
+  <depend>urdf</depend>
+  
+  <depend>qtbase5-dev</depend>
+  <depend>libqt5-core</depend>
+  <depend>libqt5-widgets</depend>
+  <depend>libopencv-dev</depend>
+  <depend>libyaml-cpp-dev</depend>
+  
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

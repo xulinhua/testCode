@@ -1,3 +1,4 @@
+// calib_node 实现：ArUco 位姿估计、手眼样本采集、OpenCV calibrateHandEye、质量指标与结果落盘。
 #include "calib_sim/calib_node.hpp"
 
 #include <opencv2/imgproc.hpp>
@@ -20,6 +21,7 @@
 namespace calib_sim
 {
 
+// 匿名命名空间：手眼算法枚举名、网格/姿态小工具、Aruco 翻转后角点坐标还原等。
 namespace
 {
 const char * handEyeMethodName(cv::HandEyeCalibrationMethod m)
@@ -260,6 +262,7 @@ bool getUrdfReferenceTcamGripperForEyeInHand(int arm_id, cv::Mat & t_cam_gripper
 }
 }
 
+// ---------- CalibNode：构造与参数 ----------
 CalibNode::CalibNode(
   const std::string & node_name, bool eye_in_hand, const rclcpp::NodeOptions & options)
 : Node(node_name, options),
@@ -313,6 +316,7 @@ CalibNode::CalibNode(
     eye_in_hand_ ? "eye_in_hand" : "eye_to_hand", arm_id_);
 }
 
+// 统一标定入口：配合 calib_unified.yaml，界面可切换 eth0/eth1/eih0/eih1。
 CalibNode::CalibNode(const std::string & node_name, const rclcpp::NodeOptions & options)
 : Node(node_name, options),
   unified_mode_(true),
@@ -969,6 +973,7 @@ bool CalibNode::ensureTargetsPrepared()
   return true;
 }
 
+// ---------- 图像回调、采样与 ArUco 检测 ----------
 void CalibNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
 {
   raw_image_pub_->publish(*msg);
@@ -1472,6 +1477,7 @@ void CalibNode::publishTargetPose(std::size_t idx)
   publishLog(oss.str());
 }
 
+// ---------- 手眼求解、质量评估与结果保存 ----------
 bool CalibNode::runCalibration()
 {
   if (static_cast<int>(samples_.size()) < min_samples_) {

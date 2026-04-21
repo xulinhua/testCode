@@ -1,5 +1,7 @@
 #pragma once
 
+// 与 nova_sim/moveit2_arm_executor.hpp 相同逻辑的头文件副本（供 nova_test 包包含路径使用）。
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -14,6 +16,7 @@
 #include "std_msgs/msg/int32.hpp"
 #include "std_msgs/msg/string.hpp"
 
+/// 多臂 nova：arm_id 选择 planning group，IK 种子来自当前 /joint_states。
 class MoveIt2ArmExecutorCpp : public rclcpp::Node
 {
 public:

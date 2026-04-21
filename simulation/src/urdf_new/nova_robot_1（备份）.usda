@@ -7,8 +7,8 @@
                 double radius = 5
             }
             dictionary Perspective = {
-                double3 position = (1.6173936903725572, 1.3462276841133, 1.5083136166223021)
-                double3 target = (0.1267486816173915, -0.14441732464186519, 0.017668643446194787)
+                double3 position = (1.8172483535351285, 1.2182493914402752, 1.4364372444171916)
+                double3 target = (0.3266033447799628, -0.2723956173148905, -0.054207728758915996)
             }
             dictionary Right = {
                 double3 position = (0, -5, 0)
@@ -21,7 +21,7 @@
             string boundCamera = "/OmniverseKit_Persp"
         }
         dictionary omni_layer = {
-            string authoring_layer = "./nova_robot_1.usda"
+            string authoring_layer = "./nova_robot_1（备份）.usda"
             dictionary locked = {
             }
             dictionary muteness = {
@@ -30,7 +30,7 @@
         dictionary renderSettings = {
         }
     }
-    defaultPrim = "World"
+    defaultPrim = "nova_robot"
     endTimeCode = 1000000
     metersPerUnit = 1
     startTimeCode = 0
@@ -999,5 +999,58 @@ def PhysicsScene "physicsScene" (
     prepend apiSchemas = ["PhysxSceneAPI"]
 )
 {
+}
+
+def Xform "nova_robot" (
+    variants = {
+        string Physics = "PhysX"
+        string Robot = "Robot"
+        string Sensor = "Sensors"
+    }
+    prepend variantSets = ["Physics", "Sensor", "Robot"]
+)
+{
+    over "root_joint"
+    {
+        point3f physics:localPos1 = (0, 0, 0)
+        quatf physics:localRot1 = (1, 0, 0, 0)
+    }
+    variantSet "Physics" = {
+        "None" (
+            prepend references = @configuration/nova_robot_1（备份）_base.usd@
+        ) {
+            over "joints" (
+                active = false
+            )
+            {
+            }
+
+        }
+        "PhysX" (
+            prepend payload = @configuration/nova_robot_1（备份）_physics.usd@
+        ) {
+
+        }
+    }
+    variantSet "Sensor" = {
+        "None" {
+
+        }
+        "Sensors" (
+            prepend payload = @configuration/nova_robot_1（备份）_sensor.usd@
+        ) {
+
+        }
+    }
+    variantSet "Robot" = {
+        "None" {
+
+        }
+        "Robot" (
+            prepend payload = @configuration/nova_robot_1（备份）_robot.usd@
+        ) {
+
+        }
+    }
 }
 

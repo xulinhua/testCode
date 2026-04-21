@@ -1,3 +1,4 @@
+// 仅启动 Qt UI + CalibQtUiRosNode（标定节点需另行启动或由 launch 组合）。
 #include <thread>
 #include "calib_sim/calib_qt_ui.hpp"
 #include "rclcpp/rclcpp.hpp"

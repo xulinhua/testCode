@@ -1,6 +1,8 @@
 #ifndef CALIB_SIM__CONFIG_DATA_MANAGER_HPP_
 #define CALIB_SIM__CONFIG_DATA_MANAGER_HPP_
 
+// 从 ROS 参数加载标定配置（话题名、ArUco 参数、采样轨迹、TF 帧名等），供 CalibNode 使用。
+
 #include <rclcpp/rclcpp.hpp>
 
 #include <string>
@@ -9,6 +11,7 @@
 namespace calib_sim
 {
 
+/// 单套标定流程使用的可序列化配置（话题、ArUco、轨迹、TF 帧、超时等）。
 struct CalibConfigData
 {
   int arm_id{0};

@@ -1,3 +1,4 @@
+// Qt 标定主窗口：图像缩放/平移、模式切换、命令下发与日志展示；RunCalibQtUiApp 为入口。
 #include "calib_sim/calib_qt_ui.hpp"
 
 #include <atomic>

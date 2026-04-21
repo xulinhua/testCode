@@ -1,3 +1,4 @@
+// moveit2_arm_executor 节点入口：单线程 spin。
 #include <memory>
 
 #include "rclcpp/rclcpp.hpp"

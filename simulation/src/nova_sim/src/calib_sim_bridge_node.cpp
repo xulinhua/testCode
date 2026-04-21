@@ -1,3 +1,4 @@
+// 仿真桥：将 calib_sim 的 ArmPose 目标转为 nova 的 PoseStamped + arm_id，并反馈位姿/到位/误差。
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -18,6 +19,7 @@
 
 #include "calib_sim/msg/arm_pose.hpp"
 
+/// 连接标定节点与 nova_sim 执行器：定时发布当前末端位姿（TF 或内部状态）及到达判定。
 class CalibSimBridgeNode : public rclcpp::Node
 {
 public:

@@ -1,3 +1,4 @@
+// 声明/读取标定相关 ROS 参数，并组装 CalibConfigData（含 unified 前缀加载）。
 #include "calib_sim/config_data_manager.hpp"
 
 #include <stdexcept>

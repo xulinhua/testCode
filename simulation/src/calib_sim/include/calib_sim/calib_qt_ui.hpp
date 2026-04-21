@@ -1,6 +1,8 @@
 #ifndef CALIB_SIM__CALIB_QT_UI_HPP_
 #define CALIB_SIM__CALIB_QT_UI_HPP_
 
+// Qt 标定界面：订阅图像与日志，向标定节点发送控制字符串；与 CalibQtUiRosNode 配合。
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,6 +14,7 @@
 namespace calib_sim
 {
 
+/// 供 Qt 线程安全读写的 ROS 侧：订阅标定状态/图像，发布控制字符串。
 class CalibQtUiRosNode : public rclcpp::Node
 {
 public:

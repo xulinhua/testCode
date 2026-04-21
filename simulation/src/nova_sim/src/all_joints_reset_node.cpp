@@ -1,3 +1,4 @@
+// 订阅 Empty 触发：向 /arm_controller/commands 发布全零向量，用于仿真中一键回零。
 #include <memory>
 
 #include "rclcpp/rclcpp.hpp"

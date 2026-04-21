@@ -4,8 +4,8 @@
 #include "rclcpp/executors/multi_threaded_executor.hpp"
 #include <thread>
 
-/// 统一标定节点 + Qt：眼在手外(eth0/eth1) 与眼在手上(eih0/eih1) 通过界面下拉框 set_mode 切换，
-/// 参数见 share/calib_sim/config/calib_unified.yaml。
+// 主程序：统一标定节点 + Qt 界面；眼在手外(eth0/eth1) 与眼在手上(eih0/eih1) 通过下拉框 set_mode 切换，
+// 默认加载 share/calib_sim/config/calib_unified.yaml。
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
