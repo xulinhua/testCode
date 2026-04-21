@@ -333,6 +333,8 @@ CalibNode::CalibNode(
   waiting_arm_reached_(false),
   waiting_capture_(false),
   finished_(false),
+  arm_reach_retry_count_(0),
+  arm_reach_retry_max_(1),
   auto_mode_(true),
   pending_step_(false),
   last_detect_fail_reason_("none"),
@@ -410,6 +412,8 @@ CalibNode::CalibNode(const std::string & node_name, const rclcpp::NodeOptions & 
   waiting_arm_reached_(false),
   waiting_capture_(false),
   finished_(false),
+  arm_reach_retry_count_(0),
+  arm_reach_retry_max_(1),
   auto_mode_(true),
   pending_step_(false),
   last_detect_fail_reason_("none"),
@@ -1070,6 +1074,7 @@ void CalibNode::controlTimerCallback()
     }
     target_sent_time_ = now();
     waiting_arm_reached_ = true;
+    arm_reach_retry_count_ = 0;
     reach_settle_armed_ = false;
     reach_log_joint_latched_ = false;
     reach_log_pose_latched_ = false;
@@ -1194,6 +1199,26 @@ void CalibNode::controlTimerCallback()
       waiting_init_pose_ = false;
       publishStatus("initialized_wait_step_timeout");
     } else {
+      if (arm_reach_retry_count_ < arm_reach_retry_max_) {
+        const int retry_no = arm_reach_retry_count_ + 1;
+        if (publishTargetPose(target_index_)) {
+          arm_reach_retry_count_ = retry_no;
+          target_sent_time_ = now();
+          waiting_arm_reached_ = true;
+          waiting_capture_ = false;
+          reach_settle_armed_ = false;
+          reach_log_joint_latched_ = false;
+          reach_log_pose_latched_ = false;
+          std::ostringstream retry_oss;
+          retry_oss << "[WARN] arm_reach_timeout_retry_target_" << target_index_
+                    << " retry=" << retry_no << "/" << arm_reach_retry_max_
+                    << " arm_wait_elapsed_sec=" << std::fixed << std::setprecision(2) << arm_wait_elapsed
+                    << " budget_sec=" << arm_reach_budget;
+          publishStatus(retry_oss.str());
+          publishLog(retry_oss.str());
+          return;
+        }
+      }
       waiting_capture_ = false;
       std::ostringstream oss;
       std::ostringstream target_pose_ss;
@@ -1231,6 +1256,7 @@ void CalibNode::controlTimerCallback()
       publishStatus(oss.str());
       publishLog(oss.str());
       ++target_index_;
+      arm_reach_retry_count_ = 0;
       if (pending_step_) {
         pending_step_ = false;
       }
@@ -1246,6 +1272,7 @@ void CalibNode::controlTimerCallback()
         << " detect_fail_reason=" << last_detect_fail_reason_;
     publishStatus(oss.str());
     ++target_index_;
+    arm_reach_retry_count_ = 0;
     if (pending_step_) {
       pending_step_ = false;
     }
@@ -1276,6 +1303,7 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
     waiting_arm_reached_ = false;
     waiting_capture_ = false;
     finished_ = false;
+    arm_reach_retry_count_ = 0;
     waiting_init_pose_ = false;
     last_status_text_.clear();
     reach_settle_armed_ = false;
@@ -1342,44 +1370,42 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
         "cmd:init burst reset n=" + std::to_string(init_reset_burst_count_) + " topic=" +
         nova_all_joints_reset_topic_);
     }
-    republishLastCameraImagesToUi();
-    const auto it = initial_pose_by_arm_.find(arm_id_);
-    if (it != initial_pose_by_arm_.end()) {
-      init_pose_pending_ = it->second;
-      init_pose_pending_.arm_id = arm_id_;
-    } else if (use_tf_for_sample_pose_ && tf_buffer_) {
-      const std::string & ee = (arm_id_ == 1) ? tf_ee_frame_arm1_ : tf_ee_frame_arm0_;
-      try {
-        const auto tf_msg = tf_buffer_->lookupTransform(tf_base_frame_, ee, tf2::TimePointZero);
-        init_pose_pending_.arm_id = arm_id_;
-        init_pose_pending_.pose.header.stamp = now();
-        init_pose_pending_.pose.header.frame_id = tf_base_frame_;
-        init_pose_pending_.pose.pose.position.x = tf_msg.transform.translation.x;
-        init_pose_pending_.pose.pose.position.y = tf_msg.transform.translation.y;
-        init_pose_pending_.pose.pose.position.z = tf_msg.transform.translation.z;
-        init_pose_pending_.pose.pose.orientation = tf_msg.transform.rotation;
-        publishLog("cmd:init no saved initial pose, fallback to current TF pose");
-      } catch (const tf2::TransformException & ex) {
-        publishStatus("init_failed_no_initial_pose");
-        publishLog(std::string("cmd:init no_initial_pose_and_tf_failed: ") + ex.what());
-        return;
+    // Explicitly send a full zero joint command so all joints return to zero pose.
+    if (joint_command_pub_) {
+      sensor_msgs::msg::JointState zero_cmd;
+      zero_cmd.header.stamp = now();
+      if (has_joint_state_ && !last_joint_state_.name.empty()) {
+        zero_cmd.name = last_joint_state_.name;
+      } else {
+        // Fallback when joint_states is not ready yet.
+        zero_cmd.name = {
+          "J1_1_joint", "J1_2_joint", "J1_3_joint", "J1_4_joint", "J1_5_joint", "J1_6_joint",
+          "J1_7_joint", "J1_8_joint",
+          "J2_1_joint", "J2_2_joint", "J2_3_joint", "J2_4_joint", "J2_5_joint", "J2_6_joint",
+          "J2_7_joint", "J2_8_joint",
+          "J3_1_joint", "J3_2_joint", "J3_3_joint", "J3_4_joint", "J3_5_joint", "J3_6_joint",
+          "J4_1_joint", "J4_2_joint", "J4_3_joint", "J4_4_joint", "J4_5_joint", "J4_6_joint"
+        };
       }
+      zero_cmd.position.assign(zero_cmd.name.size(), 0.0);
+      for (int i = 0; i < init_reset_burst_count_; ++i) {
+        zero_cmd.header.stamp = now();
+        joint_command_pub_->publish(zero_cmd);
+      }
+      last_target_joint_command_ = zero_cmd;
+      has_last_target_joint_command_ = true;
+      publishLog(
+        "cmd:init publish_zero_joint_command n=" + std::to_string(init_reset_burst_count_) +
+        " joints=" + std::to_string(zero_cmd.name.size()));
     } else {
-      publishStatus("init_failed_no_initial_pose");
-      publishLog("cmd:init no_initial_pose_for_arm");
-      return;
+      publishLog("cmd:init skip_zero_joint_command (joint_command_pub unavailable)");
     }
-    publishLog(
-      "cmd:init scheduling initial pose after delay_ms=" + std::to_string(init_delay_ms_after_reset_) +
-      " (non-blocking; camera keeps updating)");
-
-    if (init_delay_ms_after_reset_ <= 0) {
-      publishInitPoseAfterResetDelay();
-      return;
-    }
-    init_after_reset_timer_ = create_wall_timer(
-      std::chrono::milliseconds(std::max(1, init_delay_ms_after_reset_)),
-      std::bind(&CalibNode::publishInitPoseAfterResetDelay, this));
+    republishLastCameraImagesToUi();
+    waiting_arm_reached_ = false;
+    waiting_capture_ = false;
+    waiting_init_pose_ = false;
+    publishStatus("initialized_zero_pose_hold");
+    publishLog("cmd:init done; holding zero joint pose (no auto move to initial pose)");
     return;
   }
   if (cmd == "step") {
@@ -1644,12 +1670,41 @@ bool CalibNode::detectTargetPoseInCamera(
   std::string & fail_reason, cv::Mat & annotated, std::vector<int> & detected_ids)
 {
   out_mean_corner_reproj_px = 0.0;
-  annotated = frame_bgr.clone();
+  cv::Mat proc_bgr = frame_bgr;
+  cv::Mat proc_camera_matrix = camera_matrix_.clone();
+  cv::Mat proc_dist_coeffs = dist_coeffs_.clone();
+  bool used_undistort = false;
+  const bool camera_ready =
+    (camera_matrix_.rows == 3 && camera_matrix_.cols == 3 && !camera_matrix_.empty());
+  if (camera_ready && !dist_coeffs_.empty()) {
+    cv::Mat dist_abs;
+    cv::absdiff(dist_coeffs_, cv::Scalar::all(0), dist_abs);
+    const bool has_distortion = cv::countNonZero(dist_abs.reshape(1) > 1e-12) > 0;
+    if (has_distortion) {
+      cv::undistort(frame_bgr, proc_bgr, camera_matrix_, dist_coeffs_);
+      proc_dist_coeffs = cv::Mat::zeros(dist_coeffs_.size(), dist_coeffs_.type());
+      used_undistort = true;
+    }
+  }
+  annotated = proc_bgr.clone();
   const int img_w = frame_bgr.cols;
   const int img_h = frame_bgr.rows;
   if (img_w <= 0 || img_h <= 0) {
     fail_reason = "no_image";
     return false;
+  }
+  {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3)
+        << "detect_diag camera_model"
+        << " raw=" << frame_bgr.cols << "x" << frame_bgr.rows
+        << " proc=" << proc_bgr.cols << "x" << proc_bgr.rows
+        << " fx=" << proc_camera_matrix.at<double>(0, 0)
+        << " fy=" << proc_camera_matrix.at<double>(1, 1)
+        << " cx=" << proc_camera_matrix.at<double>(0, 2)
+        << " cy=" << proc_camera_matrix.at<double>(1, 2)
+        << " undistort=" << (used_undistort ? "true" : "false");
+    publishLog(oss.str());
   }
 
   const auto dict_ptr = cv::makePtr<cv::aruco::Dictionary>(aruco_dict_);
@@ -1687,9 +1742,9 @@ bool CalibNode::detectTargetPoseInCamera(
   for (const auto & ft : flip_tries) {
     cv::Mat bgr_in;
     if (ft.code == kArucoNoInputFlip) {
-      bgr_in = frame_bgr;
+      bgr_in = proc_bgr;
     } else {
-      cv::flip(frame_bgr, bgr_in, ft.code);
+      cv::flip(proc_bgr, bgr_in, ft.code);
     }
 
     cv::Mat gray;
@@ -1804,29 +1859,29 @@ bool CalibNode::detectTargetPoseInCamera(
 
   const auto & marker_corners = corners[found_index];
   const cv::Rect bbox = cv::boundingRect(marker_corners);
+  const double marker_area_px = std::abs(cv::contourArea(marker_corners));
   double perimeter_px = 0.0;
   for (std::size_t i = 0; i < marker_corners.size(); ++i) {
     const cv::Point2f & p0 = marker_corners[i];
     const cv::Point2f & p1 = marker_corners[(i + 1U) % marker_corners.size()];
     perimeter_px += cv::norm(p0 - p1);
   }
-  const double image_area = static_cast<double>(frame_bgr.cols) * static_cast<double>(frame_bgr.rows);
-  const double bbox_area_ratio = image_area > 0.0 ?
-    (static_cast<double>(bbox.width) * static_cast<double>(bbox.height) / image_area) : 0.0;
+  const double image_area = static_cast<double>(proc_bgr.cols) * static_cast<double>(proc_bgr.rows);
+  const double marker_area_ratio = image_area > 0.0 ? (marker_area_px / image_area) : 0.0;
   {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(4)
         << "detect_diag marker_id=" << ids[found_index]
         << " perimeter_px=" << perimeter_px
         << " bbox=" << bbox.x << "," << bbox.y << "," << bbox.width << "," << bbox.height
-        << " bbox_area_ratio=" << bbox_area_ratio;
+        << " marker_area_ratio=" << marker_area_ratio;
     publishLog(oss.str());
   }
-  if (bbox_area_ratio < marker_bbox_ratio_min_) {
+  if (marker_area_ratio < marker_bbox_ratio_min_) {
     fail_reason = "marker_too_small";
     return false;
   }
-  if (bbox_area_ratio > marker_bbox_ratio_max_) {
+  if (marker_area_ratio > marker_bbox_ratio_max_) {
     fail_reason = "marker_too_large";
     return false;
   }
@@ -1842,11 +1897,11 @@ bool CalibNode::detectTargetPoseInCamera(
 
   cv::Mat rvec, tvec;
   bool pnp_ok = cv::solvePnP(
-    object_points_proj, marker_corners_for_pnp, camera_matrix_, dist_coeffs_, rvec, tvec, false,
+    object_points_proj, marker_corners_for_pnp, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
     cv::SOLVEPNP_IPPE_SQUARE);
   if (!pnp_ok) {
     pnp_ok = cv::solvePnP(
-      object_points_proj, marker_corners_for_pnp, camera_matrix_, dist_coeffs_, rvec, tvec, false,
+      object_points_proj, marker_corners_for_pnp, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
       cv::SOLVEPNP_ITERATIVE);
   }
   if (!pnp_ok) {
@@ -1856,7 +1911,7 @@ bool CalibNode::detectTargetPoseInCamera(
   }
 
   std::vector<cv::Point2f> reproj;
-  cv::projectPoints(object_points_proj, rvec, tvec, camera_matrix_, dist_coeffs_, reproj);
+  cv::projectPoints(object_points_proj, rvec, tvec, proc_camera_matrix, proc_dist_coeffs, reproj);
   double reproj_err_px = 0.0;
   if (reproj.size() == marker_corners_for_pnp.size()) {
     for (std::size_t i = 0; i < reproj.size(); ++i) {
@@ -1887,16 +1942,24 @@ bool CalibNode::detectTargetPoseInCamera(
   }
 
   cv::drawFrameAxes(
-    annotated, camera_matrix_, dist_coeffs_, rvec, tvec,
+    annotated, proc_camera_matrix, proc_dist_coeffs, rvec, tvec,
     static_cast<float>(marker_length_m_ * 0.6), 2);
 
-  // Draw a pose-consistent projected border for cleaner visual feedback.
+  // Draw projected border only when reprojection is reasonably small.
+  // Otherwise yellow overlay may look "drifted" and mislead tuning.
   const std::vector<cv::Point2f> & projected_corners = reproj;
-  if (projected_corners.size() == 4U) {
+  constexpr double kProjectedBorderDrawMaxReprojPx = 2.5;
+  if (projected_corners.size() == 4U && reproj_err_px <= kProjectedBorderDrawMaxReprojPx) {
     cv::line(annotated, projected_corners[0], projected_corners[1], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
     cv::line(annotated, projected_corners[1], projected_corners[2], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
     cv::line(annotated, projected_corners[2], projected_corners[3], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
     cv::line(annotated, projected_corners[3], projected_corners[0], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+  } else if (projected_corners.size() == 4U) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3)
+        << "detect_diag projected_border_suppressed reproj_px=" << reproj_err_px
+        << " threshold_px=" << kProjectedBorderDrawMaxReprojPx;
+    publishLog(oss.str());
   }
   cv::Rodrigues(rvec, r_target_to_cam);
   t_target_to_cam = tvec.clone();

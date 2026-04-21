@@ -251,6 +251,8 @@ private:
   bool waiting_arm_reached_;
   bool waiting_capture_;
   bool finished_;
+  int arm_reach_retry_count_;
+  int arm_reach_retry_max_;
   rclcpp::Time target_sent_time_;
   rclcpp::Time capture_start_time_;
   bool auto_mode_;

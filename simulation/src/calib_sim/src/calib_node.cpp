@@ -1127,12 +1127,41 @@ bool CalibNode::detectTargetPoseInCamera(
   std::string & fail_reason, cv::Mat & annotated, std::vector<int> & detected_ids)
 {
   out_mean_corner_reproj_px = 0.0;
-  annotated = frame_bgr.clone();
+  cv::Mat proc_bgr = frame_bgr;
+  cv::Mat proc_camera_matrix = camera_matrix_.clone();
+  cv::Mat proc_dist_coeffs = dist_coeffs_.clone();
+  bool used_undistort = false;
+  const bool camera_ready =
+    (camera_matrix_.rows == 3 && camera_matrix_.cols == 3 && !camera_matrix_.empty());
+  if (camera_ready && !dist_coeffs_.empty()) {
+    cv::Mat dist_abs;
+    cv::absdiff(dist_coeffs_, cv::Scalar::all(0), dist_abs);
+    const bool has_distortion = cv::countNonZero(dist_abs.reshape(1) > 1e-12) > 0;
+    if (has_distortion) {
+      cv::undistort(frame_bgr, proc_bgr, camera_matrix_, dist_coeffs_);
+      proc_dist_coeffs = cv::Mat::zeros(dist_coeffs_.size(), dist_coeffs_.type());
+      used_undistort = true;
+    }
+  }
+  annotated = proc_bgr.clone();
   const int img_w = frame_bgr.cols;
   const int img_h = frame_bgr.rows;
   if (img_w <= 0 || img_h <= 0) {
     fail_reason = "no_image";
     return false;
+  }
+  {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3)
+        << "detect_diag camera_model"
+        << " raw=" << frame_bgr.cols << "x" << frame_bgr.rows
+        << " proc=" << proc_bgr.cols << "x" << proc_bgr.rows
+        << " fx=" << proc_camera_matrix.at<double>(0, 0)
+        << " fy=" << proc_camera_matrix.at<double>(1, 1)
+        << " cx=" << proc_camera_matrix.at<double>(0, 2)
+        << " cy=" << proc_camera_matrix.at<double>(1, 2)
+        << " undistort=" << (used_undistort ? "true" : "false");
+    publishLog(oss.str());
   }
 
   const auto dict_ptr = cv::makePtr<cv::aruco::Dictionary>(aruco_dict_);
@@ -1170,9 +1199,9 @@ bool CalibNode::detectTargetPoseInCamera(
   for (const auto & ft : flip_tries) {
     cv::Mat bgr_in;
     if (ft.code == kArucoNoInputFlip) {
-      bgr_in = frame_bgr;
+      bgr_in = proc_bgr;
     } else {
-      cv::flip(frame_bgr, bgr_in, ft.code);
+      cv::flip(proc_bgr, bgr_in, ft.code);
     }
 
     cv::Mat gray;
@@ -1287,29 +1316,29 @@ bool CalibNode::detectTargetPoseInCamera(
 
   const auto & marker_corners = corners[found_index];
   const cv::Rect bbox = cv::boundingRect(marker_corners);
+  const double marker_area_px = std::abs(cv::contourArea(marker_corners));
   double perimeter_px = 0.0;
   for (std::size_t i = 0; i < marker_corners.size(); ++i) {
     const cv::Point2f & p0 = marker_corners[i];
     const cv::Point2f & p1 = marker_corners[(i + 1U) % marker_corners.size()];
     perimeter_px += cv::norm(p0 - p1);
   }
-  const double image_area = static_cast<double>(frame_bgr.cols) * static_cast<double>(frame_bgr.rows);
-  const double bbox_area_ratio = image_area > 0.0 ?
-    (static_cast<double>(bbox.width) * static_cast<double>(bbox.height) / image_area) : 0.0;
+  const double image_area = static_cast<double>(proc_bgr.cols) * static_cast<double>(proc_bgr.rows);
+  const double marker_area_ratio = image_area > 0.0 ? (marker_area_px / image_area) : 0.0;
   {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(4)
         << "detect_diag marker_id=" << ids[found_index]
         << " perimeter_px=" << perimeter_px
         << " bbox=" << bbox.x << "," << bbox.y << "," << bbox.width << "," << bbox.height
-        << " bbox_area_ratio=" << bbox_area_ratio;
+        << " marker_area_ratio=" << marker_area_ratio;
     publishLog(oss.str());
   }
-  if (bbox_area_ratio < marker_bbox_ratio_min_) {
+  if (marker_area_ratio < marker_bbox_ratio_min_) {
     fail_reason = "marker_too_small";
     return false;
   }
-  if (bbox_area_ratio > marker_bbox_ratio_max_) {
+  if (marker_area_ratio > marker_bbox_ratio_max_) {
     fail_reason = "marker_too_large";
     return false;
   }
@@ -1325,11 +1354,11 @@ bool CalibNode::detectTargetPoseInCamera(
 
   cv::Mat rvec, tvec;
   bool pnp_ok = cv::solvePnP(
-    object_points_proj, marker_corners_for_pnp, camera_matrix_, dist_coeffs_, rvec, tvec, false,
+    object_points_proj, marker_corners_for_pnp, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
     cv::SOLVEPNP_IPPE_SQUARE);
   if (!pnp_ok) {
     pnp_ok = cv::solvePnP(
-      object_points_proj, marker_corners_for_pnp, camera_matrix_, dist_coeffs_, rvec, tvec, false,
+      object_points_proj, marker_corners_for_pnp, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
       cv::SOLVEPNP_ITERATIVE);
   }
   if (!pnp_ok) {
@@ -1339,7 +1368,7 @@ bool CalibNode::detectTargetPoseInCamera(
   }
 
   std::vector<cv::Point2f> reproj;
-  cv::projectPoints(object_points_proj, rvec, tvec, camera_matrix_, dist_coeffs_, reproj);
+  cv::projectPoints(object_points_proj, rvec, tvec, proc_camera_matrix, proc_dist_coeffs, reproj);
   double reproj_err_px = 0.0;
   if (reproj.size() == marker_corners_for_pnp.size()) {
     for (std::size_t i = 0; i < reproj.size(); ++i) {
@@ -1370,16 +1399,24 @@ bool CalibNode::detectTargetPoseInCamera(
   }
 
   cv::drawFrameAxes(
-    annotated, camera_matrix_, dist_coeffs_, rvec, tvec,
+    annotated, proc_camera_matrix, proc_dist_coeffs, rvec, tvec,
     static_cast<float>(marker_length_m_ * 0.6), 2);
 
-  // Draw a pose-consistent projected border for cleaner visual feedback.
+  // Draw projected border only when reprojection is reasonably small.
+  // Otherwise yellow overlay may look "drifted" and mislead tuning.
   const std::vector<cv::Point2f> & projected_corners = reproj;
-  if (projected_corners.size() == 4U) {
+  constexpr double kProjectedBorderDrawMaxReprojPx = 2.5;
+  if (projected_corners.size() == 4U && reproj_err_px <= kProjectedBorderDrawMaxReprojPx) {
     cv::line(annotated, projected_corners[0], projected_corners[1], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
     cv::line(annotated, projected_corners[1], projected_corners[2], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
     cv::line(annotated, projected_corners[2], projected_corners[3], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
     cv::line(annotated, projected_corners[3], projected_corners[0], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+  } else if (projected_corners.size() == 4U) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3)
+        << "detect_diag projected_border_suppressed reproj_px=" << reproj_err_px
+        << " threshold_px=" << kProjectedBorderDrawMaxReprojPx;
+    publishLog(oss.str());
   }
   cv::Rodrigues(rvec, r_target_to_cam);
   t_target_to_cam = tvec.clone();
