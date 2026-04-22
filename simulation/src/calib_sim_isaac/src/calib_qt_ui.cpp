@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <mutex>
 #include <thread>
@@ -428,7 +429,8 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   std::vector<std::string> selected_raw_images;
   int selected_sample_index = -1;
   std::string last_result_text_for_auto_pick;
-  const fs::path output_root("/home/hs/testCode/simulation/calib_output_isaac");
+  /// 供历史列表/清空磁盘使用；标定结果里的 calib_run_dir 可能是相对路径，需与 CalibNode 的 cwd 一致
+  std::string history_result_text_hint;
 
   const auto trimStr = [](std::string s) -> std::string {
     const auto first = s.find_first_not_of(" \t\r\n");
@@ -439,6 +441,63 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     return s.substr(first, last - first + 1);
   };
 
+  const auto collectScanRoots = [&](const std::string & result_text_hint) -> std::vector<fs::path> {
+    std::vector<fs::path> roots;
+    auto try_add = [&](const fs::path & p) {
+      if (p.empty()) {
+        return;
+      }
+      std::error_code ec;
+      fs::path abs_p = p;
+      if (p.is_relative()) {
+        abs_p = fs::current_path() / p;
+      }
+      abs_p = fs::weakly_canonical(abs_p, ec);
+      if (ec || !fs::exists(abs_p) || !fs::is_directory(abs_p)) {
+        return;
+      }
+      if (std::find(roots.begin(), roots.end(), abs_p) == roots.end()) {
+        roots.push_back(abs_p);
+      }
+    };
+    // 与 CalibNode 的 output_dir 默认名一致；相对路径相对当前工作目录
+    try_add(fs::path("calib_output_isaac"));
+    {
+      const fs::path cwd = fs::current_path();
+      if (!cwd.empty()) {
+        const fs::path parent = cwd.parent_path();
+        if (!parent.empty() && parent != cwd) {
+          try_add(parent / "calib_output_isaac");
+        }
+      }
+    }
+    if (const char * env = std::getenv("CALIB_SIM_ISAAC_OUTPUT_DIR")) {
+      if (env[0] != '\0') {
+        try_add(fs::path(env));
+      }
+    }
+    {
+      const std::string key_dir = "calib_run_dir:";
+      const std::size_t pos_dir = result_text_hint.rfind(key_dir);
+      if (pos_dir != std::string::npos) {
+        std::string dir = trimStr(result_text_hint.substr(pos_dir + key_dir.size()));
+        if (!dir.empty()) {
+          std::error_code ec;
+          fs::path run_path(dir);
+          if (run_path.is_relative()) {
+            run_path = fs::weakly_canonical(fs::current_path() / run_path, ec);
+          } else {
+            run_path = fs::weakly_canonical(run_path, ec);
+          }
+          if (!ec && !run_path.empty() && run_path.has_parent_path()) {
+            try_add(run_path.parent_path());
+          }
+        }
+      }
+    }
+    return roots;
+  };
+
   const auto parseRunDirFromResultText = [&](const std::string & result_text) -> std::string {
     {
       const std::string key = "calib_run_dir:";
@@ -446,6 +505,16 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       if (pos != std::string::npos) {
         const std::string dir = trimStr(result_text.substr(pos + key.size()));
         if (!dir.empty()) {
+          std::error_code ec;
+          fs::path p(dir);
+          if (p.is_relative()) {
+            p = fs::weakly_canonical(fs::current_path() / p, ec);
+          } else {
+            p = fs::weakly_canonical(p, ec);
+          }
+          if (!ec) {
+            return p.string();
+          }
           return dir;
         }
       }
@@ -456,7 +525,13 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       if (pos != std::string::npos) {
         std::string stamp = trimStr(result_text.substr(pos + key.size()));
         if (!stamp.empty()) {
-          return (output_root / ("calib_run_" + stamp)).string();
+          for (const auto & root : collectScanRoots(result_text)) {
+            const fs::path candidate = root / ("calib_run_" + stamp);
+            std::error_code ec;
+            if (fs::exists(candidate, ec) && !ec) {
+              return fs::weakly_canonical(candidate, ec).string();
+            }
+          }
         }
       }
     }
@@ -525,22 +600,25 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   };
 
   std::vector<std::string> last_run_dirs_cache;
-  const auto refreshRunList = [&]() {
-    std::error_code ec;
-    if (!fs::exists(output_root, ec) || ec) {
+  const auto refreshRunList = [&](const std::string & result_text_hint) {
+    const std::vector<fs::path> scan_roots = collectScanRoots(result_text_hint);
+    std::vector<std::string> run_dirs;
+    for (const auto & root : scan_roots) {
+      std::error_code ec;
+      for (const auto & entry : fs::directory_iterator(root, ec)) {
+        if (ec || !entry.is_directory()) {
+          continue;
+        }
+        const std::string name = entry.path().filename().string();
+        if (name.rfind("calib_run_", 0) == 0) {
+          run_dirs.push_back(entry.path().string());
+        }
+      }
+    }
+    if (run_dirs.empty()) {
       run_select->clear();
       last_run_dirs_cache.clear();
       return;
-    }
-    std::vector<std::string> run_dirs;
-    for (const auto & entry : fs::directory_iterator(output_root, ec)) {
-      if (ec || !entry.is_directory()) {
-        continue;
-      }
-      const std::string name = entry.path().filename().string();
-      if (name.rfind("calib_run_", 0) == 0) {
-        run_dirs.push_back(entry.path().string());
-      }
     }
     std::sort(run_dirs.begin(), run_dirs.end(), std::greater<std::string>());
     if (run_dirs == last_run_dirs_cache) {
@@ -628,7 +706,8 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     }
   };
 
-  refreshRunList();
+  history_result_text_hint = ros_node->resultText();
+  refreshRunList(history_result_text_hint);
 
   QObject::connect(btn_step, &QPushButton::clicked, [&, ros_node]() {
     backToLiveView();
@@ -676,34 +755,36 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   QObject::connect(btn_clear_all_data, &QPushButton::clicked, [&]() {
     const auto r = QMessageBox::question(
       &win, QString::fromUtf8("确认"),
-      QString::fromUtf8("将永久删除 calib_output_isaac 下所有 calib_run_* 目录，是否继续？"),
+      QString::fromUtf8("将永久删除已扫描到的 calib_output_isaac 目录下所有 calib_run_* 子目录，是否继续？"),
       QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (r != QMessageBox::Yes) {
       return;
     }
-    std::error_code ec;
-    if (!fs::exists(output_root, ec) || ec) {
-      appendUiLog("[历史数据] calib_output_isaac 不存在，跳过删除");
-      refreshRunList();
-      return;
-    }
     int dirs_removed = 0;
-    for (const auto & entry : fs::directory_iterator(output_root, ec)) {
-      if (ec || !entry.is_directory()) {
-        continue;
-      }
-      const std::string name = entry.path().filename().string();
-      if (name.rfind("calib_run_", 0) != 0) {
-        continue;
-      }
-      std::error_code rm_ec;
-      fs::remove_all(entry.path(), rm_ec);
-      if (!rm_ec) {
-        ++dirs_removed;
+    const std::vector<fs::path> scan_roots = collectScanRoots(history_result_text_hint);
+    if (scan_roots.empty()) {
+      appendUiLog("[历史数据] 未找到可删除的标定输出目录（请确认在 simulation 下启动或设置 CALIB_SIM_ISAAC_OUTPUT_DIR）");
+    } else {
+      for (const auto & root : scan_roots) {
+        std::error_code ec;
+        for (const auto & entry : fs::directory_iterator(root, ec)) {
+          if (ec || !entry.is_directory()) {
+            continue;
+          }
+          const std::string name = entry.path().filename().string();
+          if (name.rfind("calib_run_", 0) != 0) {
+            continue;
+          }
+          std::error_code rm_ec;
+          fs::remove_all(entry.path(), rm_ec);
+          if (!rm_ec) {
+            ++dirs_removed;
+          }
+        }
       }
     }
     clearLocalUiData();
-    refreshRunList();
+    refreshRunList("");
     appendUiLog(
       std::string("[历史数据] 已清空磁盘标定目录，已删除 run 目录数 ") + std::to_string(dirs_removed));
   });
@@ -758,6 +839,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       std::lock_guard<std::mutex> lk(cache_mu);
       local = cache;
     }
+    history_result_text_hint = local.result_text;
     if (local.result_text != last_result_text_for_auto_pick) {
       last_result_text_for_auto_pick = local.result_text;
       showing_history_image = false;
@@ -768,7 +850,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
         selected_sample_index = selected_result_images.empty() ? -1 :
           static_cast<int>(selected_result_images.size()) - 1;
       }
-      refreshRunList();
+      refreshRunList(local.result_text);
     }
     {
       const QString filtered_result =
@@ -807,7 +889,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
 
   QTimer run_list_timer;
   QObject::connect(&run_list_timer, &QTimer::timeout, [&]() {
-    refreshRunList();
+    refreshRunList(history_result_text_hint);
   });
   run_list_timer.start(2000);
 
@@ -821,6 +903,15 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   shutdown_watchdog.start(100);
 
   win.show();
+  // 启动后事件循环就绪再扫一次盘，避免首帧 cache 未就绪时列表为空
+  QTimer::singleShot(0, [&]() {
+    history_result_text_hint = ros_node->resultText();
+    refreshRunList(history_result_text_hint);
+  });
+  QTimer::singleShot(500, [&]() {
+    history_result_text_hint = ros_node->resultText();
+    refreshRunList(history_result_text_hint);
+  });
   const int rc = app.exec();
   cache_running.store(false);
   if (cache_thread.joinable()) {

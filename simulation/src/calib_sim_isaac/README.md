@@ -119,6 +119,7 @@ ros2 run calib_sim_isaac <你的节点> --ros-args --params-file install/calib_s
 
 - `target_marker_id`：只解算该 ArUco ID。
 - `marker_length_m`、`aruco_dict_id`：须与打印板 / 纹理一致。
+- `marker_bbox_ratio_min` / `max`：眼在手上（`eih*` / `eye_in_hand`）时腕部相机常较近，标定板占画幅大，可用约 `0.01`～`0.09`。眼在手外（`eth*` / `eye_to_hand`）固定机位、板子更远、**占画幅更小**，需更小 `min`、更紧 `max`（`calib_unified` 中 eth 与 `eye_to_hand.yaml` 已对齐，例如 `0.006` / `0.060`），否则易报 `marker_too_small`。
 - `use_tf_for_sample_pose`、`tf_base_frame`、`tf_ee_frame_arm0` / `arm1`：与 `nova_sim` 中 `J1_6` / `J2_6` 等一致。
 - `use_known_target_mount`、`target_to_gripper_pose`：眼在手外板子刚接在末端时，安装位姿（目标系相对末端）；与 URDF 中板子 joint 一致时链式残差可达毫米级。
 - `known_mount_quality_max_m`：已知安装路径下的质量门限。
@@ -135,7 +136,9 @@ ros2 run calib_sim_isaac <你的节点> --ros-args --params-file install/calib_s
 
 ## 输出结果
 
-默认写入参数 `output_dir` 下（如工作空间内 `calib_output_isaac/`），每次 run 带时间戳子目录，包含：
+**Isaac Sim 标定**（本包）默认将 `output_dir` 设为 `calib_output_isaac`；**Gazebo 标定**（`calib_sim` 包）使用 `calib_output`，两者分开存放，避免混用。
+
+默认写入该目录下（在 `simulation` 工作空间根、相对运行目录，一般为 `simulation/calib_output_isaac/`），每次 run 带时间戳子目录，包含：
 
 - `calib_result_eye_in_hand.yaml` 或 `calib_result_eye_to_hand.yaml`
 - `sample_manifest.csv`（若启用）

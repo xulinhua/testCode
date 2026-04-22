@@ -3,6 +3,7 @@
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/calib3d.hpp>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2/exceptions.h>
@@ -1717,7 +1718,8 @@ bool CalibNode::detectTargetPoseInCamera(
   detector_params->adaptiveThreshWinSizeMax = 31;
   detector_params->adaptiveThreshWinSizeStep = 4;
   detector_params->adaptiveThreshConstant = 7.0;
-  detector_params->minMarkerDistanceRate = 0.03;
+  // 眼在手外多板同屏时，默认 minMarkerDistance 偏大易只检到一块
+  detector_params->minMarkerDistanceRate = eye_in_hand_ ? 0.03 : 0.01;
   detector_params->polygonalApproxAccuracyRate = 0.03;
   detector_params->minMarkerPerimeterRate = 0.02;
   detector_params->maxMarkerPerimeterRate = 5.0;
@@ -1774,10 +1776,11 @@ bool CalibNode::detectTargetPoseInCamera(
             }
           }
         }
+        // 在原始灰度上亚像素，避免 unsharp+CLAHE 在斜视/高对比背景上把角点“拉偏”
         for (auto & marker : out_corners) {
           cv::cornerSubPix(
-            gray_sharp, marker, cv::Size(7, 7), cv::Size(-1, -1),
-            cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.01));
+            gray, marker, cv::Size(5, 5), cv::Size(-1, -1),
+            cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 50, 0.01));
         }
       };
 
@@ -1801,6 +1804,73 @@ bool CalibNode::detectTargetPoseInCamera(
         publishLog(std::string("detect_diag aruco_mirror_fix input_") + ft.name);
       }
       break;
+    }
+  }
+  // 眼在手外/固定机位：画面里多板 + 远距时，主检测会间歇性丢 target_id 或全空；多路宽松检测与 2x 放大补检
+  if (found_index < 0 && !eye_in_hand_) {
+    cv::Mat g0;
+    cv::cvtColor(proc_bgr, g0, cv::COLOR_BGR2GRAY);
+    cv::Mat g_eq;
+    {
+      cv::Ptr<cv::CLAHE> clahe2 = cv::createCLAHE(3.0, cv::Size(8, 8));
+      clahe2->apply(g0, g_eq);
+    }
+    cv::Mat g_up2;
+    cv::resize(g0, g_up2, cv::Size(), 2.0, 2.0, cv::INTER_CUBIC);
+    cv::Mat g_eq_up;
+    cv::resize(g_eq, g_eq_up, cv::Size(), 2.0, 2.0, cv::INTER_CUBIC);
+    const auto make_loose_params = [](double min_perim_rate, double min_dist_rate) {
+      auto pr = cv::makePtr<cv::aruco::DetectorParameters>();
+      pr->cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
+      pr->cornerRefinementWinSize = 5;
+      pr->adaptiveThreshWinSizeMin = 3;
+      pr->adaptiveThreshWinSizeMax = 45;
+      pr->adaptiveThreshWinSizeStep = 2;
+      pr->adaptiveThreshConstant = 5.0;
+      pr->minMarkerPerimeterRate = min_perim_rate;
+      pr->minMarkerDistanceRate = min_dist_rate;
+      pr->polygonalApproxAccuracyRate = 0.05;
+      return pr;
+    };
+    const auto try_e2h = [&](const cv::Mat & gsrc, const cv::Ptr<cv::aruco::DetectorParameters> & pr,
+        bool halve_to_full_res, const char * tag) -> bool {
+      std::vector<std::vector<cv::Point2f>> c_try;
+      std::vector<int> id_try;
+      cv::aruco::detectMarkers(gsrc, dict_ptr, c_try, id_try, pr);
+      for (std::size_t i = 0; i < id_try.size(); ++i) {
+        if (id_try[i] != marker_id_) {
+          continue;
+        }
+        found_index = static_cast<int>(i);
+        corners = std::move(c_try);
+        ids = std::move(id_try);
+        if (halve_to_full_res) {
+          for (auto & m : corners) {
+            for (auto & q : m) {
+              q.x = static_cast<float>(q.x * 0.5F);
+              q.y = static_cast<float>(q.y * 0.5F);
+            }
+          }
+        }
+        for (auto & m : corners) {
+          cv::cornerSubPix(
+            g0, m, cv::Size(5, 5), cv::Size(-1, -1),
+            cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 50, 0.01));
+        }
+        publishLog(std::string("detect_diag eye_to_hand_retry: ok (") + tag + ")");
+        return true;
+      }
+      return false;
+    };
+    const cv::Ptr<cv::aruco::DetectorParameters> p1 = make_loose_params(0.002, 0.0008);
+    const cv::Ptr<cv::aruco::DetectorParameters> p2 = make_loose_params(0.001, 0.0005);
+    if (try_e2h(g_eq, p1, false, "CLAHE+loose1")) {
+    } else if (try_e2h(g0, p1, false, "gray+loose1")) {
+    } else if (try_e2h(g_eq, p2, false, "CLAHE+loose2")) {
+    } else if (try_e2h(g_up2, p1, true, "2x_gray+loose1")) {
+    } else if (try_e2h(g_eq_up, p1, true, "2x_clahe+loose1")) {
+    } else {
+      publishLog("detect_diag eye_to_hand_retry: all passes failed (target id not found)");
     }
   }
 
@@ -1846,14 +1916,11 @@ bool CalibNode::detectTargetPoseInCamera(
   if (found_index >= 0 && static_cast<std::size_t>(found_index) < corners.size()) {
     const auto & c = corners[static_cast<std::size_t>(found_index)];
     if (c.size() == 4U) {
-      cv::line(annotated, c[0], c[1], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-      cv::line(annotated, c[1], c[2], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-      cv::line(annotated, c[2], c[3], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-      cv::line(annotated, c[3], c[0], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-      cv::circle(annotated, c[0], 3, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
-      cv::putText(
-        annotated, std::to_string(marker_id_), c[0] + cv::Point2f(2.0F, -6.0F),
-        cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+      // 粗检测框仅用于在「尺寸门限未通过即返回」时仍有可视化；成功路径下会用 PnP 精化角点重画
+      cv::line(annotated, c[0], c[1], cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+      cv::line(annotated, c[1], c[2], cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+      cv::line(annotated, c[2], c[3], cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+      cv::line(annotated, c[3], c[0], cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
     }
   }
 
@@ -1895,27 +1962,82 @@ bool CalibNode::detectTargetPoseInCamera(
     cv::Point3f(h, -h, 0.0), cv::Point3f(-h, -h, 0.0)
   };
 
+  // 在 proc_bgr 坐标的灰度图上来回迭代：位姿->重投影角点->亚像素，收敛部分帧上「检测角点与真实边不齐」的偏差
+  std::vector<cv::Point2f> refined_img_pts(marker_corners_for_pnp.begin(), marker_corners_for_pnp.end());
+  cv::Mat gray_pnp;
+  cv::cvtColor(proc_bgr, gray_pnp, cv::COLOR_BGR2GRAY);
   cv::Mat rvec, tvec;
-  bool pnp_ok = cv::solvePnP(
-    object_points_proj, marker_corners_for_pnp, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
-    cv::SOLVEPNP_IPPE_SQUARE);
-  if (!pnp_ok) {
-    pnp_ok = cv::solvePnP(
-      object_points_proj, marker_corners_for_pnp, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
-      cv::SOLVEPNP_ITERATIVE);
+  // 眼在手外/远景：标定边长短像素少，大窗口易吞背景条纹；近景腕相机边长多可略加大窗口、多轮迭代
+  const double edge_len_approx_px = perimeter_px > 1e-6 ? (0.25 * perimeter_px) : 20.0;
+  const int subpix_win = (edge_len_approx_px < 18.0)   ? 3
+    : (edge_len_approx_px < 40.0)                      ? 5
+                                                         : 7;
+  const int kPnpRefineIters = (edge_len_approx_px < 22.0) ? 2 : 3;
+  bool pnp_ok = false;
+  for (int k = 0; k < kPnpRefineIters; ++k) {
+    if (k == 0) {
+      pnp_ok = cv::solvePnP(
+        object_points_proj, refined_img_pts, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
+        cv::SOLVEPNP_IPPE_SQUARE);
+      if (!pnp_ok) {
+        pnp_ok = cv::solvePnP(
+          object_points_proj, refined_img_pts, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, false,
+          cv::SOLVEPNP_ITERATIVE);
+      }
+    } else {
+      pnp_ok = cv::solvePnP(
+        object_points_proj, refined_img_pts, proc_camera_matrix, proc_dist_coeffs, rvec, tvec, true,
+        cv::SOLVEPNP_ITERATIVE);
+    }
+    if (!pnp_ok) {
+      publishLog("detect_diag pose_estimation_failed");
+      fail_reason = "pnp_failed";
+      return false;
+    }
+    try {
+      cv::solvePnPRefineLM(
+        object_points_proj, refined_img_pts, proc_camera_matrix, proc_dist_coeffs, rvec, tvec,
+        cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 50, 1e-5));
+    } catch (const cv::Exception &) {
+    }
+    if (k + 1 >= kPnpRefineIters) {
+      break;
+    }
+    std::vector<cv::Point2f> proj_seeds;
+    cv::projectPoints(
+      object_points_proj, rvec, tvec, proc_camera_matrix, proc_dist_coeffs, proj_seeds);
+    if (proj_seeds.size() != 4U) {
+      break;
+    }
+    refined_img_pts = std::move(proj_seeds);
+    try {
+      cv::cornerSubPix(
+        gray_pnp, refined_img_pts, cv::Size(subpix_win, subpix_win), cv::Size(-1, -1),
+        cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 50, 0.005));
+    } catch (const cv::Exception &) {
+    }
   }
-  if (!pnp_ok) {
-    publishLog("detect_diag pose_estimation_failed");
-    fail_reason = "pnp_failed";
-    return false;
+  {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1)
+        << "detect_diag pnp_refine edge_len_apx_px=" << edge_len_approx_px
+        << " subpix_win=" << subpix_win << " iters=" << kPnpRefineIters;
+    publishLog(oss.str());
+  }
+  // 再做一个 VVS 精化，常能略降重投影、减轻「绿框/坐标轴与真实边不重合」的观感
+  try {
+    cv::solvePnPRefineVVS(
+      object_points_proj, refined_img_pts, proc_camera_matrix, proc_dist_coeffs, rvec, tvec,
+      cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 30, 1e-4));
+  } catch (const cv::Exception &) {
   }
 
   std::vector<cv::Point2f> reproj;
   cv::projectPoints(object_points_proj, rvec, tvec, proc_camera_matrix, proc_dist_coeffs, reproj);
   double reproj_err_px = 0.0;
-  if (reproj.size() == marker_corners_for_pnp.size()) {
+  if (reproj.size() == refined_img_pts.size()) {
     for (std::size_t i = 0; i < reproj.size(); ++i) {
-      reproj_err_px += cv::norm(reproj[i] - marker_corners_for_pnp[i]);
+      reproj_err_px += cv::norm(reproj[i] - refined_img_pts[i]);
     }
     reproj_err_px /= static_cast<double>(reproj.size());
   }
@@ -1941,26 +2063,21 @@ bool CalibNode::detectTargetPoseInCamera(
     return false;
   }
 
+  if (refined_img_pts.size() == 4U) {
+    for (int e = 0; e < 4; ++e) {
+      cv::line(
+        annotated, refined_img_pts[static_cast<std::size_t>(e)],
+        refined_img_pts[static_cast<std::size_t>((e + 1) % 4)], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+    }
+    cv::circle(annotated, refined_img_pts[0], 3, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
+    cv::putText(
+      annotated, std::to_string(marker_id_), refined_img_pts[0] + cv::Point2f(2.0F, -6.0F),
+      cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+  }
   cv::drawFrameAxes(
     annotated, proc_camera_matrix, proc_dist_coeffs, rvec, tvec,
     static_cast<float>(marker_length_m_ * 0.6), 2);
-
-  // Draw projected border only when reprojection is reasonably small.
-  // Otherwise yellow overlay may look "drifted" and mislead tuning.
-  const std::vector<cv::Point2f> & projected_corners = reproj;
-  constexpr double kProjectedBorderDrawMaxReprojPx = 2.5;
-  if (projected_corners.size() == 4U && reproj_err_px <= kProjectedBorderDrawMaxReprojPx) {
-    cv::line(annotated, projected_corners[0], projected_corners[1], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
-    cv::line(annotated, projected_corners[1], projected_corners[2], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
-    cv::line(annotated, projected_corners[2], projected_corners[3], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
-    cv::line(annotated, projected_corners[3], projected_corners[0], cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
-  } else if (projected_corners.size() == 4U) {
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(3)
-        << "detect_diag projected_border_suppressed reproj_px=" << reproj_err_px
-        << " threshold_px=" << kProjectedBorderDrawMaxReprojPx;
-    publishLog(oss.str());
-  }
+  // 不再绘制黄色「模型重投影边」：与绿色图像边并存时稍有残差就会看起来像「双框不准」，只保留绿框+坐标轴即可判读
   cv::Rodrigues(rvec, r_target_to_cam);
   t_target_to_cam = tvec.clone();
   out_mean_corner_reproj_px = reproj_err_px;

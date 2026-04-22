@@ -53,3 +53,5 @@ simulation/src/Universal_Robots_ROS2_Gazebo_Simulation/
 
 # Calibration outputs (local run artifacts)
 simulation/calib_output/
+simulation/calib_output_isaac/
+simulation/.pydeps/

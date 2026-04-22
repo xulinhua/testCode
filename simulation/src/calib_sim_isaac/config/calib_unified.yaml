@@ -18,8 +18,9 @@
       - 0.0
       - 0.0
       - 1.0
-      marker_bbox_ratio_min: 0.01
-      marker_bbox_ratio_max: 0.090
+      # 眼在手外/固定机位：板子更远、占画幅更小，门限与 eye_to_hand.yaml 一致（eih 腕部相机可更大）
+      marker_bbox_ratio_min: 0.006
+      marker_bbox_ratio_max: 0.060
       use_tf_for_sample_pose: true
       tf_base_frame: base_link
       tf_ee_frame_arm0: J1_6
@@ -346,8 +347,9 @@
       - 0.0
       - 0.0
       - 1.0
-      marker_bbox_ratio_min: 0.01
-      marker_bbox_ratio_max: 0.090
+      # 同 eth0：眼在手外/固定机位
+      marker_bbox_ratio_min: 0.006
+      marker_bbox_ratio_max: 0.060
       use_tf_for_sample_pose: true
       tf_base_frame: base_link
       tf_ee_frame_arm0: J1_6
