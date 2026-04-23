@@ -27,3 +27,6 @@ Thumbs.db
 # Model files (large binaries, optional)
 # *.stl
 # *.dae
+
+# Local runtime logs
+MUJOCO_LOG.TXT
