@@ -59,6 +59,13 @@ ros2 run calib_sim_isaac calib_sim_node
 
 启动后在窗口中通过下拉框切换 **眼在手外 eth0/eth1**、**眼在手上 eih0/eih1**；参数来自安装目录下的 `share/calib_sim_isaac/config/calib_unified.yaml`（各模式带前缀，由 `config_data_manager` 加载）。
 
+### 配置加载机制（重构后）
+
+- 本包现已改为 **启动时直接读取 YAML 到 `CalibConfigData` 结构体**，运行期间不再依赖 `declare_parameter/get_parameter`。
+- `CalibNode` 会从启动参数 `--params-file` 提取配置文件路径，确保“当前运行到底用了哪份配置”可追踪、可复现。
+- 模式切换（`set_mode:eth0/eih0...`）时会在日志输出 `mode_config_confirm ...`，可在 UI 日志区直接核对关键参数是否生效。
+- 这样可避免运行中 ROS 参数被外部工具改写而导致的标定异常。
+
 ### 单 YAML 节点（调试）
 
 也可自行指定参数文件启动同一 `CalibNode` 逻辑（需自行准备入口或沿用项目内其它 main），例如仅眼在手上：
@@ -176,10 +183,18 @@ calib_sim_isaac/
 │   ├── eye_to_hand.yaml
 │   └── ui.yaml
 ├── include/calib_sim_isaac/
+│   ├── config_data_manager.hpp           # YAML -> CalibConfigData（非运行期参数依赖）
+│   ├── calib_qt_ui_data_utils.hpp        # 历史目录扫描/样本收集等通用工具
+│   ├── calib_qt_ui_history_service.hpp   # 历史 run 数据聚合服务
+│   └── calib_qt_ui_presenter_utils.hpp   # 日志展示策略（着色/拼接）
 └── src/
     ├── calib_node.cpp          # 核心：检测、采样、手眼、落盘
     ├── config_data_manager.cpp
-    ├── calib_qt_ui.cpp         # Qt 界面
+    ├── calib_qt_ui.cpp         # Qt 纯界面主流程（控件/信号槽）
+    ├── calib_qt_ui_ros_node.cpp        # UI ROS 节点实现（订阅/发布）
+    ├── calib_qt_ui_data_utils.cpp      # UI 非业务工具实现
+    ├── calib_qt_ui_history_service.cpp # 历史结果读取实现
+    ├── calib_qt_ui_presenter_utils.cpp # 日志展示实现
     ├── calib_ui_node.cpp
     ├── calib_sim_node.cpp
     ├── calib_qt_ui_node.cpp

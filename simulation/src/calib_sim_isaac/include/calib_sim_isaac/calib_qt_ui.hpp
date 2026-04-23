@@ -4,6 +4,7 @@
 // Qt 标定界面：订阅图像与日志，向标定节点发送控制字符串；与 CalibQtUiRosNode 配合。
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 

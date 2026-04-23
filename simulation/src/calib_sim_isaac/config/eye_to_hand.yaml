@@ -18,17 +18,21 @@
     capture_wait_timeout_sec: 12.0
     topic_wait_timeout_sec: 60.0
     joint_command_burst_count: 5
-    use_known_target_mount: true
+    use_known_target_mount: false
     # target_to_gripper_pose (inverse of URDF gripper->target mount pose)
-    target_to_gripper_pose: [0.0, 0.12, 0.01, 0.0, 0.0, 0.0, 1.0]
-    # 固定相机下方板子占画幅小；过大会误拒。与 calib_unified 中 eth0/eth1 同量级可对照调
-    marker_bbox_ratio_min: 0.006
+    # tuned from recent run candidate: cfg*flipY + d(0,-0.06,0)
+    target_to_gripper_pose: [0.0, 0.06, 0.01, 0.0, 1.0, 0.0, 0.0]
+    # rs405 固定机位下板子更小，再降一档最小面积门限
+    marker_bbox_ratio_min: 0.0008
     marker_bbox_ratio_max: 0.060
+    eye_to_hand_retry_enabled: true
     # 采样末端位姿：与图像时间戳对齐的 TF（优于异步 /joint_states），右臂标定建议开启
     use_tf_for_sample_pose: true
     tf_base_frame: "base_link"
     tf_ee_frame_arm0: "J1_6"
     tf_ee_frame_arm1: "J2_6"
+    # Isaac/ROS 桥：固定 cam0 成像/投影常对齐到 Camera_Pseudo_Depth（用于 TF 参考/known_mount 选解）
+    tf_fixed_cam_ref_frame: "Camera_Pseudo_Depth"
     # 已知安装位姿求解时的平移一致性阈值 (m)；略放宽以配合 TF 同步
     known_mount_quality_max_m: 0.23
     # 初始化：先发多帧全零到 /arm_controller/commands，再延时后发初始位姿，避免 IK 立刻覆盖复位

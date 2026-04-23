@@ -7,24 +7,27 @@
       marker_length_m: 0.083333
       min_samples: 16
       state_timeout_sec: 2.0
-    topic_wait_timeout_sec: 60.0
-    joint_command_burst_count: 5
-      use_known_target_mount: true
+      topic_wait_timeout_sec: 60.0
+      joint_command_burst_count: 5
+      use_known_target_mount: false
       target_to_gripper_pose:
       - 0.0
-      - 0.12
+      - 0.06
       - 0.01
       - 0.0
-      - 0.0
-      - 0.0
       - 1.0
+      - 0.0
+      - 0.0
       # 眼在手外/固定机位：板子更远、占画幅更小，门限与 eye_to_hand.yaml 一致（eih 腕部相机可更大）
-      marker_bbox_ratio_min: 0.006
+      marker_bbox_ratio_min: 0.0008
       marker_bbox_ratio_max: 0.060
+      eye_to_hand_retry_enabled: true
       use_tf_for_sample_pose: true
       tf_base_frame: base_link
       tf_ee_frame_arm0: J1_6
       tf_ee_frame_arm1: J2_6
+      # 固定 camera0：与 Isaac Camera_Pseudo_Depth 成像坐标系对齐
+      tf_fixed_cam_ref_frame: Camera_Pseudo_Depth
       known_mount_quality_max_m: 0.23
       init_reset_burst_count: 6
       init_reset_burst_period_ms: 50
@@ -71,7 +74,7 @@
       - -0.061628
       - 0.29
       - -0.33
-      - 0.4
+      - 0.37
       - -0.673945
       - 0.735481
       - 0.047127
@@ -336,24 +339,27 @@
       marker_length_m: 0.083333
       min_samples: 16
       state_timeout_sec: 2.0
-    topic_wait_timeout_sec: 60.0
-    joint_command_burst_count: 5
-      use_known_target_mount: true
+      topic_wait_timeout_sec: 60.0
+      joint_command_burst_count: 5
+      use_known_target_mount: false
       target_to_gripper_pose:
       - 0.0
-      - 0.12
+      - 0.06
       - 0.01
       - 0.0
-      - 0.0
-      - 0.0
       - 1.0
+      - 0.0
+      - 0.0
       # 同 eth0：眼在手外/固定机位
-      marker_bbox_ratio_min: 0.006
+      marker_bbox_ratio_min: 0.0008
       marker_bbox_ratio_max: 0.060
+      eye_to_hand_retry_enabled: true
       use_tf_for_sample_pose: true
       tf_base_frame: base_link
       tf_ee_frame_arm0: J1_6
       tf_ee_frame_arm1: J2_6
+      # 固定 camera0：与 Isaac Camera_Pseudo_Depth 成像坐标系对齐
+      tf_fixed_cam_ref_frame: Camera_Pseudo_Depth
       known_mount_quality_max_m: 0.23
       init_reset_burst_count: 6
       init_reset_burst_period_ms: 50
@@ -400,7 +406,7 @@
       - -0.061628
       - 0.29
       - -0.33
-      - 0.4
+      - 0.37
       - -0.673945
       - 0.735481
       - 0.047127
@@ -664,13 +670,13 @@
       arm_id: 0
       aruco_dict_id: 11
       marker_length_m: 0.083333
-      min_samples: 16
+      min_samples: 12
       state_timeout_sec: 2.0
-    topic_wait_timeout_sec: 60.0
-    joint_command_burst_count: 5
+      topic_wait_timeout_sec: 60.0
+      joint_command_burst_count: 5
       reached_wait_timeout_sec: 20.0
       capture_wait_timeout_sec: 6.0
-      use_known_target_mount: true
+      use_known_target_mount: false
       target_to_gripper_pose:
       - 0.0
       - 0.12
@@ -681,6 +687,10 @@
       - 1.0
       marker_bbox_ratio_min: 0.01
       marker_bbox_ratio_max: 0.090
+      sample_reproj_error_max_px: 3.3
+      handeye_reproj_filter_max_px: 3.0
+      handeye_reproj_min_samples: 10
+      reproj_reject_skip_count: 6
       use_tf_for_sample_pose: true
       tf_base_frame: base_link
       tf_ee_frame_arm0: J1_6
@@ -719,7 +729,7 @@
         0.366000, -0.161200, 0.390000,   -0.6740254, 0.7359312, -0.0175415, 0.0615412,
         0.327500, -0.082000, 0.443000,   0.7397660, -0.6650565,  0.0084524, 0.1018563,
         0.356000, -0.010000, 0.430000,   0.7573243, -0.6474251,  0.0849782, 0.0089054,
-        0.325000, -0.146800, 0.397000,  -0.6800490, 0.7302374,  0.0653855, -0.0033721,
+        0.343000, -0.132000, 0.418000,  -0.7443780, 0.6622260, -0.0817800, -0.0258990,
         0.364000, -0.098800, 0.447000,  -0.6826752, 0.7274819,  0.0068192, 0.0683970,
         0.334000, -0.209200, 0.407000,  -0.6435015, 0.7616960,  0.0087222, -0.0751597,
         0.369000, -0.065200, 0.400000,   0.7387045, -0.6716768,  0.0524588, -0.0203482,
@@ -727,7 +737,7 @@
         0.360000, -0.202000, 0.435000,  -0.6602697, 0.7444365, -0.0968138, -0.0220308,
         0.322500, -0.074800, 0.393000,   0.7245025, -0.6860785, -0.0098759, 0.0655344,
         0.354000, -0.022000, 0.425000,  -0.6296121, 0.7697973,  0.0173845, 0.1034338,
-        0.329000, -0.185200, 0.385000,   0.7535236, -0.6530507, -0.0756725, -0.0008183,
+        0.344000, -0.172000, 0.412000,   0.6581240, -0.7480060,  0.0780150,  0.0356730,
         0.365000, -0.154000, 0.433000,   0.7071068, -0.7071068,  0.0000000, 0.0000000,
         0.332500, -0.034000, 0.405000,   0.7071068, -0.7071068,  0.0000000, 0.0000000,
       ]
@@ -751,19 +761,18 @@
         0.724000, -0.022000, 0.430500,   0.7764678, 0.6191307, -0.1158619, 0.0187316,
         0.699000, -0.185200, 0.368500,   0.6458892, 0.7587161, -0.0004292, 0.0847169,
         0.735000, -0.154000, 0.442900,   0.7071068, 0.7071068,  0.0000000, 0.0000000,
-        0.702500, -0.034000, 0.399500,   0.7071068, 0.7071068,  0.0000000, 0.0000000,
       ]
     eih1:
       arm_id: 1
       aruco_dict_id: 11
       marker_length_m: 0.083333
-      min_samples: 16
+      min_samples: 12
       state_timeout_sec: 2.0
-    topic_wait_timeout_sec: 60.0
-    joint_command_burst_count: 5
+      topic_wait_timeout_sec: 60.0
+      joint_command_burst_count: 5
       reached_wait_timeout_sec: 20.0
       capture_wait_timeout_sec: 6.0
-      use_known_target_mount: true
+      use_known_target_mount: false
       target_to_gripper_pose:
       - 0.0
       - 0.12
@@ -774,6 +783,10 @@
       - 1.0
       marker_bbox_ratio_min: 0.01
       marker_bbox_ratio_max: 0.090
+      sample_reproj_error_max_px: 3.6
+      handeye_reproj_filter_max_px: 3.0
+      handeye_reproj_min_samples: 10
+      reproj_reject_skip_count: 6
       use_tf_for_sample_pose: true
       tf_base_frame: base_link
       tf_ee_frame_arm0: J1_6
@@ -797,7 +810,7 @@
       joint_names_arm1: ["J2_1_joint", "J2_2_joint", "J2_3_joint", "J2_4_joint", "J2_5_joint", "J2_6_joint"]
       output_dir: calib_output_isaac
       use_current_pose_as_center: false
-      target_marker_id: 1
+      target_marker_id: 2
       image_topic: /camera2_rgb_sensor/image_raw
       depth_topic: /camera2/depth/image_raw
       camera_info_topic: /camera2_rgb_sensor/camera_info
@@ -822,7 +835,6 @@
         0.354000, -0.022000, 0.425000,  -0.6296121, 0.7697973,  0.0173845, 0.1034338,
         0.329000, -0.185200, 0.385000,   0.7535236, -0.6530507, -0.0756725, -0.0008183,
         0.365000, -0.154000, 0.433000,   0.7071068, -0.7071068,  0.0000000, 0.0000000,
-        0.332500, -0.034000, 0.405000,   0.7071068, -0.7071068,  0.0000000, 0.0000000,
       ]
       target_poses_arm1: [
         0.715000, -0.118000, 0.415000,   0.7071068, 0.7071068,  0.0000000, 0.0000000,
@@ -844,5 +856,4 @@
         0.724000, -0.022000, 0.430500,   0.7764678, 0.6191307, -0.1158619, 0.0187316,
         0.699000, -0.185200, 0.368500,   0.6458892, 0.7587161, -0.0004292, 0.0847169,
         0.735000, -0.154000, 0.442900,   0.7071068, 0.7071068,  0.0000000, 0.0000000,
-        0.702500, -0.034000, 0.399500,   0.7071068, 0.7071068,  0.0000000, 0.0000000,
       ]

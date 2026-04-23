@@ -61,6 +61,8 @@ private:
     cv::Mat t_target_to_cam;
     /// Mean |projected−detected| over 4 marker corners (pixels), from PnP self-check
     double mean_corner_reproj_px{0.0};
+    /// Approximate reprojection error converted to mm using target depth and focal length.
+    double mean_corner_reproj_mm{0.0};
   };
 
   /// 标定质量汇总：重投影、手眼链平移/旋转残差（均值与逐点）。
@@ -68,10 +70,17 @@ private:
   {
     double mean_corner_reproj_px{0.0};
     std::vector<double> per_point_corner_reproj_px;
+    double mean_corner_reproj_mm{0.0};
+    std::vector<double> per_point_corner_reproj_mm;
+    /// 手眼链残差主指标：眼在手上时与手眼内点集一致，避免混入已剔除离群点导致与 solver 行不一致。
     double mean_chain_translation_m{0.0};
     std::vector<double> per_point_chain_translation_m;
     double mean_chain_rotation_deg{0.0};
     std::vector<double> per_point_chain_rotation_deg;
+    /// 眼在手上：全样本上的链式残差均值（仅作参考，含未进入 hand-eye 子集/离群帧）
+    double mean_chain_translation_all_samples_m{0.0};
+    double mean_chain_rotation_all_samples_deg{0.0};
+    bool eih_inlier_window_used{false};
   };
 
   void declareAndLoadParameters();
@@ -145,6 +154,14 @@ private:
     const calib_sim_isaac::msg::ArmPose & target_pose,
     sensor_msgs::msg::JointState & out_joint_cmd);
   bool tryGetLiveReferenceTcamBase(cv::Mat & out_t_cam_base_ref) const;
+  bool tryLookupTfTransform(
+    const std::string & parent_frame,
+    const std::string & child_frame,
+    cv::Mat & out_t_parent_child) const;
+  bool tryGetTfReferenceTcamGripper(cv::Mat & out_t_cam_gripper_ref, std::string & out_ref_desc) const;
+  bool tryGetTfReferenceTcamBase(cv::Mat & out_t_cam_base_ref, std::string & out_ref_desc) const;
+  void logActiveCalibrationParams(const std::string & trigger);
+  void logAndClearTargetReprojRejectStats(const std::string & trigger);
   mutable std::string last_ik_failure_reason_;
   bool isJointTargetReached(double * out_max_abs_err_rad) const;
   bool isPoseTargetReachedFromTf(double * out_pos_err_m, double * out_rot_err_deg) const;
@@ -152,6 +169,7 @@ private:
   std::string formatCurrentPoseCompact() const;
 
   bool unified_mode_{false};
+  std::string config_yaml_path_;
   std::unordered_map<std::string, CalibConfigData> mode_configs_;
   std::string active_mode_;
 
@@ -245,8 +263,12 @@ private:
   bool warned_no_joint_states_pub_;
   bool warned_no_joint_command_sub_;
   bool warned_domain_mismatch_hint_;
+  bool has_prev_target_marker_center_;
+  cv::Point2f prev_target_marker_center_;
 
   std::vector<Sample> samples_;
+  /// 眼在手上：最后一次 hand-eye 求解使用的样本下标（与 calibrateHandEye 的 anchor 帧 s0=front() 一致）
+  std::vector<int> eih_last_inlier_indices_;
   std::size_t target_index_;
   bool waiting_arm_reached_;
   bool waiting_capture_;
@@ -258,6 +280,8 @@ private:
   bool auto_mode_;
   bool pending_step_;
   std::string last_detect_fail_reason_;
+  int consecutive_reproj_rejects_;
+  std::unordered_map<std::size_t, int> target_reproj_reject_counts_;
   bool waiting_init_pose_;
   std::string last_status_text_;
   std::unordered_map<int, calib_sim_isaac::msg::ArmPose> initial_pose_by_arm_;
@@ -270,6 +294,11 @@ private:
   double joint_reach_tolerance_rad_;
   double pose_reach_position_tolerance_m_;
   double pose_reach_rotation_tolerance_deg_;
+  double sample_reproj_error_max_px_;
+  double handeye_reproj_filter_max_px_;
+  int handeye_reproj_min_samples_;
+  int reproj_reject_skip_count_;
+  bool eye_to_hand_retry_enabled_;
   /// 关节与 TF 均判定到位后，再等待该时间（秒）才进入采图，缓解仿真/控制滞后
   double post_reach_settle_sec_;
   /// 为 true：post_reach_settle 整段计时内每周期须关节也在容差内（与 TF 到位叠加，抑制「TF 已收敛、关节仍在微动」就采图）
@@ -289,6 +318,8 @@ private:
   std::string tf_base_frame_;
   std::string tf_ee_frame_arm0_;
   std::string tf_ee_frame_arm1_;
+  /// eye_to_hand / cam0：Isaac 常用 Camera_Pseudo_Depth 作为成像/投影坐标系
+  std::string tf_fixed_cam_ref_frame_;
   double known_mount_quality_max_m_;
   int init_reset_burst_count_;
   int init_reset_burst_period_ms_;

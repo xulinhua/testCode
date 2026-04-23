@@ -1,16 +1,16 @@
 // Qt 标定主窗口：图像缩放/平移、模式切换、命令下发与日志展示；RunCalibQtUiApp 为入口。
 #include "calib_sim_isaac/calib_qt_ui.hpp"
+#include "calib_sim_isaac/calib_qt_ui_data_utils.hpp"
+#include "calib_sim_isaac/calib_qt_ui_history_service.hpp"
+#include "calib_sim_isaac/calib_qt_ui_presenter_utils.hpp"
 
 #include <atomic>
 #include <algorithm>
-#include <cstdlib>
-#include <filesystem>
 #include <mutex>
 #include <thread>
 
 #include <QApplication>
 #include <QComboBox>
-#include <QFile>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QImage>
@@ -18,7 +18,6 @@
 #include <QMainWindow>
 #include <QPixmap>
 #include <QPushButton>
-#include <QTextStream>
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QTimer>
@@ -28,10 +27,6 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QMouseEvent>
-#include <QBrush>
-#include <QColor>
-#include <QPalette>
-#include <QTextCharFormat>
 
 namespace calib_sim_isaac
 {
@@ -134,14 +129,21 @@ protected:
     if (original_image_.isNull()) {
       return;
     }
+    const QSize avail = size();
+    if (avail.width() < 1 || avail.height() < 1) {
+      return;
+    }
+    // 始终以原图为源：先算适应窗口的基准尺寸，再乘 scale_；避免 SmoothTransformation 放大发糊。
+    const QSize fitted = original_image_.size().scaled(avail, Qt::KeepAspectRatio);
+    if (fitted.width() < 1 || fitted.height() < 1) {
+      return;
+    }
+    const int dw = std::max(1, static_cast<int>(std::round(static_cast<double>(fitted.width()) * scale_)));
+    const int dh = std::max(1, static_cast<int>(std::round(static_cast<double>(fitted.height()) * scale_)));
     QPainter painter(this);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    const QSize base = size();
-    const QSize target_size(
-      std::max(1, static_cast<int>(base.width() * scale_)),
-      std::max(1, static_cast<int>(base.height() * scale_)));
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     const QPixmap pix = QPixmap::fromImage(original_image_).scaled(
-      target_size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+      dw, dh, Qt::KeepAspectRatio, Qt::FastTransformation);
     const int x = (width() - pix.width()) / 2 + pan_offset_.x();
     const int y = (height() - pix.height()) / 2 + pan_offset_.y();
     painter.drawPixmap(x, y, pix);
@@ -154,97 +156,6 @@ protected:
   bool dragging_{false};
   QPoint last_mouse_pos_{0, 0};
 };
-
-CalibQtUiRosNode::CalibQtUiRosNode(const rclcpp::NodeOptions & options)
-: Node("calib_qt_ui_node", options)
-{
-  status_sub_ = create_subscription<std_msgs::msg::String>(
-    "/calib_sim_isaac/status", 20, [this](const std_msgs::msg::String::SharedPtr msg) {
-      std::lock_guard<std::mutex> lk(mu_);
-      status_ = msg->data;
-    });
-  log_sub_ = create_subscription<std_msgs::msg::String>(
-    "/calib_sim_isaac/log", 50, [this](const std_msgs::msg::String::SharedPtr msg) {
-      std::lock_guard<std::mutex> lk(mu_);
-      logs_.push_back(msg->data);
-      if (logs_.size() > 200) {
-        logs_.erase(logs_.begin());
-      }
-    });
-  reach_error_sub_ = create_subscription<std_msgs::msg::String>(
-    "/calib_sim_isaac/reach_error", 20, [this](const std_msgs::msg::String::SharedPtr msg) {
-      std::lock_guard<std::mutex> lk(mu_);
-      reach_error_ = msg->data;
-    });
-  result_text_sub_ = create_subscription<std_msgs::msg::String>(
-    "/calib_sim_isaac/result_text", 10, [this](const std_msgs::msg::String::SharedPtr msg) {
-      std::lock_guard<std::mutex> lk(mu_);
-      result_text_ = msg->data;
-    });
-  raw_sub_ = create_subscription<sensor_msgs::msg::Image>(
-    "/calib_sim_isaac/raw_image", 10, [this](const sensor_msgs::msg::Image::SharedPtr msg) {
-      std::lock_guard<std::mutex> lk(mu_);
-      raw_ = *msg;
-    });
-  result_sub_ = create_subscription<sensor_msgs::msg::Image>(
-    "/calib_sim_isaac/result_image", 10, [this](const sensor_msgs::msg::Image::SharedPtr msg) {
-      std::lock_guard<std::mutex> lk(mu_);
-      result_ = *msg;
-    });
-  ctrl_pub_ = create_publisher<std_msgs::msg::String>("/calib_sim_isaac/control", 10);
-}
-
-void CalibQtUiRosNode::sendCmd(const std::string & cmd)
-{
-  std_msgs::msg::String m;
-  m.data = cmd;
-  ctrl_pub_->publish(m);
-}
-
-void CalibQtUiRosNode::clearLogsAndResult()
-{
-  std::lock_guard<std::mutex> lk(mu_);
-  logs_.clear();
-  result_text_ = "等待标定结果...";
-  raw_ = sensor_msgs::msg::Image{};
-  result_ = sensor_msgs::msg::Image{};
-}
-
-std::string CalibQtUiRosNode::status()
-{
-  std::lock_guard<std::mutex> lk(mu_);
-  return status_;
-}
-
-std::vector<std::string> CalibQtUiRosNode::logs()
-{
-  std::lock_guard<std::mutex> lk(mu_);
-  return logs_;
-}
-
-std::string CalibQtUiRosNode::reachError()
-{
-  std::lock_guard<std::mutex> lk(mu_);
-  return reach_error_;
-}
-
-std::string CalibQtUiRosNode::resultText()
-{
-  std::lock_guard<std::mutex> lk(mu_);
-  return result_text_;
-}
-
-sensor_msgs::msg::Image CalibQtUiRosNode::raw()
-{
-  std::lock_guard<std::mutex> lk(mu_);
-  return raw_;
-}
-
-sensor_msgs::msg::Image CalibQtUiRosNode::result()
-{
-  std::lock_guard<std::mutex> lk(mu_);
-  return result_;
-}
 
 static QImage toQImage(const sensor_msgs::msg::Image & msg)
 {
@@ -265,7 +176,6 @@ static QImage toQImage(const sensor_msgs::msg::Image & msg)
 
 int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc, char ** argv)
 {
-  namespace fs = std::filesystem;
   QApplication app(argc, argv);
   app.setStyleSheet(QString::fromUtf8(R"(
     QMainWindow { background: #eef1f6; }
@@ -432,189 +342,13 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   /// 供历史列表/清空磁盘使用；标定结果里的 calib_run_dir 可能是相对路径，需与 CalibNode 的 cwd 一致
   std::string history_result_text_hint;
 
-  const auto trimStr = [](std::string s) -> std::string {
-    const auto first = s.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) {
-      return "";
-    }
-    const auto last = s.find_last_not_of(" \t\r\n");
-    return s.substr(first, last - first + 1);
-  };
-
-  const auto collectScanRoots = [&](const std::string & result_text_hint) -> std::vector<fs::path> {
-    std::vector<fs::path> roots;
-    auto try_add = [&](const fs::path & p) {
-      if (p.empty()) {
-        return;
-      }
-      std::error_code ec;
-      fs::path abs_p = p;
-      if (p.is_relative()) {
-        abs_p = fs::current_path() / p;
-      }
-      abs_p = fs::weakly_canonical(abs_p, ec);
-      if (ec || !fs::exists(abs_p) || !fs::is_directory(abs_p)) {
-        return;
-      }
-      if (std::find(roots.begin(), roots.end(), abs_p) == roots.end()) {
-        roots.push_back(abs_p);
-      }
-    };
-    // 与 CalibNode 的 output_dir 默认名一致；相对路径相对当前工作目录
-    try_add(fs::path("calib_output_isaac"));
-    {
-      const fs::path cwd = fs::current_path();
-      if (!cwd.empty()) {
-        const fs::path parent = cwd.parent_path();
-        if (!parent.empty() && parent != cwd) {
-          try_add(parent / "calib_output_isaac");
-        }
-      }
-    }
-    if (const char * env = std::getenv("CALIB_SIM_ISAAC_OUTPUT_DIR")) {
-      if (env[0] != '\0') {
-        try_add(fs::path(env));
-      }
-    }
-    {
-      const std::string key_dir = "calib_run_dir:";
-      const std::size_t pos_dir = result_text_hint.rfind(key_dir);
-      if (pos_dir != std::string::npos) {
-        std::string dir = trimStr(result_text_hint.substr(pos_dir + key_dir.size()));
-        if (!dir.empty()) {
-          std::error_code ec;
-          fs::path run_path(dir);
-          if (run_path.is_relative()) {
-            run_path = fs::weakly_canonical(fs::current_path() / run_path, ec);
-          } else {
-            run_path = fs::weakly_canonical(run_path, ec);
-          }
-          if (!ec && !run_path.empty() && run_path.has_parent_path()) {
-            try_add(run_path.parent_path());
-          }
-        }
-      }
-    }
-    return roots;
-  };
-
-  const auto parseRunDirFromResultText = [&](const std::string & result_text) -> std::string {
-    {
-      const std::string key = "calib_run_dir:";
-      const std::size_t pos = result_text.rfind(key);
-      if (pos != std::string::npos) {
-        const std::string dir = trimStr(result_text.substr(pos + key.size()));
-        if (!dir.empty()) {
-          std::error_code ec;
-          fs::path p(dir);
-          if (p.is_relative()) {
-            p = fs::weakly_canonical(fs::current_path() / p, ec);
-          } else {
-            p = fs::weakly_canonical(p, ec);
-          }
-          if (!ec) {
-            return p.string();
-          }
-          return dir;
-        }
-      }
-    }
-    {
-      const std::string key = "calib_run_stamp:";
-      const std::size_t pos = result_text.rfind(key);
-      if (pos != std::string::npos) {
-        std::string stamp = trimStr(result_text.substr(pos + key.size()));
-        if (!stamp.empty()) {
-          for (const auto & root : collectScanRoots(result_text)) {
-            const fs::path candidate = root / ("calib_run_" + stamp);
-            std::error_code ec;
-            if (fs::exists(candidate, ec) && !ec) {
-              return fs::weakly_canonical(candidate, ec).string();
-            }
-          }
-        }
-      }
-    }
-    const std::string key = "result_image_samples_dir:";
-    const std::size_t pos = result_text.rfind(key);
-    if (pos == std::string::npos) {
-      return "";
-    }
-    return trimStr(result_text.substr(pos + key.size()));
-  };
-
-  const auto collectSampleImages = [](const std::string & run_dir, const char * prefix) {
-    std::vector<std::string> files;
-    if (run_dir.empty()) {
-      return files;
-    }
-    std::error_code ec;
-    if (!fs::exists(run_dir, ec) || ec) {
-      return files;
-    }
-    const std::string pre(prefix);
-    for (const auto & entry : fs::directory_iterator(run_dir, ec)) {
-      if (ec || !entry.is_regular_file()) {
-        continue;
-      }
-      const std::string name = entry.path().filename().string();
-      if (name.rfind(pre, 0) == 0 && entry.path().extension() == ".png") {
-        files.push_back(entry.path().string());
-      }
-    }
-    std::sort(files.begin(), files.end());
-    return files;
-  };
-
   const auto filterYamlLinesForDisplay = [](const QString & yaml_text) -> QString {
-    QString out;
-    const QStringList lines = yaml_text.split('\n');
-    for (const QString & line : lines) {
-      if (line.contains(QLatin1String("sample_manifest_file")) ||
-        line.contains(QLatin1String("result_file:")) ||
-        line.contains(QLatin1String("result_image_samples_dir:")) ||
-        line.contains(QLatin1String("calib_result_file:")) ||
-        line.contains(QLatin1String("calib_run_dir:")))
-      {
-        continue;
-      }
-      out += line;
-      out += QLatin1Char('\n');
-    }
-    return out;
-  };
-
-  const auto appendLogLineColored = [](QTextEdit * te, const QString & line) {
-    QTextCursor cursor(te->document());
-    cursor.movePosition(QTextCursor::End);
-    QTextCharFormat fmt;
-    const bool err = line.startsWith(QLatin1String("[ERROR]")) ||
-      line.contains(QLatin1String("calibration_failed"));
-    if (err) {
-      fmt.setForeground(QBrush(QColor(200, 40, 40)));
-    } else {
-      fmt.setForeground(QBrush(te->palette().color(QPalette::WindowText)));
-    }
-    cursor.setCharFormat(fmt);
-    cursor.insertText(line + QLatin1Char('\n'));
+    return QString::fromStdString(FilterResultYamlForDisplay(yaml_text.toStdString()));
   };
 
   std::vector<std::string> last_run_dirs_cache;
   const auto refreshRunList = [&](const std::string & result_text_hint) {
-    const std::vector<fs::path> scan_roots = collectScanRoots(result_text_hint);
-    std::vector<std::string> run_dirs;
-    for (const auto & root : scan_roots) {
-      std::error_code ec;
-      for (const auto & entry : fs::directory_iterator(root, ec)) {
-        if (ec || !entry.is_directory()) {
-          continue;
-        }
-        const std::string name = entry.path().filename().string();
-        if (name.rfind("calib_run_", 0) == 0) {
-          run_dirs.push_back(entry.path().string());
-        }
-      }
-    }
+    std::vector<std::string> run_dirs = ListRunDirs(result_text_hint);
     if (run_dirs.empty()) {
       run_select->clear();
       last_run_dirs_cache.clear();
@@ -629,7 +363,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     run_select->clear();
     for (const auto & path : run_dirs) {
       run_select->addItem(
-        QString::fromStdString(fs::path(path).filename().string()),
+        QString::fromStdString(Basename(path)),
         QString::fromStdString(path));
     }
     if (!prev_data.isEmpty()) {
@@ -675,25 +409,15 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       return;
     }
     appendUiLog(std::string("[历史数据] 开始加载: ") + run_dir);
-    std::string yaml_file = run_dir + "/calib_result_eye_to_hand.yaml";
-    if (!fs::exists(yaml_file)) {
-      const std::string fallback = run_dir + "/calib_result_eye_in_hand.yaml";
-      if (fs::exists(fallback)) {
-        yaml_file = fallback;
-      }
-    }
-    if (fs::exists(yaml_file)) {
-      QFile f(QString::fromStdString(yaml_file));
-      if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QTextStream in(&f);
-        result_view->setPlainText(filterYamlLinesForDisplay(in.readAll()));
-        appendUiLog(std::string("[历史数据] 已读取标定 YAML: ") + yaml_file);
-      }
+    const RunHistoryData data = LoadRunHistoryData(run_dir);
+    if (data.yaml_found) {
+      result_view->setPlainText(QString::fromStdString(data.filtered_yaml_text));
+      appendUiLog(std::string("[历史数据] 已读取标定 YAML: ") + data.yaml_file);
     } else {
       appendUiLog("[历史数据] 未找到 calib_result_eye_to_hand.yaml / eye_in_hand.yaml");
     }
-    selected_result_images = collectSampleImages(run_dir, "result_sample_");
-    selected_raw_images = collectSampleImages(run_dir, "raw_sample_");
+    selected_result_images = data.result_images;
+    selected_raw_images = data.raw_images;
     appendUiLog(
       std::string("[历史数据] 结果图 ") + std::to_string(selected_result_images.size()) + " 张, 原图 " +
       std::to_string(selected_raw_images.size()) + " 张");
@@ -761,27 +485,11 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
       return;
     }
     int dirs_removed = 0;
-    const std::vector<fs::path> scan_roots = collectScanRoots(history_result_text_hint);
+    const std::vector<std::string> scan_roots = CollectScanRoots(history_result_text_hint);
     if (scan_roots.empty()) {
       appendUiLog("[历史数据] 未找到可删除的标定输出目录（请确认在 simulation 下启动或设置 CALIB_SIM_ISAAC_OUTPUT_DIR）");
     } else {
-      for (const auto & root : scan_roots) {
-        std::error_code ec;
-        for (const auto & entry : fs::directory_iterator(root, ec)) {
-          if (ec || !entry.is_directory()) {
-            continue;
-          }
-          const std::string name = entry.path().filename().string();
-          if (name.rfind("calib_run_", 0) != 0) {
-            continue;
-          }
-          std::error_code rm_ec;
-          fs::remove_all(entry.path(), rm_ec);
-          if (!rm_ec) {
-            ++dirs_removed;
-          }
-        }
-      }
+      dirs_removed = RemoveAllRunDirs(history_result_text_hint);
     }
     clearLocalUiData();
     refreshRunList("");
@@ -843,10 +551,10 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     if (local.result_text != last_result_text_for_auto_pick) {
       last_result_text_for_auto_pick = local.result_text;
       showing_history_image = false;
-      const std::string run_dir = parseRunDirFromResultText(local.result_text);
+      const std::string run_dir = ParseRunDirFromResultText(local.result_text);
       if (!run_dir.empty()) {
-        selected_result_images = collectSampleImages(run_dir, "result_sample_");
-        selected_raw_images = collectSampleImages(run_dir, "raw_sample_");
+        selected_result_images = CollectSampleImages(run_dir, "result_sample_");
+        selected_raw_images = CollectSampleImages(run_dir, "raw_sample_");
         selected_sample_index = selected_result_images.empty() ? -1 :
           static_cast<int>(selected_result_images.size()) - 1;
       }
@@ -873,12 +581,11 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
     }
     const bool user_is_selecting = log_view->textCursor().hasSelection();
     if (!user_is_selecting) {
-      std::vector<std::string> display_logs = ui_log_extra;
-      display_logs.insert(display_logs.end(), local.logs.begin(), local.logs.end());
+      std::vector<std::string> display_logs = BuildDisplayLogs(ui_log_extra, local.logs);
       if (display_logs != rendered_logs_snapshot) {
         log_view->clear();
         for (const auto & line : display_logs) {
-          appendLogLineColored(log_view, QString::fromStdString(line));
+          AppendLogLineColored(log_view, QString::fromStdString(line));
         }
         rendered_logs_snapshot = std::move(display_logs);
         log_view->moveCursor(QTextCursor::End);

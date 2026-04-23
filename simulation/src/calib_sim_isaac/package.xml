@@ -20,6 +20,7 @@
   <depend>orocos_kdl</depend>
   <depend>kdl_parser</depend>
   <depend>opencv</depend>
+  <depend>yaml-cpp</depend>
   <depend>qtbase5-dev</depend>
 
   <exec_depend>rosidl_default_runtime</exec_depend>

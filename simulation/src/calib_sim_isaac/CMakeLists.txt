@@ -26,6 +26,7 @@ find_package(kdl_parser REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
+find_package(yaml-cpp REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmPose.msg"
@@ -40,7 +41,12 @@ include_directories(
 add_library(calib_sim_core STATIC
   src/config_data_manager.cpp
   src/calib_node.cpp
+  src/calib_node_aruco.cpp
   src/calib_ui_node.cpp
+  src/calib_qt_ui_ros_node.cpp
+  src/calib_qt_ui_data_utils.cpp
+  src/calib_qt_ui_history_service.cpp
+  src/calib_qt_ui_presenter_utils.cpp
   src/calib_qt_ui.cpp
 )
 
@@ -59,6 +65,7 @@ ament_target_dependencies(calib_sim_core
 target_link_libraries(calib_sim_core
   ${OpenCV_LIBS}
   Qt5::Widgets
+  yaml-cpp
 )
 
 rosidl_target_interfaces(calib_sim_core

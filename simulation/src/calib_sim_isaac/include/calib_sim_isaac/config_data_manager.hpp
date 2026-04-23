@@ -1,11 +1,10 @@
 #ifndef CALIB_SIM__CONFIG_DATA_MANAGER_HPP_
 #define CALIB_SIM__CONFIG_DATA_MANAGER_HPP_
 
-// 从 ROS 参数加载标定配置（话题名、ArUco 参数、采样轨迹、TF 帧名等），供 CalibNode 使用。
-
-#include <rclcpp/rclcpp.hpp>
+// 直接从 YAML 加载标定配置（不依赖运行期 ROS 参数）。
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace calib_sim_isaac
@@ -48,29 +47,63 @@ struct CalibConfigData
   std::string tf_base_frame{"base_link"};
   std::string tf_ee_frame_arm0{"J1_6"};
   std::string tf_ee_frame_arm1{"J2_6"};
+  /// 眼在手外/固定机位：TF 中 cam0 与 OpenCV/仿真成像对齐的“相机子坐标系”名称（如 Isaac 的 Camera_Pseudo_Depth）。
+  /// 为空时回退 camera0_optical_frame / camera_info.frame_id。
+  std::string tf_fixed_cam_ref_frame{""};
   /// 眼在手外 + use_known_target_mount 时，known_mount 平移不一致阈值 (m)
   double known_mount_quality_max_m{0.20};
   /// 初始化标定：先发全零关节，再延时后发缓存初始位姿（避免 IK 立刻覆盖复位）
   int init_reset_burst_count{6};
   int init_reset_burst_period_ms{50};
   int init_delay_ms_after_reset{500};
+  bool use_joint_kinematics_interface{true};
+  bool enable_legacy_pose_fallback{false};
+  double ik_command_max_age_sec{1.0};
+  double joint_reach_tolerance_rad{0.015};
+  double pose_reach_position_tolerance_m{0.004};
+  double pose_reach_rotation_tolerance_deg{1.0};
+  double sample_reproj_error_max_px{1.8};
+  double handeye_reproj_filter_max_px{1.5};
+  int handeye_reproj_min_samples{12};
+  int reproj_reject_skip_count{8};
+  bool eye_to_hand_retry_enabled{false};
+  double post_reach_settle_sec{1.2};
+  bool post_reach_settle_require_joint{true};
+  bool reach_require_joint_and_tf{true};
+  double arm_reach_timeout_grace_sec{2.0};
+  double topic_wait_timeout_sec{60.0};
+  int joint_command_burst_count{5};
+  std::string legacy_pose_command_topic{"/robot_target_pose"};
+  std::string kinematics_pose_goal_topic{"/nova_target_pose"};
+  std::string kinematics_joint_command_topic{"/ik_joint_command"};
+  std::string ik_urdf_path{"/home/hs/testCode/simulation/src/nova_sim/urdf/nova_robot_position.urdf"};
+  std::vector<std::string> joint_names_arm0{
+    "J1_1_joint", "J1_2_joint", "J1_3_joint", "J1_4_joint", "J1_5_joint", "J1_6_joint"};
+  std::vector<std::string> joint_names_arm1{
+    "J2_1_joint", "J2_2_joint", "J2_3_joint", "J2_4_joint", "J2_5_joint", "J2_6_joint"};
+  std::string nova_all_joints_reset_topic{"/nova_sim/reset_all_joints"};
 };
 
 class EyeToHandConfigDataManager
 {
 public:
-  CalibConfigData load(rclcpp::Node & node) const;
+  /// 从 eye_to_hand.yaml 读取配置（一次性加载，运行期不再依赖 ROS 参数服务）。
+  CalibConfigData load(const std::string & yaml_path) const;
 };
 
 class EyeInHandConfigDataManager
 {
 public:
-  CalibConfigData load(rclcpp::Node & node) const;
+  /// 从 eye_in_hand.yaml 读取配置（含 arm0/arm1 分块与当前 arm 绑定字段）。
+  CalibConfigData load(const std::string & yaml_path) const;
 };
 
-/// 从带前缀的参数（如 eth0.arm_id）加载；用于 calib_unified.yaml。
-CalibConfigData loadCalibConfigPrefixed(
-  rclcpp::Node & node, const std::string & prefix, const CalibConfigData & defaults);
+/// 从带前缀的配置块（如 eth0.arm_id）加载；用于 calib_unified.yaml。
+CalibConfigData loadCalibConfigPrefixedFromYaml(
+  const std::string & yaml_path, const std::string & prefix, const CalibConfigData & defaults);
+
+/// 从 calib_unified.yaml 读取 eth0/eth1/eih0/eih1 四套配置并返回映射。
+std::unordered_map<std::string, CalibConfigData> loadUnifiedConfigsFromYaml(const std::string & yaml_path);
 
 CalibConfigData defaultCalibConfigEyeToHand();
 CalibConfigData defaultCalibConfigEyeInHand();

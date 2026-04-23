@@ -6,7 +6,7 @@
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  const auto pkg_share = ament_index_cpp::get_package_share_directory("calib_sim");
+  const auto pkg_share = ament_index_cpp::get_package_share_directory("calib_sim_isaac");
   const auto config_path = pkg_share + "/config/ui.yaml";
   rclcpp::NodeOptions options;
   options.arguments({"--ros-args", "--params-file", config_path});

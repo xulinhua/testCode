@@ -9,7 +9,7 @@
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  const auto pkg_share = ament_index_cpp::get_package_share_directory("calib_sim");
+  const auto pkg_share = ament_index_cpp::get_package_share_directory("calib_sim_isaac");
   rclcpp::NodeOptions calib_options;
   calib_options.arguments({"--ros-args", "--params-file", pkg_share + "/config/calib_unified.yaml"});
   auto calib_node = std::make_shared<calib_sim_isaac::CalibNode>("calib_sim", calib_options);

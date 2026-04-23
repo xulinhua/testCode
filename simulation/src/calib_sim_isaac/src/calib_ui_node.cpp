@@ -12,15 +12,10 @@ namespace calib_sim_isaac
 CalibSimUiNode::CalibSimUiNode(const rclcpp::NodeOptions & options)
 : Node("calib_sim_ui_node", options)
 {
-  this->declare_parameter("status_topic", std::string("/calib_sim_isaac/status"));
-  this->declare_parameter("raw_image_topic", std::string("/calib_sim_isaac/raw_image"));
-  this->declare_parameter("result_image_topic", std::string("/calib_sim_isaac/result_image"));
-  this->declare_parameter("window_name", std::string("calib_sim_ui"));
-
-  status_topic_ = this->get_parameter("status_topic").as_string();
-  raw_image_topic_ = this->get_parameter("raw_image_topic").as_string();
-  result_image_topic_ = this->get_parameter("result_image_topic").as_string();
-  window_name_ = this->get_parameter("window_name").as_string();
+  status_topic_ = "/calib_sim_isaac/status";
+  raw_image_topic_ = "/calib_sim_isaac/raw_image";
+  result_image_topic_ = "/calib_sim_isaac/result_image";
+  window_name_ = "calib_sim_ui";
 
   status_sub_ = this->create_subscription<std_msgs::msg::String>(
     status_topic_, 10, [this](const std_msgs::msg::String::SharedPtr msg) { status_ = msg->data; });
