@@ -1,0 +1,16 @@
+image_topic: /camera/image_raw
+pose_endpoint: /robot_pose
+control_endpoint: /robot_control
+mode: offline
+board_type: aruco_gridboard
+algorithm: Tsai
+pose_csv: /tmp/poses.csv
+pose_format: quaternion
+pose_columns:
+  - tx
+  - ty
+  - tz
+  - qx
+  - qy
+  - qz
+  - qw

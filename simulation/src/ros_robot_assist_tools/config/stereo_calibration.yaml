@@ -1,0 +1,7 @@
+image_topic_left: /camera_left/image_raw
+image_topic_right: /camera_right/image_raw
+pose_endpoint: /robot_pose
+control_endpoint: /robot_control
+board_type: charuco
+mode: realtime
+quality_hint: true
