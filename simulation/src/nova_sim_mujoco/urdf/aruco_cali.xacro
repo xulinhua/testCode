@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="aruco_cali">
+  
+  <!-- 定义 aruco_cali 宏 -->
+  <xacro:macro name="aruco_cali" params="parent_link child_link cali_x cali_y cali_z cali_roll cali_pitch cali_yaw mesh_file:='package://nova_sim/meshes/aruco_board.dae'">
+    
+    <!-- ArUco 标定板尺寸参数 -->
+    <xacro:property name="board_width" value="0.1"/>      
+    <xacro:property name="board_height" value="0.1"/>     
+    <xacro:property name="board_thickness" value="0.001"/> 
+    
+    <!-- 连接到父链接的关节 -->
+    <joint name="${child_link}_joint" type="fixed">
+      <origin xyz="${cali_x} ${cali_y} ${cali_z}" 
+              rpy="${cali_roll} ${cali_pitch} ${cali_yaw}"/>
+      <parent link="${parent_link}"/>
+      <child link="${child_link}"/>
+    </joint>
+    
+    <!-- 主链接 -->
+    <link name="${child_link}">
+      <visual>
+        <!-- 翻面已在 aruco_board*.dae 内用法线/绕序完成；此处勿再 rpy 转 180°，否则易镜像。 -->
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <!-- 使用带UV的平面网格贴图，Gazebo 对这种方式兼容性更好 -->
+          <mesh filename="${mesh_file}"/>
+        </geometry>
+      </visual>
+      
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${board_width} ${board_height} ${board_thickness}"/>
+        </geometry>
+      </collision>
+      
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="0.00004167" ixy="0" ixz="0" iyy="0.00004167" iyz="0" izz="0.00008333"/>
+      </inertial>
+    </link>
+
+    <!-- Gazebo 配置 -->
+    <gazebo reference="${child_link}">
+      <mu1>0.5</mu1>
+      <mu2>0.5</mu2>
+      <material>
+        <ambient>1 1 1 1</ambient>
+        <diffuse>1 1 1 1</diffuse>
+        <specular>0 0 0 1</specular>
+        <emissive>0 0 0 1</emissive>
+      </material>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

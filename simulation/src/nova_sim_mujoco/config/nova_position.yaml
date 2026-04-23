@@ -1,0 +1,81 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500
+    use_sim_time: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    arm_controller:
+      type: position_controllers/JointGroupPositionController
+
+# 关节状态广播器配置
+joint_state_broadcaster:
+  ros__parameters:
+    joints:
+      - J1_1_joint
+      - J1_2_joint
+      - J1_3_joint
+      - J1_4_joint
+      - J1_5_joint
+      - J1_6_joint
+      - J1_7_joint
+      - J1_8_joint
+      - J2_1_joint
+      - J2_2_joint
+      - J2_3_joint
+      - J2_4_joint
+      - J2_5_joint
+      - J2_6_joint
+      - J2_7_joint
+      - J2_8_joint
+      - J3_1_joint
+      - J3_2_joint
+      - J3_3_joint
+      - J3_4_joint
+      - J3_5_joint
+      - J3_6_joint
+      - J4_1_joint
+      - J4_2_joint
+      - J4_3_joint
+      - J4_4_joint
+      - J4_5_joint
+      - J4_6_joint
+
+# 机械臂位置控制器配置
+arm_controller:
+  ros__parameters:
+    joints:
+      - J1_1_joint
+      - J1_2_joint
+      - J1_3_joint
+      - J1_4_joint
+      - J1_5_joint
+      - J1_6_joint
+      - J1_7_joint
+      - J1_8_joint
+      - J2_1_joint
+      - J2_2_joint
+      - J2_3_joint
+      - J2_4_joint
+      - J2_5_joint
+      - J2_6_joint
+      - J2_7_joint
+      - J2_8_joint
+      - J3_1_joint
+      - J3_2_joint
+      - J3_3_joint
+      - J3_4_joint
+      - J3_5_joint
+      - J3_6_joint
+      - J4_1_joint
+      - J4_2_joint
+      - J4_3_joint
+      - J4_4_joint
+      - J4_5_joint
+      - J4_6_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity

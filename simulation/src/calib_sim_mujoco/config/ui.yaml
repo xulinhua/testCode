@@ -1,0 +1,6 @@
+/**:
+  ros__parameters:
+    status_topic: "/calib_sim/status"
+    raw_image_topic: "/calib_sim/raw_image"
+    result_image_topic: "/calib_sim/result_image"
+    window_name: "calib_sim_ui"

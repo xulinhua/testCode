@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <authoring_tool>handwritten</authoring_tool>
+    </contributor>
+    <unit name="meter" meter="1"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+
+  <library_images>
+    <image id="aruco_png" name="aruco_png">
+      <init_from>6x6_1000-0.png</init_from>
+    </image>
+  </library_images>
+
+  <library_effects>
+    <effect id="aruco_fx">
+      <profile_COMMON>
+        <newparam sid="aruco_surface">
+          <surface type="2D">
+            <init_from>aruco_png</init_from>
+          </surface>
+        </newparam>
+        <newparam sid="aruco_sampler">
+          <sampler2D>
+            <source>aruco_surface</source>
+          </sampler2D>
+        </newparam>
+        <technique sid="common">
+          <lambert>
+            <diffuse>
+              <texture texture="aruco_sampler" texcoord="UVMap"/>
+            </diffuse>
+          </lambert>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+
+  <library_materials>
+    <material id="aruco_mat" name="aruco_mat">
+      <instance_effect url="#aruco_fx"/>
+    </material>
+  </library_materials>
+
+  <library_geometries>
+    <geometry id="aruco_plane" name="aruco_plane">
+      <mesh>
+        <!-- 10cm x 10cm, centered at origin, near-zero thickness plane -->
+        <source id="aruco_positions">
+          <float_array id="aruco_positions_array" count="12">
+            -0.05 -0.05 0
+             0.05 -0.05 0
+             0.05  0.05 0
+            -0.05  0.05 0
+          </float_array>
+          <technique_common>
+            <accessor source="#aruco_positions_array" count="4" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+
+        <source id="aruco_normals">
+          <float_array id="aruco_normals_array" count="3">
+            0 0 -1
+          </float_array>
+          <technique_common>
+            <accessor source="#aruco_normals_array" count="1" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+
+        <!-- 相对标准 UV 绕纹理中心转 180°：(u,v)->(1-u,1-v)，配合法线 -Z 与绕序 -->
+        <source id="aruco_uvs">
+          <float_array id="aruco_uvs_array" count="8">
+            1 0
+            0 0
+            0 1
+            1 1
+          </float_array>
+          <technique_common>
+            <accessor source="#aruco_uvs_array" count="4" stride="2">
+              <param name="S" type="float"/>
+              <param name="T" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+
+        <vertices id="aruco_vertices">
+          <input semantic="POSITION" source="#aruco_positions"/>
+        </vertices>
+
+        <triangles material="aruco_mat" count="2">
+          <input semantic="VERTEX" source="#aruco_vertices" offset="0"/>
+          <input semantic="NORMAL" source="#aruco_normals" offset="1"/>
+          <input semantic="TEXCOORD" source="#aruco_uvs" offset="2" set="0"/>
+          <!-- 绕边翻面：法线 -Z，三角绕序与 +Z 时相反，从 +Z 看向平面可见贴图 -->
+          <p>0 0 0 2 0 2 1 0 1 0 0 0 3 0 3 2 0 2</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="aruco_node" name="aruco_node" type="NODE">
+        <instance_geometry url="#aruco_plane">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="aruco_mat" target="#aruco_mat"/>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+
+  <scene>
+    <instance_visual_scene url="#Scene"/>
+  </scene>
+</COLLADA>

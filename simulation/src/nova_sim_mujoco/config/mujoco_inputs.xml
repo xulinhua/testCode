@@ -1,0 +1,43 @@
+<mujoco_inputs>
+  <raw_inputs>
+    <option integrator="implicitfast" timestep="0.002"/>
+    <default>
+      <default class="visual">
+        <geom group="2" type="mesh" contype="0" conaffinity="0"/>
+      </default>
+      <default class="collision">
+        <geom group="3" type="mesh" contype="0" conaffinity="0"/>
+      </default>
+    </default>
+    <actuator>
+      <position name="J1_1_joint" joint="J1_1_joint" kp="300"/>
+      <position name="J1_2_joint" joint="J1_2_joint" kp="300"/>
+      <position name="J1_3_joint" joint="J1_3_joint" kp="300"/>
+      <position name="J1_4_joint" joint="J1_4_joint" kp="300"/>
+      <position name="J1_5_joint" joint="J1_5_joint" kp="300"/>
+      <position name="J1_6_joint" joint="J1_6_joint" kp="300"/>
+      <position name="J1_7_joint" joint="J1_7_joint" kp="120"/>
+      <position name="J1_8_joint" joint="J1_8_joint" kp="120"/>
+      <position name="J2_1_joint" joint="J2_1_joint" kp="300"/>
+      <position name="J2_2_joint" joint="J2_2_joint" kp="300"/>
+      <position name="J2_3_joint" joint="J2_3_joint" kp="300"/>
+      <position name="J2_4_joint" joint="J2_4_joint" kp="300"/>
+      <position name="J2_5_joint" joint="J2_5_joint" kp="300"/>
+      <position name="J2_6_joint" joint="J2_6_joint" kp="300"/>
+      <position name="J2_7_joint" joint="J2_7_joint" kp="120"/>
+      <position name="J2_8_joint" joint="J2_8_joint" kp="120"/>
+      <position name="J3_1_joint" joint="J3_1_joint" kp="350"/>
+      <position name="J3_2_joint" joint="J3_2_joint" kp="350"/>
+      <position name="J3_3_joint" joint="J3_3_joint" kp="350"/>
+      <position name="J3_4_joint" joint="J3_4_joint" kp="350"/>
+      <position name="J3_5_joint" joint="J3_5_joint" kp="350"/>
+      <position name="J3_6_joint" joint="J3_6_joint" kp="350"/>
+      <position name="J4_1_joint" joint="J4_1_joint" kp="350"/>
+      <position name="J4_2_joint" joint="J4_2_joint" kp="350"/>
+      <position name="J4_3_joint" joint="J4_3_joint" kp="350"/>
+      <position name="J4_4_joint" joint="J4_4_joint" kp="350"/>
+      <position name="J4_5_joint" joint="J4_5_joint" kp="350"/>
+      <position name="J4_6_joint" joint="J4_6_joint" kp="350"/>
+    </actuator>
+  </raw_inputs>
+</mujoco_inputs>
