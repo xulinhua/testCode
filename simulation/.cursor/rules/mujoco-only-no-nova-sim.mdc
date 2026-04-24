@@ -1,0 +1,10 @@
+---
+description: MuJoCo 仿真与标定仅改 mujoco 分包，不改动 nova_sim 原包
+alwaysApply: true
+---
+
+# MuJoCo 与 `nova_sim` 边界
+
+- **`src/nova_sim/`（nova_sim 原包）**：默认**不修改**。Gazebo / 历史 URDF 以该包为准，保持独立。
+- **MuJoCo 与仿真标定相关改动**：只改 **`src/nova_sim_mujoco/`** 与 **`src/calib_sim_mujoco/`**。
+- 需要的 URDF、mesh、纹理、launch、config：放在上述 mujoco 包内；launch 里已有对 `package://nova_sim/` → `nova_sim_mujoco` 的替换时，以 **mujoco 包内资源** 为准，避免回头改 `nova_sim`。

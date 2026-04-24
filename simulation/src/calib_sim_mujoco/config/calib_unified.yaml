@@ -666,7 +666,7 @@
       robot_target_topic: /robot_target_pose
       output_dir: calib_output
       use_current_pose_as_center: false
-      target_marker_id: 3
+      target_marker_id: 0
       image_topic: /camera1_rgb_sensor/image_raw
       depth_topic: /camera1/depth/image_raw
       camera_info_topic: /camera1_rgb_sensor/camera_info

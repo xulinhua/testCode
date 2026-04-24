@@ -31,9 +31,9 @@
 
     use_current_pose_as_center: false
 
-    # ========== 机械臂 0：camera1 → 固定板 ID=3（nova_robot_position 板3）==========
+    # ========== 机械臂 0：camera1 → 底座固定板 ID=0（aruco_board_base_mid，与 nova_sim 位姿一致）==========
     arm0:
-      target_marker_id: 3
+      target_marker_id: 0
       image_topic: "/camera1_rgb_sensor/image_raw"
       depth_topic: "/camera1/depth/image_raw"
       camera_info_topic: "/camera1_rgb_sensor/camera_info"

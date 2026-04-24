@@ -1,5 +1,4 @@
 import os
-import re
 import subprocess
 import tempfile
 
@@ -42,45 +41,14 @@ def launch_setup(context, *args, **kwargs):
         'robot_description': ParameterValue(value=robot_description_fixed, value_type=str)
     }
 
-    # Use a conversion-only URDF variant that removes ArUco board links/joints entirely.
-    # This avoids DAE conversion issues and mesh-name collisions in mujoco_ros2_control converter.
-    conversion_urdf = re.sub(
-        r'<link name="aruco_board[^"]*">.*?</link>',
-        '',
-        robot_description_fixed,
-        flags=re.DOTALL,
-    )
-
-    def _drop_aruco_joint(match: re.Match) -> str:
-        block = match.group(0)
-        if (
-            'name="aruco_board' in block
-            or '<parent link="aruco_board' in block
-            or '<child link="aruco_board' in block
-        ):
-            return ''
-        return block
-
-    conversion_urdf = re.sub(
-        r'<joint\b[^>]*>.*?</joint>',
-        _drop_aruco_joint,
-        conversion_urdf,
-        flags=re.DOTALL,
-    )
-    conversion_urdf = re.sub(
-        r'<gazebo\s+reference="aruco_board[^"]*">.*?</gazebo>',
-        '',
-        conversion_urdf,
-        flags=re.DOTALL,
-    )
-
+    # MuJoCo MJCF converter uses the same URDF (incl. ArUco boards) so TF and visuals match.
     expanded_urdf_file = tempfile.NamedTemporaryFile(
         mode='w',
         suffix='.urdf',
         prefix='nova_sim_mujoco_expanded_',
         delete=False,
     )
-    expanded_urdf_file.write(conversion_urdf)
+    expanded_urdf_file.write(robot_description_fixed)
     expanded_urdf_file.flush()
     expanded_urdf_file.close()
 

@@ -1414,8 +1414,8 @@
     </plugin>
   </gazebo>
 
-  <!-- ========== ArUco 标定板（可配置参数） ========== -->
-  <!-- 板1：绑定到 J1_6 -->
+  <!-- ========== ArUco 标定板（位姿与 nova_sim 一致；MuJoCo 用 DICT_6X6_1000 纹理） ========== -->
+  <!-- 板1：J1_6，marker ID=2 -->
   <xacro:property name="aruco1_parent_link" value="J1_6"/>
   <xacro:property name="aruco1_child_link" value="aruco_board_j1_6"/>
   <xacro:property name="aruco1_cali_x" value="0.0"/>
@@ -1424,9 +1424,9 @@
   <xacro:property name="aruco1_cali_roll" value="0.0"/>
   <xacro:property name="aruco1_cali_pitch" value="0.0"/>
   <xacro:property name="aruco1_cali_yaw" value="0.0"/>
-  <xacro:property name="aruco1_mesh_file" value="package://nova_sim/meshes/aruco_board.dae"/>
+  <xacro:property name="aruco1_mesh_file" value="package://nova_sim/meshes/aruco_6x6_1000_id2.dae"/>
 
-  <!-- 板2：绑定到 J2_6 -->
+  <!-- 板2：J2_6，marker ID=3（6x6_1000-3） -->
   <xacro:property name="aruco2_parent_link" value="J2_6"/>
   <xacro:property name="aruco2_child_link" value="aruco_board_j2_6"/>
   <xacro:property name="aruco2_cali_x" value="0.0"/>
@@ -1435,10 +1435,9 @@
   <xacro:property name="aruco2_cali_roll" value="0.0"/>
   <xacro:property name="aruco2_cali_pitch" value="0.0"/>
   <xacro:property name="aruco2_cali_yaw" value="0.0"/>
-  <xacro:property name="aruco2_mesh_file" value="package://nova_sim/meshes/aruco_board_1.dae"/>
+  <xacro:property name="aruco2_mesh_file" value="package://nova_sim/meshes/aruco_6x6_1000_id3.dae"/>
 
-  <!-- 板3：base_link 固定，DICT_6X6_1000 ID=3（aruco_board_2）；略偏 J1 工作区 (y-)，便于 camera1 俯视 -->
-  <!-- 与臂上板 1/2 同理：dae 法线 -Z；绕 X 转 π 使标记面朝上(+Z) -->
+  <!-- 板3：base_link，marker ID=0；位姿同 nova_sim aruco_board_base_mid -->
   <xacro:property name="aruco3_parent_link" value="base_link"/>
   <xacro:property name="aruco3_child_link" value="aruco_board_base_mid"/>
   <xacro:property name="aruco3_cali_x" value="0.42"/>
@@ -1447,9 +1446,9 @@
   <xacro:property name="aruco3_cali_roll" value="3.141592653589793"/>
   <xacro:property name="aruco3_cali_pitch" value="0.0"/>
   <xacro:property name="aruco3_cali_yaw" value="0.0"/>
-  <xacro:property name="aruco3_mesh_file" value="package://nova_sim/meshes/aruco_board_2.dae"/>
+  <xacro:property name="aruco3_mesh_file" value="package://nova_sim/meshes/aruco_6x6_1000_id0.dae"/>
 
-  <!-- 板4：base_link 固定，ID=1（aruco_board_1 / 6x6_1000-1）；略偏 J2 工作区 (y+)，与板3 分离，眼在手上 arm1 专用 -->
+  <!-- 板4：base_link，marker ID=1；位姿同 nova_sim aruco_board_base_arm1 -->
   <xacro:property name="aruco4_parent_link" value="base_link"/>
   <xacro:property name="aruco4_child_link" value="aruco_board_base_arm1"/>
   <xacro:property name="aruco4_cali_x" value="0.65"/>
@@ -1458,9 +1457,9 @@
   <xacro:property name="aruco4_cali_roll" value="3.141592653589793"/>
   <xacro:property name="aruco4_cali_pitch" value="0.0"/>
   <xacro:property name="aruco4_cali_yaw" value="0.0"/>
-  <xacro:property name="aruco4_mesh_file" value="package://nova_sim/meshes/aruco_board_1.dae"/>
+  <xacro:property name="aruco4_mesh_file" value="package://nova_sim/meshes/aruco_6x6_1000_id1.dae"/>
   
-  <xacro:include filename="$(find nova_sim)/urdf/aruco_cali.xacro"/>
+  <xacro:include filename="$(find nova_sim_mujoco)/urdf/aruco_cali.xacro"/>
   <xacro:aruco_cali
     parent_link="${aruco1_parent_link}"
     child_link="${aruco1_child_link}"
