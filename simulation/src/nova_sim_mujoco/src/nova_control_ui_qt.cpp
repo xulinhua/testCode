@@ -40,6 +40,7 @@
 
 #include "rclcpp/executors/single_threaded_executor.hpp"
 
+#include "calib_sim_mujoco/msg/arm_pose.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "moveit_msgs/srv/get_position_ik.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -105,6 +106,8 @@ public:
     cmd_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>("/arm_controller/commands", 10);
     arm_id_pub_ = node_->create_publisher<std_msgs::msg::Int32>("/nova_arm_id", 10);
     pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/nova_target_pose", 10);
+    arm_target_pose_pub_ = node_->create_publisher<calib_sim_mujoco::msg::ArmPose>(
+      "/nova_target_arm_pose", 10);
     gripper_pub_ = node_->create_publisher<std_msgs::msg::String>("/nova_gripper_goal", 10);
     pose_log_sub_ = node_->create_subscription<std_msgs::msg::String>(
       "/nova_pose_log", 20,
@@ -120,7 +123,7 @@ public:
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node_, false);
 
-    setWindowTitle("Nova Control UI (Qt/C++)");
+    setWindowTitle("Nova Control UI (Qt/C++) [arm-isolation]");
     resize(900, 780);
     setMinimumSize(860, 720);
     build_ui();
@@ -266,7 +269,10 @@ private:
       arm_grids[arm_num]->addWidget(label, row, 0, Qt::AlignLeft);
       arm_grids[arm_num]->addWidget(current, row, 1, Qt::AlignLeft);
       arm_grids[arm_num]->addWidget(spin, row, 2, Qt::AlignLeft);
-      connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), [this](double) {
+      connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), [this, i](double) {
+        if (!syncing_joint_targets_) {
+          dirty_joint_indices_.insert(i);
+        }
         if (joint_realtime_check_ && joint_realtime_check_->isChecked()) {
           joint_publish_timer_->start();
         }
@@ -293,8 +299,14 @@ private:
     joint_layout->addLayout(joint_btns);
     connect(btn_publish, &QPushButton::clicked, [this]() { publish_joint_command(); });
     connect(btn_zero, &QPushButton::clicked, [this]() {
+      syncing_joint_targets_ = true;
       for (auto * s : joint_spins_) {
         s->setValue(0.0);
+      }
+      syncing_joint_targets_ = false;
+      dirty_joint_indices_.clear();
+      for (int i = 0; i < static_cast<int>(joint_spins_.size()); ++i) {
+        dirty_joint_indices_.insert(i);
       }
       publish_joint_command();
     });
@@ -536,13 +548,22 @@ private:
   void publish_joint_command()
   {
     std_msgs::msg::Float64MultiArray msg;
-    msg.data.reserve(joint_spins_.size());
-    for (auto * s : joint_spins_) {
-      msg.data.push_back(s->value());
+    msg.data.reserve(kJointOrder.size());
+    for (int i = 0; i < static_cast<int>(kJointOrder.size()) && i < static_cast<int>(joint_spins_.size()); ++i) {
+      double out = joint_spins_[i]->value();
+      const auto it_cur = current_joint_map_.find(kJointOrder[i]);
+      if (it_cur != current_joint_map_.end()) {
+        out = it_cur->second;
+      }
+      if (dirty_joint_indices_.count(i) > 0) {
+        out = joint_spins_[i]->value();
+      }
+      msg.data.push_back(out);
     }
     cmd_pub_->publish(msg);
     if (joint_status_label_) {
-      joint_status_label_->setText("Status: published");
+      joint_status_label_->setText(
+        QString("Status: published (%1 dirty joints)").arg(static_cast<int>(dirty_joint_indices_.size())));
     }
   }
 
@@ -596,16 +617,34 @@ private:
         joint_current_labels_[i]->setText(QString::number(it->second, 'f', 4));
       }
     }
+    if (!joint_targets_initialized_ && !current_joint_map_.empty()) {
+      syncing_joint_targets_ = true;
+      for (int i = 0; i < static_cast<int>(kJointOrder.size()) && i < static_cast<int>(joint_spins_.size()); ++i) {
+        const auto it = current_joint_map_.find(kJointOrder[i]);
+        if (it != current_joint_map_.end()) {
+          joint_spins_[i]->setValue(it->second);
+        }
+      }
+      syncing_joint_targets_ = false;
+      dirty_joint_indices_.clear();
+      joint_targets_initialized_ = true;
+      if (joint_status_label_) {
+        joint_status_label_->setText("Status: target initialized from current");
+      }
+    }
   }
 
   void copy_current_joint_to_target()
   {
+    syncing_joint_targets_ = true;
     for (int i = 0; i < static_cast<int>(kJointOrder.size()) && i < static_cast<int>(joint_spins_.size()); ++i) {
       const auto it = current_joint_map_.find(kJointOrder[i]);
       if (it != current_joint_map_.end()) {
         joint_spins_[i]->setValue(it->second);
       }
     }
+    syncing_joint_targets_ = false;
+    dirty_joint_indices_.clear();
     if (joint_status_label_) {
       joint_status_label_->setText("Status: copied current->target");
     }
@@ -643,14 +682,13 @@ private:
       return;
     }
 
-    publish_arm_id(arm_id);
-
-    geometry_msgs::msg::PoseStamped pose;
-    pose.header.frame_id = current_frame_id();
-    pose.header.stamp = node_->now();
-    pose.pose.position.x = px_->value();
-    pose.pose.position.y = py_->value();
-    pose.pose.position.z = pz_->value();
+    calib_sim_mujoco::msg::ArmPose arm_pose;
+    arm_pose.arm_id = arm_id;
+    arm_pose.pose.header.frame_id = current_frame_id();
+    arm_pose.pose.header.stamp = node_->now();
+    arm_pose.pose.pose.position.x = px_->value();
+    arm_pose.pose.pose.position.y = py_->value();
+    arm_pose.pose.pose.position.z = pz_->value();
     if (orientation_mode_ && orientation_mode_->currentText() == "rpy") {
       const double roll = roll_->value();
       const double pitch = pitch_->value();
@@ -661,24 +699,25 @@ private:
       const double sp = std::sin(pitch * 0.5);
       const double cy = std::cos(yaw * 0.5);
       const double sy = std::sin(yaw * 0.5);
-      pose.pose.orientation.w = cr * cp * cy + sr * sp * sy;
-      pose.pose.orientation.x = sr * cp * cy - cr * sp * sy;
-      pose.pose.orientation.y = cr * sp * cy + sr * cp * sy;
-      pose.pose.orientation.z = cr * cp * sy - sr * sp * cy;
+      arm_pose.pose.pose.orientation.w = cr * cp * cy + sr * sp * sy;
+      arm_pose.pose.pose.orientation.x = sr * cp * cy - cr * sp * sy;
+      arm_pose.pose.pose.orientation.y = cr * sp * cy + sr * cp * sy;
+      arm_pose.pose.pose.orientation.z = cr * cp * sy - sr * sp * cy;
     } else {
-      pose.pose.orientation.x = qx_->value();
-      pose.pose.orientation.y = qy_->value();
-      pose.pose.orientation.z = qz_->value();
-      pose.pose.orientation.w = qw_->value();
+      arm_pose.pose.pose.orientation.x = qx_->value();
+      arm_pose.pose.pose.orientation.y = qy_->value();
+      arm_pose.pose.pose.orientation.z = qz_->value();
+      arm_pose.pose.pose.orientation.w = qw_->value();
     }
-    pose_pub_->publish(pose);
+    // 与 arm_id 同消息下发，避免 /nova_arm_id 与 /nova_target_pose 回调顺序与执行器内 arm_id_ 错绑
+    arm_target_pose_pub_->publish(arm_pose);
     append_pose_log(
       QString("Pose sent: arm_id=%1 frame=%2 pos=(%3,%4,%5)")
         .arg(arm_id)
-        .arg(QString::fromStdString(pose.header.frame_id))
-        .arg(pose.pose.position.x, 0, 'f', 3)
-        .arg(pose.pose.position.y, 0, 'f', 3)
-        .arg(pose.pose.position.z, 0, 'f', 3),
+        .arg(QString::fromStdString(arm_pose.pose.header.frame_id))
+        .arg(arm_pose.pose.pose.position.x, 0, 'f', 3)
+        .arg(arm_pose.pose.pose.position.y, 0, 'f', 3)
+        .arg(arm_pose.pose.pose.position.z, 0, 'f', 3),
       false);
 
     if (gripper_mode_->currentText() != "none") {
@@ -1080,6 +1119,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr cmd_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr arm_id_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+  rclcpp::Publisher<calib_sim_mujoco::msg::ArmPose>::SharedPtr arm_target_pose_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr gripper_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr pose_log_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
@@ -1144,6 +1184,9 @@ private:
   std::thread ros_spin_thread_;
   std::atomic<bool> ros_spin_exit_{false};
   std::atomic<bool> ee_refresh_running_{false};
+  bool syncing_joint_targets_{false};
+  bool joint_targets_initialized_{false};
+  std::set<int> dirty_joint_indices_;
 };
 
 int main(int argc, char ** argv)

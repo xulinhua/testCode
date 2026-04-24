@@ -42,7 +42,7 @@ joint_state_broadcaster:
       - J4_5_joint
       - J4_6_joint
 
-# 机械臂位置控制器配置
+# 机械臂位置控制器配置（控制全部 28 轴）
 arm_controller:
   ros__parameters:
     joints:

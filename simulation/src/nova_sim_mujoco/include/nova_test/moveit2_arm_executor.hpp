@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "calib_sim_mujoco/msg/arm_pose.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "moveit_msgs/srv/get_position_ik.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -25,9 +26,12 @@ public:
 private:
   void on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg);
   void on_arm_id(const std_msgs::msg::Int32::SharedPtr msg);
-  void on_pose_goal(const geometry_msgs::msg::PoseStamped::SharedPtr pose);
+  void on_target_arm_pose(const calib_sim_mujoco::msg::ArmPose::SharedPtr msg);
+  void process_pose_goal(int arm_id, const geometry_msgs::msg::PoseStamped & pose_in);
   void on_gripper_goal(const std_msgs::msg::String::SharedPtr msg);
   void publish_command(const std::unordered_map<std::string, double> & command_map);
+  double resolve_command_value(
+    const std::string & joint, const std::unordered_map<std::string, double> & command_map) const;
 
   int arm_id_;
   std::unordered_map<int, std::string> arm_groups_;
@@ -46,6 +50,6 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pose_log_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr arm_id_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
+  rclcpp::Subscription<calib_sim_mujoco::msg::ArmPose>::SharedPtr target_arm_pose_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gripper_sub_;
 };

@@ -33,6 +33,7 @@ public:
 
     this->declare_parameter("nova_arm_id_topic", std::string("/nova_arm_id"));
     this->declare_parameter("nova_target_pose_topic", std::string("/nova_target_pose"));
+    this->declare_parameter("nova_target_arm_pose_topic", std::string("/nova_target_arm_pose"));
     this->declare_parameter("initial_arm_id", 0);
     this->declare_parameter(
       "initial_pose", std::vector<double>{0.30, 0.0, 0.25, 0.0, 0.0, 0.0, 1.0});
@@ -53,6 +54,7 @@ public:
     feedback_delay_ms_ = this->get_parameter("feedback_delay_ms").as_int();
     nova_arm_id_topic_ = this->get_parameter("nova_arm_id_topic").as_string();
     nova_target_pose_topic_ = this->get_parameter("nova_target_pose_topic").as_string();
+    nova_target_arm_pose_topic_ = this->get_parameter("nova_target_arm_pose_topic").as_string();
     initial_arm_id_ = this->get_parameter("initial_arm_id").as_int();
     initial_pose_ = this->get_parameter("initial_pose").as_double_array();
     pose_publish_hz_ = this->get_parameter("pose_publish_hz").as_double();
@@ -75,6 +77,7 @@ public:
 
     nova_arm_id_pub_ = this->create_publisher<std_msgs::msg::Int32>(nova_arm_id_topic_, 20);
     nova_target_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(nova_target_pose_topic_, 20);
+    nova_target_arm_pose_pub_ = this->create_publisher<calib_sim_mujoco::msg::ArmPose>(nova_target_arm_pose_topic_, 20);
     calib_pose_pub_ = this->create_publisher<calib_sim_mujoco::msg::ArmPose>(calib_pose_feedback_topic_, 20);
     calib_reached_pub_ = this->create_publisher<std_msgs::msg::Bool>(calib_reached_topic_, 20);
     reach_error_pub_ = this->create_publisher<std_msgs::msg::String>("/calib_sim/reach_error", 20);
@@ -102,6 +105,9 @@ public:
 private:
   void onCalibTarget(const calib_sim_mujoco::msg::ArmPose::SharedPtr msg)
   {
+    // 主路径：单条消息给 moveit2 执行器，避免分开发时回调顺序与 arm_id 错绑
+    nova_target_arm_pose_pub_->publish(*msg);
+    // 供仅监听分话题的调试/外设（执行器以 /nova_target_arm_pose 为准）
     std_msgs::msg::Int32 arm_id_msg;
     arm_id_msg.data = msg->arm_id;
     nova_arm_id_pub_->publish(arm_id_msg);
@@ -272,6 +278,7 @@ private:
   std::string calib_reached_topic_;
   std::string nova_arm_id_topic_;
   std::string nova_target_pose_topic_;
+  std::string nova_target_arm_pose_topic_;
   int initial_arm_id_;
   std::vector<double> initial_pose_;
   double pose_publish_hz_;
@@ -289,6 +296,7 @@ private:
   rclcpp::Subscription<calib_sim_mujoco::msg::ArmPose>::SharedPtr target_sub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr nova_arm_id_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr nova_target_pub_;
+  rclcpp::Publisher<calib_sim_mujoco::msg::ArmPose>::SharedPtr nova_target_arm_pose_pub_;
   rclcpp::Publisher<calib_sim_mujoco::msg::ArmPose>::SharedPtr calib_pose_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr calib_reached_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr reach_error_pub_;

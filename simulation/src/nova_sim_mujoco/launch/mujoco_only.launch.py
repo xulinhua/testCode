@@ -120,6 +120,7 @@ def launch_setup(context, *args, **kwargs):
     )
 
     # Publish an explicit zero pose once controllers are up, to avoid random startup posture.
+    # arm_controller currently controls all 28 joints.
     zero_pose_command = ExecuteProcess(
         cmd=[
             'ros2', 'topic', 'pub', '--once',

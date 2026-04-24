@@ -9,6 +9,8 @@
 #include "moveit_msgs/msg/position_ik_request.hpp"
 #include "moveit_msgs/msg/robot_state.hpp"
 
+#include "calib_sim_mujoco/msg/arm_pose.hpp"
+
 using namespace std::chrono_literals;
 
 MoveIt2ArmExecutorCpp::MoveIt2ArmExecutorCpp()
@@ -37,8 +39,8 @@ MoveIt2ArmExecutorCpp::MoveIt2ArmExecutorCpp()
     "/joint_states", 50, std::bind(&MoveIt2ArmExecutorCpp::on_joint_state, this, std::placeholders::_1));
   arm_id_sub_ = this->create_subscription<std_msgs::msg::Int32>(
     "/nova_arm_id", 10, std::bind(&MoveIt2ArmExecutorCpp::on_arm_id, this, std::placeholders::_1));
-  pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/nova_target_pose", 10, std::bind(&MoveIt2ArmExecutorCpp::on_pose_goal, this, std::placeholders::_1));
+  target_arm_pose_sub_ = this->create_subscription<calib_sim_mujoco::msg::ArmPose>(
+    "/nova_target_arm_pose", 10, std::bind(&MoveIt2ArmExecutorCpp::on_target_arm_pose, this, std::placeholders::_1));
   gripper_sub_ = this->create_subscription<std_msgs::msg::String>(
     "/nova_gripper_goal", 10, std::bind(&MoveIt2ArmExecutorCpp::on_gripper_goal, this, std::placeholders::_1));
 
@@ -51,7 +53,10 @@ MoveIt2ArmExecutorCpp::MoveIt2ArmExecutorCpp()
       this->get_logger(),
       "/compute_ik not ready now. Joint/gripper control still works; pose control waits for MoveIt.");
   }
-  RCLCPP_INFO(this->get_logger(), "Use /nova_arm_id + /nova_target_pose (+ optional /nova_gripper_goal).");
+  RCLCPP_INFO(
+    this->get_logger(),
+    "Pose goals: calib_sim_mujoco/ArmPose on /nova_target_arm_pose only "
+    "(/nova_arm_id + /nova_target_pose 不再被此节点订阅，避免错序). + optional /nova_gripper_goal.");
 }
 
 void MoveIt2ArmExecutorCpp::on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg)
@@ -74,8 +79,22 @@ void MoveIt2ArmExecutorCpp::on_arm_id(const std_msgs::msg::Int32::SharedPtr msg)
   RCLCPP_INFO(this->get_logger(), "Set active arm_id=%d", arm_id_);
 }
 
-void MoveIt2ArmExecutorCpp::on_pose_goal(const geometry_msgs::msg::PoseStamped::SharedPtr pose)
+void MoveIt2ArmExecutorCpp::on_target_arm_pose(const calib_sim_mujoco::msg::ArmPose::SharedPtr msg)
 {
+  process_pose_goal(msg->arm_id, msg->pose);
+}
+
+void MoveIt2ArmExecutorCpp::process_pose_goal(
+  int arm_id, const geometry_msgs::msg::PoseStamped & pose)
+{
+  if (arm_groups_.count(arm_id) == 0) {
+    RCLCPP_ERROR(
+      this->get_logger(),
+      "Invalid arm_id=%d for pose IK. Current MoveIt config supports arm_id 0/1/2/3.",
+      arm_id);
+    return;
+  }
+
   if (!ik_client_->wait_for_service(100ms)) {
     RCLCPP_ERROR(this->get_logger(), "Pose goal rejected: /compute_ik service is unavailable.");
     std_msgs::msg::String log_msg;
@@ -94,9 +113,9 @@ void MoveIt2ArmExecutorCpp::on_pose_goal(const geometry_msgs::msg::PoseStamped::
 
   auto ik_req = std::make_shared<moveit_msgs::srv::GetPositionIK::Request>();
   moveit_msgs::msg::PositionIKRequest ikr;
-  ikr.group_name = arm_groups_[arm_id_];
-  ikr.ik_link_name = ee_links_[arm_id_];
-  ikr.pose_stamped = *pose;
+  ikr.group_name = arm_groups_[arm_id];
+  ikr.ik_link_name = ee_links_[arm_id];
+  ikr.pose_stamped = pose;
   const double qx = ikr.pose_stamped.pose.orientation.x;
   const double qy = ikr.pose_stamped.pose.orientation.y;
   const double qz = ikr.pose_stamped.pose.orientation.z;
@@ -145,12 +164,12 @@ void MoveIt2ArmExecutorCpp::on_pose_goal(const geometry_msgs::msg::PoseStamped::
   RCLCPP_INFO(
     this->get_logger(),
     "[nova_executor_v2] send IK arm_id=%d group=%s link=%s frame=%s",
-    arm_id_,
+    arm_id,
     ikr.group_name.c_str(),
     ikr.ik_link_name.c_str(),
     ikr.pose_stamped.header.frame_id.c_str());
 
-  const int request_arm_id = arm_id_;
+  const int request_arm_id = arm_id;
   const auto request_prefix = arm_prefix_[request_arm_id];
   ik_client_->async_send_request(
     ik_req,
@@ -184,6 +203,7 @@ void MoveIt2ArmExecutorCpp::on_pose_goal(const geometry_msgs::msg::PoseStamped::
         }
       }
       publish_command(command_map);
+      arm_id_ = request_arm_id;
       RCLCPP_INFO(this->get_logger(), "Pose command sent for arm_id=%d", request_arm_id);
       std_msgs::msg::String log_msg;
       log_msg.data = "[INFO] Pose command sent for arm_id=" + std::to_string(request_arm_id);
@@ -231,8 +251,7 @@ void MoveIt2ArmExecutorCpp::publish_command(const std::unordered_map<std::string
   bool has_meaningful_change = !has_last_command_;
   if (!has_meaningful_change) {
     for (const auto & joint : control_joint_order_) {
-      const auto it_new = command_map.find(joint);
-      const double new_val = (it_new == command_map.end()) ? 0.0 : it_new->second;
+      const double new_val = resolve_command_value(joint, command_map);
       const auto it_old = last_published_command_map_.find(joint);
       const double old_val = (it_old == last_published_command_map_.end()) ? 0.0 : it_old->second;
       if (std::abs(new_val - old_val) > kJointDeadband) {
@@ -249,11 +268,28 @@ void MoveIt2ArmExecutorCpp::publish_command(const std::unordered_map<std::string
   std_msgs::msg::Float64MultiArray msg;
   msg.data.reserve(control_joint_order_.size());
   for (const auto & joint : control_joint_order_) {
-    const auto it = command_map.find(joint);
-    const double value = (it == command_map.end()) ? 0.0 : it->second;
+    const double value = resolve_command_value(joint, command_map);
     msg.data.push_back(value);
     last_published_command_map_[joint] = value;
   }
   has_last_command_ = true;
   command_pub_->publish(msg);
+}
+
+double MoveIt2ArmExecutorCpp::resolve_command_value(
+  const std::string & joint, const std::unordered_map<std::string, double> & command_map) const
+{
+  const auto it = command_map.find(joint);
+  if (it != command_map.end()) {
+    return it->second;
+  }
+  const auto it_last = last_published_command_map_.find(joint);
+  if (it_last != last_published_command_map_.end()) {
+    return it_last->second;
+  }
+  const auto it_cur = current_joint_map_.find(joint);
+  if (it_cur != current_joint_map_.end()) {
+    return it_cur->second;
+  }
+  return 0.0;
 }

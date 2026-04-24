@@ -2,14 +2,14 @@
 """
 Nova control UI (Tkinter):
 1) Joint mode: publish all joints to /arm_controller/commands
-2) Pose mode: publish arm_id and PoseStamped to MoveIt2 executor topics
+2) Pose mode: publish calib_sim_mujoco/ArmPose to /nova_target_arm_pose (与 arm_id 同帧，避免分话题错序)
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from calib_sim_mujoco.msg import ArmPose
 from std_msgs.msg import Float64MultiArray, Int32, String
 
 
@@ -27,7 +27,7 @@ class NovaControlUI:
         self.node = rclpy.create_node("nova_control_ui")
         self.cmd_pub = self.node.create_publisher(Float64MultiArray, "/arm_controller/commands", 10)
         self.arm_id_pub = self.node.create_publisher(Int32, "/nova_arm_id", 10)
-        self.pose_pub = self.node.create_publisher(PoseStamped, "/nova_target_pose", 10)
+        self.arm_pose_pub = self.node.create_publisher(ArmPose, "/nova_target_arm_pose", 10)
         self.gripper_pub = self.node.create_publisher(String, "/nova_gripper_goal", 10)
 
         self.root = tk.Tk()
@@ -95,7 +95,7 @@ class NovaControlUI:
         self.gripper_width_var = tk.StringVar(value="0.05")
 
         row = 0
-        ttk.Label(body, text="Pose mode: publish /nova_arm_id and /nova_target_pose").grid(row=row, column=0, columnspan=4, sticky="w")
+        ttk.Label(body, text="Pose mode: /nova_target_arm_pose (ArmPose)").grid(row=row, column=0, columnspan=4, sticky="w")
         row += 1
 
         ttk.Label(body, text="arm_id (0/1/2/3)").grid(row=row, column=0, sticky="e", padx=6, pady=4)
@@ -184,21 +184,18 @@ class NovaControlUI:
             messagebox.showerror("Input Error", "arm_id must be 0,1,2,3.")
             return
 
-        id_msg = Int32()
-        id_msg.data = arm_id
-        self.arm_id_pub.publish(id_msg)
-
-        pose = PoseStamped()
-        pose.header.frame_id = self.frame_id_var.get().strip() or "base_link"
-        pose.header.stamp = self.node.get_clock().now().to_msg()
-        pose.pose.position.x = px
-        pose.pose.position.y = py
-        pose.pose.position.z = pz
-        pose.pose.orientation.x = qx
-        pose.pose.orientation.y = qy
-        pose.pose.orientation.z = qz
-        pose.pose.orientation.w = qw
-        self.pose_pub.publish(pose)
+        out = ArmPose()
+        out.arm_id = arm_id
+        out.pose.header.frame_id = self.frame_id_var.get().strip() or "base_link"
+        out.pose.header.stamp = self.node.get_clock().now().to_msg()
+        out.pose.pose.position.x = px
+        out.pose.pose.position.y = py
+        out.pose.pose.position.z = pz
+        out.pose.pose.orientation.x = qx
+        out.pose.pose.orientation.y = qy
+        out.pose.pose.orientation.z = qz
+        out.pose.pose.orientation.w = qw
+        self.arm_pose_pub.publish(out)
 
         mode = self.gripper_mode_var.get()
         if mode != "none":

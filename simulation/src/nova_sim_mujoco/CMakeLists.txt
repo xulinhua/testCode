@@ -35,6 +35,7 @@ ament_target_dependencies(moveit2_arm_executor_cpp
   sensor_msgs
   geometry_msgs
   moveit_msgs
+  calib_sim_mujoco
 )
 
 add_executable(nova_control_ui_cpp
@@ -44,6 +45,7 @@ ament_target_dependencies(nova_control_ui_cpp
   rclcpp
   std_msgs
   geometry_msgs
+  calib_sim_mujoco
 )
 
 add_executable(nova_control_ui_qt
@@ -55,6 +57,7 @@ ament_target_dependencies(nova_control_ui_qt
   sensor_msgs
   geometry_msgs
   moveit_msgs
+  calib_sim_mujoco
   tf2_ros
   tf2
 )
@@ -101,6 +104,9 @@ install(DIRECTORY
 install(PROGRAMS
   scripts/start_mujoco.sh
   scripts/moveit2_arm_executor.py
+  scripts/fake_camera_publishers.py
+  scripts/tf_aruco_camera_publishers.py
+  scripts/mujoco_raster_camera_publishers.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

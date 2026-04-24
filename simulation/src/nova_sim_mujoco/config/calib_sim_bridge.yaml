@@ -7,6 +7,7 @@
 
     nova_arm_id_topic: "/nova_arm_id"
     nova_target_pose_topic: "/nova_target_pose"
+    nova_target_arm_pose_topic: "/nova_target_arm_pose"
     initial_arm_id: 0
     initial_pose: [0.30, 0.0, 0.25, 0.0, 0.0, 0.0, 1.0]
     pose_publish_hz: 10.0

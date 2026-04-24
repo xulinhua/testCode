@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "calib_sim_mujoco/msg/arm_pose.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
@@ -20,7 +21,7 @@ const std::vector<std::string> kJointOrder = {
   "J4_1_joint", "J4_2_joint", "J4_3_joint", "J4_4_joint", "J4_5_joint", "J4_6_joint"};
 }  // namespace
 
-/// 简单 CLI：向 /arm_controller/commands、/nova_arm_id、/nova_target_pose、/nova_gripper_goal 发消息。
+/// 简单 CLI：向 /arm_controller/commands、/nova_target_arm_pose、/nova_arm_id、/nova_gripper_goal 发消息。
 class NovaControlUiCpp : public rclcpp::Node
 {
 public:
@@ -29,7 +30,7 @@ public:
   {
     cmd_pub_ = create_publisher<std_msgs::msg::Float64MultiArray>("/arm_controller/commands", 10);
     arm_id_pub_ = create_publisher<std_msgs::msg::Int32>("/nova_arm_id", 10);
-    pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/nova_target_pose", 10);
+    arm_target_pub_ = create_publisher<calib_sim_mujoco::msg::ArmPose>("/nova_target_arm_pose", 10);
     gripper_pub_ = create_publisher<std_msgs::msg::String>("/nova_gripper_goal", 10);
   }
 
@@ -62,7 +63,7 @@ private:
   {
     std::cout << "Nova Control UI (C++)\n";
     std::cout << "- Joint mode: publish 28 values to /arm_controller/commands\n";
-    std::cout << "- Pose mode: publish /nova_arm_id + /nova_target_pose\n";
+    std::cout << "- Pose mode: publish calib_sim_mujoco/ArmPose to /nova_target_arm_pose\n";
     std::cout << "- Gripper mode: publish /nova_arm_id + /nova_gripper_goal\n";
   }
 
@@ -125,23 +126,20 @@ private:
     }
     clear_stdin();
 
-    std_msgs::msg::Int32 id_msg;
-    id_msg.data = arm_id;
-    arm_id_pub_->publish(id_msg);
+    calib_sim_mujoco::msg::ArmPose arm_pose;
+    arm_pose.arm_id = arm_id;
+    arm_pose.pose.header.frame_id = "base_link";
+    arm_pose.pose.header.stamp = now();
+    arm_pose.pose.pose.position.x = x;
+    arm_pose.pose.pose.position.y = y;
+    arm_pose.pose.pose.position.z = z;
+    arm_pose.pose.pose.orientation.x = qx;
+    arm_pose.pose.pose.orientation.y = qy;
+    arm_pose.pose.pose.orientation.z = qz;
+    arm_pose.pose.pose.orientation.w = qw;
+    arm_target_pub_->publish(arm_pose);
 
-    geometry_msgs::msg::PoseStamped pose;
-    pose.header.frame_id = "base_link";
-    pose.header.stamp = now();
-    pose.pose.position.x = x;
-    pose.pose.position.y = y;
-    pose.pose.position.z = z;
-    pose.pose.orientation.x = qx;
-    pose.pose.orientation.y = qy;
-    pose.pose.orientation.z = qz;
-    pose.pose.orientation.w = qw;
-    pose_pub_->publish(pose);
-
-    std::cout << "[UI] published pose goal for arm_id=" << arm_id << "\n";
+    std::cout << "[UI] published /nova_target_arm_pose for arm_id=" << arm_id << "\n";
   }
 
   void handle_gripper_mode()
@@ -199,7 +197,7 @@ private:
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr cmd_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr arm_id_pub_;
-  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+  rclcpp::Publisher<calib_sim_mujoco::msg::ArmPose>::SharedPtr arm_target_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr gripper_pub_;
 };
 

@@ -1,43 +1,47 @@
 <mujoco_inputs>
   <raw_inputs>
-    <option integrator="implicitfast" timestep="0.002"/>
+    <option integrator="implicitfast" timestep="0.001" iterations="120"/>
     <default>
+      <!-- 提高关节被动阻尼与转子惯量，压低高频颤振 -->
+      <joint damping="8.0" armature="0.08"/>
       <default class="visual">
         <geom group="2" type="mesh" contype="0" conaffinity="0"/>
       </default>
+      <!-- 碰撞体参与接触：与环境碰撞，但避免机器人内部自碰撞导致抖动 -->
       <default class="collision">
-        <geom group="3" type="mesh" contype="0" conaffinity="0"/>
+        <geom group="3" type="mesh" contype="1" conaffinity="2" condim="1" friction="0.4 0.02 0.01"/>
       </default>
     </default>
     <actuator>
-      <position name="J1_1_joint" joint="J1_1_joint" kp="300"/>
-      <position name="J1_2_joint" joint="J1_2_joint" kp="300"/>
-      <position name="J1_3_joint" joint="J1_3_joint" kp="300"/>
-      <position name="J1_4_joint" joint="J1_4_joint" kp="300"/>
-      <position name="J1_5_joint" joint="J1_5_joint" kp="300"/>
-      <position name="J1_6_joint" joint="J1_6_joint" kp="300"/>
-      <position name="J1_7_joint" joint="J1_7_joint" kp="120"/>
-      <position name="J1_8_joint" joint="J1_8_joint" kp="120"/>
-      <position name="J2_1_joint" joint="J2_1_joint" kp="300"/>
-      <position name="J2_2_joint" joint="J2_2_joint" kp="300"/>
-      <position name="J2_3_joint" joint="J2_3_joint" kp="300"/>
-      <position name="J2_4_joint" joint="J2_4_joint" kp="300"/>
-      <position name="J2_5_joint" joint="J2_5_joint" kp="300"/>
-      <position name="J2_6_joint" joint="J2_6_joint" kp="300"/>
-      <position name="J2_7_joint" joint="J2_7_joint" kp="120"/>
-      <position name="J2_8_joint" joint="J2_8_joint" kp="120"/>
-      <position name="J3_1_joint" joint="J3_1_joint" kp="350"/>
-      <position name="J3_2_joint" joint="J3_2_joint" kp="350"/>
-      <position name="J3_3_joint" joint="J3_3_joint" kp="350"/>
-      <position name="J3_4_joint" joint="J3_4_joint" kp="350"/>
-      <position name="J3_5_joint" joint="J3_5_joint" kp="350"/>
-      <position name="J3_6_joint" joint="J3_6_joint" kp="350"/>
-      <position name="J4_1_joint" joint="J4_1_joint" kp="350"/>
-      <position name="J4_2_joint" joint="J4_2_joint" kp="350"/>
-      <position name="J4_3_joint" joint="J4_3_joint" kp="350"/>
-      <position name="J4_4_joint" joint="J4_4_joint" kp="350"/>
-      <position name="J4_5_joint" joint="J4_5_joint" kp="350"/>
-      <position name="J4_6_joint" joint="J4_6_joint" kp="350"/>
+      <position name="J1_1_joint" joint="J1_1_joint" kp="420" dampratio="1.0"/>
+      <!-- J1/J2 的 2~4 轴受重力静差更明显，适当提高刚度以减小零位残差 -->
+      <position name="J1_2_joint" joint="J1_2_joint" kp="1350" dampratio="1.15"/>
+      <position name="J1_3_joint" joint="J1_3_joint" kp="1250" dampratio="1.15"/>
+      <position name="J1_4_joint" joint="J1_4_joint" kp="1150" dampratio="1.15"/>
+      <position name="J1_5_joint" joint="J1_5_joint" kp="420" dampratio="1.0"/>
+      <position name="J1_6_joint" joint="J1_6_joint" kp="420" dampratio="1.0"/>
+      <position name="J1_7_joint" joint="J1_7_joint" kp="180" dampratio="1.0"/>
+      <position name="J1_8_joint" joint="J1_8_joint" kp="180" dampratio="1.0"/>
+      <position name="J2_1_joint" joint="J2_1_joint" kp="420" dampratio="1.0"/>
+      <position name="J2_2_joint" joint="J2_2_joint" kp="1350" dampratio="1.15"/>
+      <position name="J2_3_joint" joint="J2_3_joint" kp="1250" dampratio="1.15"/>
+      <position name="J2_4_joint" joint="J2_4_joint" kp="1150" dampratio="1.15"/>
+      <position name="J2_5_joint" joint="J2_5_joint" kp="420" dampratio="1.0"/>
+      <position name="J2_6_joint" joint="J2_6_joint" kp="420" dampratio="1.0"/>
+      <position name="J2_7_joint" joint="J2_7_joint" kp="180" dampratio="1.0"/>
+      <position name="J2_8_joint" joint="J2_8_joint" kp="180" dampratio="1.0"/>
+      <position name="J3_1_joint" joint="J3_1_joint" kp="460" dampratio="1.0"/>
+      <position name="J3_2_joint" joint="J3_2_joint" kp="460" dampratio="1.0"/>
+      <position name="J3_3_joint" joint="J3_3_joint" kp="460" dampratio="1.0"/>
+      <position name="J3_4_joint" joint="J3_4_joint" kp="460" dampratio="1.0"/>
+      <position name="J3_5_joint" joint="J3_5_joint" kp="460" dampratio="1.0"/>
+      <position name="J3_6_joint" joint="J3_6_joint" kp="460" dampratio="1.0"/>
+      <position name="J4_1_joint" joint="J4_1_joint" kp="460" dampratio="1.0"/>
+      <position name="J4_2_joint" joint="J4_2_joint" kp="460" dampratio="1.0"/>
+      <position name="J4_3_joint" joint="J4_3_joint" kp="460" dampratio="1.0"/>
+      <position name="J4_4_joint" joint="J4_4_joint" kp="460" dampratio="1.0"/>
+      <position name="J4_5_joint" joint="J4_5_joint" kp="460" dampratio="1.0"/>
+      <position name="J4_6_joint" joint="J4_6_joint" kp="460" dampratio="1.0"/>
     </actuator>
   </raw_inputs>
 </mujoco_inputs>
