@@ -3,22 +3,28 @@
 namespace ros_robot_assist_tools::ui
 {
 
-std::vector<std::pair<QString, QString>> HandeyeOnlineFieldDefs()
+QString HandeyeSetupModeToYamlString(HandeyeSetupMode mode)
 {
-  return {
-    {"base_frame", "base_link"},
-    {"ee_frame", "tool0"},
-    {"camera_frame", "camera_link"},
-  };
+  return mode == HandeyeSetupMode::EyeInHand ? "eye_in_hand" : "eye_to_hand";
 }
 
-std::vector<std::pair<QString, QString>> HandeyeOfflineFieldDefs()
+HandeyeSetupMode HandeyeSetupModeFromYamlString(const QString & value)
 {
-  return {
-    {"base_frame", "base_link"},
-    {"ee_frame", "tool0"},
-    {"camera_frame", "camera_link"},
-  };
+  const QString v = value.trimmed().toLower();
+  if (v == "eye_to_hand" || v == "eye-to-hand" || v == "hand_to_eye" || v.contains("手外")) {
+    return HandeyeSetupMode::EyeToHand;
+  }
+  return HandeyeSetupMode::EyeInHand;
+}
+
+QString HandeyeThirdFrameYamlKey(HandeyeSetupMode mode)
+{
+  return mode == HandeyeSetupMode::EyeInHand ? "camera_frame" : "object_frame";
+}
+
+QString HandeyeThirdFrameFieldLabel(HandeyeSetupMode mode)
+{
+  return mode == HandeyeSetupMode::EyeInHand ? QStringLiteral("camera_frame:") : QStringLiteral("object_frame (标定目标):");
 }
 
 }  // namespace ros_robot_assist_tools::ui

@@ -22,6 +22,7 @@ public:
   bool EnsureFileExists() const;
 
 protected:
+  /// 派生类可覆盖，在每次 Load/构造基类逻辑中合并默认键。
   virtual void EnsureDefaults();
 
   YAML::Node data_{YAML::NodeType::Map};

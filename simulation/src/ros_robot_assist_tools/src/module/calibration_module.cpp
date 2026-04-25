@@ -5,9 +5,11 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QStringList>
+#include <QTextStream>
 
 #include <yaml-cpp/yaml.h>
 
@@ -45,6 +47,8 @@ bool LoadRosInterfaceConfigFromYaml(const QString & yaml_path, RosInterfaceConfi
     if (node["image_topic"]) { config->image_topic = QString::fromStdString(node["image_topic"].as<std::string>()); }
     if (node["pose_endpoint"]) { config->pose_endpoint = QString::fromStdString(node["pose_endpoint"].as<std::string>()); }
     if (node["control_endpoint"]) { config->control_endpoint = QString::fromStdString(node["control_endpoint"].as<std::string>()); }
+    if (node["handeye_setup"]) { config->handeye_setup = QString::fromStdString(node["handeye_setup"].as<std::string>()); }
+    if (node["pose_csv"]) { config->handeye_poses_csv = QString::fromStdString(node["pose_csv"].as<std::string>()); }
     return true;
   } catch (const std::exception & e) {
     if (err_msg != nullptr) { *err_msg = e.what(); }
@@ -207,6 +211,107 @@ bool ValidateRosbagDirectory(const QString & bag_dir, QString * err_msg)
   const QStringList db3_files = dir.entryList(QStringList() << "*.db3", QDir::Files);
   if (db3_files.isEmpty()) {
     if (err_msg != nullptr) { *err_msg = "未找到 .db3 数据文件"; }
+    return false;
+  }
+  return true;
+}
+
+QString ImageDirectoryForHandeyePosesCsv(const QString & csv_path)
+{
+  return QFileInfo(csv_path).absolutePath();
+}
+
+namespace
+{
+QString FirstColumnCell(const QString & line)
+{
+  const QString t = line.trimmed();
+  if (t.isEmpty()) {
+    return QString();
+  }
+  for (QChar c : {',', ';', '\t'}) {
+    const int i = t.indexOf(c);
+    if (i >= 0) {
+      return t.left(i).trimmed();
+    }
+  }
+  return t;
+}
+
+bool LikelyHeaderRowFirstColumn(const QString & first_cell)
+{
+  const QString s = first_cell.toLower();
+  if (s == "image" || s == "filename" || s == "file" || s.contains("图像") || s.contains("图片")) {
+    return true;
+  }
+  if (first_cell.contains('.')) {
+    return false;
+  }
+  return s == "id" || s == "name" || s == "index";
+}
+}  // namespace
+
+bool ValidateHandeyePosesCsvFile(const QString & csv_path, QString * err_msg)
+{
+  const QFileInfo fi(csv_path);
+  if (!fi.exists() || !fi.isFile()) {
+    if (err_msg != nullptr) { *err_msg = "CSV 文件不存在"; }
+    return false;
+  }
+  if (fi.suffix().compare("csv", Qt::CaseInsensitive) != 0) {
+    if (err_msg != nullptr) { *err_msg = "请选择 .csv 文件"; }
+    return false;
+  }
+  QFile f(csv_path);
+  if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    if (err_msg != nullptr) { *err_msg = "无法打开 CSV 文件"; }
+    return false;
+  }
+  if (f.size() < 1) {
+    if (err_msg != nullptr) { *err_msg = "CSV 文件为空"; }
+    return false;
+  }
+  return true;
+}
+
+bool ListImageFilenamesFromHandeyePosesCsv(
+  const QString & csv_path, std::vector<QString> * basenames, int * line_count, QString * err_msg)
+{
+  if (basenames == nullptr) {
+    if (err_msg != nullptr) { *err_msg = "basenames is null"; }
+    return false;
+  }
+  basenames->clear();
+  if (line_count != nullptr) { *line_count = 0; }
+  QFile f(csv_path);
+  if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    if (err_msg != nullptr) { *err_msg = "无法打开 CSV"; }
+    return false;
+  }
+  QTextStream in(&f);
+  int total = 0;
+  bool is_first_data_candidate = true;
+  while (!in.atEnd()) {
+    const QString line = in.readLine();
+    if (line.trimmed().isEmpty() || line.trimmed().startsWith("#")) {
+      continue;
+    }
+    const QString cell = FirstColumnCell(line);
+    if (cell.isEmpty()) {
+      continue;
+    }
+    if (is_first_data_candidate) {
+      is_first_data_candidate = false;
+      if (LikelyHeaderRowFirstColumn(cell)) {
+        continue;
+      }
+    }
+    basenames->push_back(cell);
+    total++;
+  }
+  if (line_count != nullptr) { *line_count = total; }
+  if (basenames->empty()) {
+    if (err_msg != nullptr) { *err_msg = "未解析到图像文件名：请使用首列为图像文件名的数据行，可用首行作表头（如 image,filename）"; }
     return false;
   }
   return true;

@@ -13,7 +13,10 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMetaObject>
+#include <QMessageBox>
+#include <QProcess>
 #include <QProgressBar>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -139,6 +142,7 @@ SystemStatusWidget::SystemStatusWidget(QWidget * parent)
   monitor_table->setWordWrap(false);
   monitor_table->setTextElideMode(Qt::ElideNone);
   monitor_table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+  monitor_table->setContextMenuPolicy(Qt::CustomContextMenu);
   bottom_layout->addWidget(monitor_table);
   layout->addWidget(bottom_group, 3);
 
@@ -168,6 +172,75 @@ SystemStatusWidget::SystemStatusWidget(QWidget * parent)
     force_refresh->store(true);
   });
   QObject::connect(ros_filter_edit, &QLineEdit::textChanged, [=](const QString &) {
+    force_refresh->store(true);
+  });
+
+  auto shell_quote = [](const QString & raw) {
+    QString escaped = raw;
+    escaped.replace("'", "'\\''");
+    return "'" + escaped + "'";
+  };
+  QObject::connect(monitor_table, &QWidget::customContextMenuRequested, [=](const QPoint & pos) {
+    const int row = monitor_table->rowAt(pos.y());
+    if (row < 0) {
+      return;
+    }
+    const int monitor_type = monitor_type_combo->currentIndex();
+    if (monitor_type != 0 && monitor_type != 1) {
+      return;  // 仅进程/节点支持结束
+    }
+    QMenu menu(monitor_table);
+    QAction * kill_action = menu.addAction(monitor_type == 0 ? "结束进程" : "结束节点");
+    QAction * chosen = menu.exec(monitor_table->viewport()->mapToGlobal(pos));
+    if (chosen != kill_action) {
+      return;
+    }
+
+    if (monitor_type == 0) {
+      const QTableWidgetItem * pid_item = monitor_table->item(row, 0);
+      if (!pid_item) {
+        return;
+      }
+      const QString pid = pid_item->text().trimmed();
+      if (pid.isEmpty()) {
+        return;
+      }
+      const auto reply = QMessageBox::question(
+        this, "确认", QString("确定结束进程 PID=%1 ?").arg(pid),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+      if (reply != QMessageBox::Yes) {
+        return;
+      }
+      const QString cmd = QString("kill -TERM %1 2>/dev/null || kill -9 %1 2>/dev/null").arg(pid);
+      QProcess p;
+      p.start("bash", {"-lc", cmd});
+      p.waitForFinished(1200);
+      force_refresh->store(true);
+      return;
+    }
+
+    // ROS2 节点：优先按 __node:= 名称匹配，回退按节点名匹配
+    const QTableWidgetItem * node_item = monitor_table->item(row, 0);
+    if (!node_item) {
+      return;
+    }
+    const QString node = node_item->text().trimmed();
+    if (node.isEmpty()) {
+      return;
+    }
+    const auto reply = QMessageBox::question(
+      this, "确认", QString("确定结束 ROS2 节点 %1 ?").arg(node),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply != QMessageBox::Yes) {
+      return;
+    }
+    const QString node_q = shell_quote(node);
+    const QString cmd = QString(
+      "pkill -f \"__node:=%1\" 2>/dev/null || pkill -f %2 2>/dev/null")
+      .arg(node, node_q);
+    QProcess p;
+    p.start("bash", {"-lc", cmd});
+    p.waitForFinished(1200);
     force_refresh->store(true);
   });
 

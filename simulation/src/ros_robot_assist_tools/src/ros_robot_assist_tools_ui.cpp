@@ -423,7 +423,7 @@ QWidget* createKinematicsSolverPage() {
 /// 创建主窗口
 QMainWindow* createMainWindow() {
   QMainWindow* window = new QMainWindow();
-  window->setWindowTitle("ROS2 Assist Tools");
+  window->setWindowTitle("Assist Tool");
   window->resize(1200, 800);
   
   // 中心部件
@@ -444,7 +444,7 @@ QMainWindow* createMainWindow() {
   navLayout->setContentsMargins(10, 20, 10, 20);
   
   // 标题
-  QLabel* titleLabel = new QLabel("ROS2 Assist Tools", navPanel);
+  QLabel* titleLabel = new QLabel("Assist Tool", navPanel);
   titleLabel->setStyleSheet("color: white; font-size: 18px; font-weight: bold;");
   titleLabel->setAlignment(Qt::AlignCenter);
   navLayout->addWidget(titleLabel);

@@ -24,7 +24,7 @@ namespace ros_robot_assist_tools::ui
 QMainWindow * CreateMainWindow()
 {
   QMainWindow * window = new QMainWindow();
-  window->setWindowTitle("ROS2 Assist Tools");
+  window->setWindowTitle("Assist Tool");
   window->resize(1400, 880);
   QWidget * central = new QWidget(window);
   window->setCentralWidget(central);

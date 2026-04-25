@@ -25,6 +25,12 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(eigen3_cmake_module REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(urdf REQUIRED)
+find_package(kdl_parser REQUIRED)
+find_package(orocos_kdl REQUIRED)
+find_package(moveit_msgs REQUIRED)
 
 include_directories(
   include
@@ -53,6 +59,10 @@ add_library(ros_robot_assist_tools_core STATIC
   src/module/pose_transform_module.cpp
   src/ui/kinematics_solver_widget.cpp
   src/module/kinematics_solver_module.cpp
+  src/kinematics/arm_kinematics_kdl.cpp
+  src/kinematics/mdh_craig1989.cpp
+  src/kinematics/arm_kinematics_moveit.cpp
+  src/kinematics/mobile_kinematics.cpp
   src/ui/tf_viewer_widget.cpp
   src/module/tf_viewer_module.cpp
   src/manage/feature_data_manager_base.cpp
@@ -77,12 +87,17 @@ ament_target_dependencies(ros_robot_assist_tools_core
   tf2
   tf2_ros
   geometry_msgs
+  moveit_msgs
+  urdf
+  kdl_parser
+  orocos_kdl
 )
 
 target_link_libraries(ros_robot_assist_tools_core
   ${OpenCV_LIBS}
   Qt5::Widgets
   ${YAML_CPP_LIBRARIES}
+  Eigen3::Eigen
 )
 
 # 主 UI 节点
@@ -105,6 +120,10 @@ install(TARGETS
 )
 
 install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY assets
   DESTINATION share/${PROJECT_NAME}
 )
 

@@ -16,6 +16,10 @@ struct RosInterfaceConfig
   EndpointType pose_endpoint_type = EndpointType::Topic;
   QString control_endpoint = "/robot_control";
   EndpointType control_endpoint_type = EndpointType::Topic;
+  /// 手眼标定：eye_in_hand（眼在手上）或 eye_to_hand（眼在手外）
+  QString handeye_setup = "eye_in_hand";
+  /// 手眼离线：位姿与图像名列表 CSV 路径（图像与 CSV 同目录）
+  QString handeye_poses_csv;
 };
 
 struct ResourceUsage

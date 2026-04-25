@@ -18,6 +18,14 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>geometry_msgs</depend>
+  <depend>moveit_msgs</depend>
+  <depend>urdf</depend>
+  <depend>urdfdom</depend>
+  <depend>urdfdom_headers</depend>
+  <depend>kdl_parser</depend>
+  <depend>orocos_kdl</depend>
+  <depend>eigen3_cmake_module</depend>
+  <depend>libeigen3-dev</depend>
   
   <depend>qtbase5-dev</depend>
   <depend>libqt5-core</depend>

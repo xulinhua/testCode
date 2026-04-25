@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -17,13 +18,13 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QRadioButton>
-#include <QStackedWidget>
 #include <QTextEdit>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -38,11 +39,10 @@ namespace ros_robot_assist_tools::ui
 namespace
 {
 
-QLineEdit * AddField(QFormLayout * form, const QString & label, const QString & value)
+void SetFormLeftAligned(QFormLayout * form)
 {
-  QLineEdit * edit = new QLineEdit(value);
-  form->addRow(label, edit);
-  return edit;
+  form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
 }
 
 void PopulateTopicCombo(QComboBox * combo, const std::vector<QString> & topics, const QString & preferred)
@@ -60,7 +60,7 @@ void PopulateTopicCombo(QComboBox * combo, const std::vector<QString> & topics, 
   combo->setCurrentIndex(idx);
 }
 
-QImage BuildPreviewPlaceholder(const QString & title, const QString & topic)
+QImage BuildPreviewPlaceholder(const QString & title, const QString & detail)
 {
   QImage img(1280, 720, QImage::Format_RGB888);
   img.fill(QColor(32, 36, 42));
@@ -79,9 +79,7 @@ QImage BuildPreviewPlaceholder(const QString & title, const QString & topic)
   painter.drawText(
     QRect(20, 92, 680, 280),
     Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-    QString("当前话题: %1\n更新时间: %2")
-      .arg(topic.isEmpty() ? "(未选择)" : topic)
-      .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss")));
+    detail);
   painter.end();
   return img;
 }
@@ -132,27 +130,39 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
   distortion_model->setCurrentText("fisheye");
   QComboBox * run_mode = new QComboBox();
   run_mode->addItems({"实时模式", "离线模式"});
+  QComboBox * handeye_setup = new QComboBox();
+  handeye_setup->addItem("眼在手上 (Eye-in-hand)");
+  handeye_setup->addItem("眼在手外 (Eye-to-hand)");
 
   QGroupBox * param_group = new QGroupBox("参数");
   QVBoxLayout * param_layout = new QVBoxLayout(param_group);
   QFormLayout * common_form = new QFormLayout();
+  SetFormLeftAligned(common_form);
   common_form->addRow("标定板类型:", board_type);
   common_form->addRow("畸变模型:", distortion_model);
+  common_form->addRow("手眼方式:", handeye_setup);
   common_form->addRow("运行模式:", run_mode);
   param_layout->addLayout(common_form);
-  QStackedWidget * mode_stack = new QStackedWidget();
-  param_layout->addWidget(mode_stack, 1);
   root->addWidget(param_group, 0);
+
+  QGroupBox * calib_param_group = new QGroupBox("标定参数");
+  QVBoxLayout * calib_param_layout = new QVBoxLayout(calib_param_group);
+  QGroupBox * validation_param_group = new QGroupBox("验证参数");
+  QVBoxLayout * validation_param_layout = new QVBoxLayout(validation_param_group);
+  QGroupBox * operation_group = new QGroupBox("操作");
+  QVBoxLayout * operation_layout = new QVBoxLayout(operation_group);
+  root->addWidget(calib_param_group, 0);
+  root->addWidget(validation_param_group, 0);
+  root->addWidget(operation_group, 0);
 
   QComboBox * rt_image_topic = nullptr;
   QComboBox * rt_camera_info_topic = nullptr;
-  QLineEdit * off_bag_dir = nullptr;
-  QComboBox * off_image_topic = nullptr;
+  QLineEdit * off_csv_path = nullptr;
+  QComboBox * off_image_preview = nullptr;
   QComboBox * off_camera_info_topic = nullptr;
 
-  QWidget * realtime = new QWidget();
-  QVBoxLayout * rt_layout = new QVBoxLayout(realtime);
   QFormLayout * rt_form = new QFormLayout();
+  SetFormLeftAligned(rt_form);
   rt_image_topic = new QComboBox();
   rt_image_topic->setEditable(false);
   rt_image_topic->setSizeAdjustPolicy(QComboBox::AdjustToContentsOnFirstShow);
@@ -162,24 +172,77 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
   rt_topic_row->addWidget(rt_image_topic, 1);
   rt_topic_row->addWidget(refresh_live_topics);
   rt_form->addRow("图像话题:", rt_topic_row);
-  for (const auto & def : HandeyeOnlineFieldDefs()) {
-    AddField(rt_form, def.first + ":", def.second);
-  }
+  QLineEdit * rt_base_frame = new QLineEdit("base_link");
+  QLineEdit * rt_ee_frame = new QLineEdit("tool0");
+  QLineEdit * rt_third_frame = new QLineEdit("camera_link");
+  QLabel * rt_third_label = new QLabel(HandeyeThirdFrameFieldLabel(HandeyeSetupMode::EyeInHand));
+  rt_form->addRow("base_frame:", rt_base_frame);
+  rt_form->addRow("ee_frame:", rt_ee_frame);
+  rt_form->addRow(rt_third_label, rt_third_frame);
   QCheckBox * auto_refresh_live_topics = new QCheckBox("自动刷新在线图像话题(2s)");
   auto_refresh_live_topics->setChecked(false);
   rt_form->addRow("", auto_refresh_live_topics);
-  rt_layout->addLayout(rt_form);
+  QWidget * rt_calib_panel = new QWidget();
+  QVBoxLayout * rt_calib_layout = new QVBoxLayout(rt_calib_panel);
+  rt_calib_layout->setContentsMargins(0, 0, 0, 0);
+  rt_calib_layout->addLayout(rt_form);
+  calib_param_layout->addWidget(rt_calib_panel);
 
-  QGroupBox * rt_validation_group = new QGroupBox("验证参数");
-  QFormLayout * rt_validation_form = new QFormLayout(rt_validation_group);
+  QVBoxLayout * off_param_layout = new QVBoxLayout();
+  QHBoxLayout * csv_row = new QHBoxLayout();
+  off_csv_path = new QLineEdit();
+  QPushButton * browse_csv = new QPushButton("选择 CSV 文件");
+  csv_row->addWidget(off_csv_path, 1);
+  csv_row->addWidget(browse_csv);
+  off_param_layout->addLayout(csv_row);
+  off_image_preview = new QComboBox();
+  off_image_preview->setEditable(false);
+  off_image_preview->setSizeAdjustPolicy(QComboBox::AdjustToContentsOnFirstShow);
+  QFormLayout * off_form = new QFormLayout();
+  SetFormLeftAligned(off_form);
+  off_form->addRow("预览图像(同目录):", off_image_preview);
+  QLineEdit * off_base_frame = new QLineEdit("base_link");
+  QLineEdit * off_ee_frame = new QLineEdit("tool0");
+  QLineEdit * off_third_frame = new QLineEdit("camera_link");
+  QLabel * off_third_label = new QLabel(HandeyeThirdFrameFieldLabel(HandeyeSetupMode::EyeInHand));
+  off_form->addRow("base_frame:", off_base_frame);
+  off_form->addRow("ee_frame:", off_ee_frame);
+  off_form->addRow(off_third_label, off_third_frame);
+  off_param_layout->addLayout(off_form);
+  QWidget * off_calib_panel = new QWidget();
+  QVBoxLayout * off_calib_layout = new QVBoxLayout(off_calib_panel);
+  off_calib_layout->setContentsMargins(0, 0, 0, 0);
+  off_calib_layout->addLayout(off_param_layout);
+  calib_param_layout->addWidget(off_calib_panel);
+
+  QWidget * rt_validation_widget = new QWidget();
+  QFormLayout * rt_validation_form = new QFormLayout(rt_validation_widget);
+  SetFormLeftAligned(rt_validation_form);
   rt_camera_info_topic = new QComboBox();
   rt_camera_info_topic->setEditable(true);
   PopulateTopicCombo(rt_camera_info_topic, {}, "/camera/camera_info");
   rt_validation_form->addRow("camera_info话题:", rt_camera_info_topic);
-  rt_layout->addWidget(rt_validation_group);
+  QWidget * rt_validation_panel = new QWidget();
+  QVBoxLayout * rt_validation_layout = new QVBoxLayout(rt_validation_panel);
+  rt_validation_layout->setContentsMargins(0, 0, 0, 0);
+  rt_validation_layout->addWidget(rt_validation_widget);
+  validation_param_layout->addWidget(rt_validation_panel);
+
+  QWidget * off_validation_widget = new QWidget();
+  QFormLayout * off_validation_form = new QFormLayout(off_validation_widget);
+  SetFormLeftAligned(off_validation_form);
+  off_camera_info_topic = new QComboBox();
+  off_camera_info_topic->setEditable(true);
+  PopulateTopicCombo(off_camera_info_topic, {}, "/camera/camera_info");
+  off_validation_form->addRow("camera_info话题:", off_camera_info_topic);
+  QWidget * off_validation_panel = new QWidget();
+  QVBoxLayout * off_validation_layout = new QVBoxLayout(off_validation_panel);
+  off_validation_layout->setContentsMargins(0, 0, 0, 0);
+  off_validation_layout->addWidget(off_validation_widget);
+  validation_param_layout->addWidget(off_validation_panel);
+
   QRadioButton * quality_hint = new QRadioButton("显示采图质量提示");
   quality_hint->setChecked(true);
-  rt_layout->addWidget(quality_hint);
   QHBoxLayout * rt_btn_row = new QHBoxLayout();
   QPushButton * manual_capture = new QPushButton("手动采图");
   QPushButton * auto_capture = new QPushButton("自动采图");
@@ -187,56 +250,18 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
   rt_btn_row->addWidget(manual_capture);
   rt_btn_row->addWidget(auto_capture);
   rt_btn_row->addWidget(run_btn);
-  rt_layout->addLayout(rt_btn_row);
-  rt_layout->addStretch();
-  mode_stack->addWidget(realtime);
-
-  QWidget * offline = new QWidget();
-  QVBoxLayout * off_layout = new QVBoxLayout(offline);
-  QVBoxLayout * off_param_layout = new QVBoxLayout();
-  QHBoxLayout * bag_row = new QHBoxLayout();
-  off_bag_dir = new QLineEdit();
-  QPushButton * browse_bag = new QPushButton("选择 .db3 目录");
-  bag_row->addWidget(off_bag_dir, 1);
-  bag_row->addWidget(browse_bag);
-  off_param_layout->addLayout(bag_row);
-  off_image_topic = new QComboBox();
-  off_image_topic->setEditable(false);
-  QFormLayout * off_form = new QFormLayout();
-  off_form->addRow("图像话题:", off_image_topic);
-  for (const auto & def : HandeyeOfflineFieldDefs()) {
-    AddField(off_form, def.first + ":", def.second);
-  }
-  off_param_layout->addLayout(off_form);
-  off_layout->addLayout(off_param_layout);
-  QObject::connect(browse_bag, &QPushButton::clicked, [=]() {
-    const QString dir = QFileDialog::getExistingDirectory(nullptr, "选择 rosbag(.db3) 目录", QDir::homePath());
-    if (dir.isEmpty()) return;
-    off_bag_dir->setText(dir);
-    QString err;
-    std::vector<QString> topics;
-    if (!ListImageTopicsFromRosbag(dir, &topics, &err)) {
-      QMessageBox::warning(this, "rosbag解析失败", err);
-      return;
-    }
-    PopulateTopicCombo(off_image_topic, topics, "/camera/image_raw");
-    std::vector<QString> camera_info_topics;
-    QString camera_info_err;
-    if (ListCameraInfoTopicsFromRosbag(dir, &camera_info_topics, &camera_info_err)) {
-      PopulateTopicCombo(off_camera_info_topic, camera_info_topics, off_camera_info_topic->currentText());
-    }
-  });
-  QGroupBox * off_validation_group = new QGroupBox("验证参数");
-  QFormLayout * off_validation_form = new QFormLayout(off_validation_group);
-  off_camera_info_topic = new QComboBox();
-  off_camera_info_topic->setEditable(true);
-  PopulateTopicCombo(off_camera_info_topic, {}, "/camera/camera_info");
-  off_validation_form->addRow("camera_info话题:", off_camera_info_topic);
-  off_layout->addWidget(off_validation_group);
+  QWidget * rt_operation_panel = new QWidget();
+  QVBoxLayout * rt_operation_layout = new QVBoxLayout(rt_operation_panel);
+  rt_operation_layout->setContentsMargins(0, 0, 0, 0);
+  rt_operation_layout->addWidget(quality_hint);
+  rt_operation_layout->addLayout(rt_btn_row);
   QPushButton * off_run_btn = new QPushButton("执行离线标定");
-  off_layout->addWidget(off_run_btn);
-  off_layout->addStretch();
-  mode_stack->addWidget(offline);
+  QWidget * off_operation_panel = new QWidget();
+  QVBoxLayout * off_operation_layout = new QVBoxLayout(off_operation_panel);
+  off_operation_layout->setContentsMargins(0, 0, 0, 0);
+  off_operation_layout->addWidget(off_run_btn);
+  operation_layout->addWidget(rt_operation_panel);
+  operation_layout->addWidget(off_operation_panel);
 
   QGroupBox * preview_group = new QGroupBox("图像显示");
   QVBoxLayout * preview_layout = new QVBoxLayout(preview_group);
@@ -275,10 +300,75 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
     if (!path.isEmpty()) output_yaml->setText(path);
   });
 
-  QObject::connect(run_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), mode_stack, &QStackedWidget::setCurrentIndex);
+  auto update_mode_visibility = [=]() {
+    const bool online = (run_mode->currentIndex() == 0);
+    rt_calib_panel->setVisible(online);
+    rt_validation_panel->setVisible(online);
+    rt_operation_panel->setVisible(online);
+    off_calib_panel->setVisible(!online);
+    off_validation_panel->setVisible(!online);
+    off_operation_panel->setVisible(!online);
+  };
+  QObject::connect(run_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) {
+    update_mode_visibility();
+  });
   auto append_log = [=](const QString & msg) {
     log->append(QString("[%1] %2").arg(QDateTime::currentDateTime().toString("hh:mm:ss")).arg(msg));
   };
+  auto repopulate_offline_from_csv = [=](bool with_dialog) {
+    const QString p = off_csv_path->text().trimmed();
+    if (p.isEmpty()) {
+      off_image_preview->clear();
+      return;
+    }
+    QString err;
+    if (!ValidateHandeyePosesCsvFile(p, &err)) {
+      if (with_dialog) {
+        QMessageBox::warning(this, "CSV 无效", err);
+      }
+      return;
+    }
+    std::vector<QString> basenames;
+    int n = 0;
+    if (!ListImageFilenamesFromHandeyePosesCsv(p, &basenames, &n, &err)) {
+      if (with_dialog) {
+        QMessageBox::warning(this, "解析 CSV 失败", err);
+      } else {
+        append_log("解析 CSV: " + err);
+      }
+      return;
+    }
+    off_image_preview->clear();
+    for (const auto & b : basenames) {
+      off_image_preview->addItem(b);
+    }
+    if (off_image_preview->count() > 0) {
+      off_image_preview->setCurrentIndex(0);
+    }
+    append_log(QString("已加载采集列表: %1 条记录，图像目录: %2")
+        .arg(n)
+        .arg(ImageDirectoryForHandeyePosesCsv(p)));
+  };
+  QObject::connect(browse_csv, &QPushButton::clicked, [=]() {
+    const QString path = QFileDialog::getOpenFileName(
+      this, "选择手眼采集列表 CSV", QDir::homePath(), "CSV (*.csv);;所有文件 (*)");
+    if (path.isEmpty()) return;
+    off_csv_path->setText(path);
+    repopulate_offline_from_csv(true);
+  });
+  auto sync_handeye_frame_labels = [=]() {
+    const HandeyeSetupMode m = handeye_setup->currentIndex() == 0 ? HandeyeSetupMode::EyeInHand : HandeyeSetupMode::EyeToHand;
+    rt_third_label->setText(HandeyeThirdFrameFieldLabel(m));
+    off_third_label->setText(HandeyeThirdFrameFieldLabel(m));
+    const QString ph = (m == HandeyeSetupMode::EyeInHand) ? QStringLiteral("随末端安装的相机坐标系")
+                                                         : QStringLiteral("固连末端的标定板/目标坐标系");
+    rt_third_frame->setPlaceholderText(ph);
+    off_third_frame->setPlaceholderText(ph);
+  };
+  QObject::connect(handeye_setup, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) {
+    sync_handeye_frame_labels();
+    append_log(QString("手眼方式: %1").arg(handeye_setup->currentText()));
+  });
   QObject::connect(manual_capture, &QPushButton::clicked, [=]() { append_log("手动采图触发。"); });
   QObject::connect(auto_capture, &QPushButton::clicked, [=]() { append_log("自动采图启动。"); });
 
@@ -310,9 +400,34 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
 
   auto update_preview = [=]() {
     const bool online_mode = (run_mode->currentIndex() == 0);
-    const QString topic = online_mode ? rt_image_topic->currentText() : off_image_topic->currentText();
-    const QString text = show_raw_checkbox->isChecked() ? "原图预览" : "标定结果图预览";
-    preview_widget->SetImage(BuildPreviewPlaceholder(text, topic));
+    if (online_mode) {
+      const QString topic = rt_image_topic->currentText();
+      const QString text = show_raw_checkbox->isChecked() ? "原图预览" : "标定结果图预览";
+      const QString body = QString("当前话题: %1\n更新时间: %2")
+        .arg(topic.isEmpty() ? "(未选择)" : topic)
+        .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss"));
+      preview_widget->SetImage(BuildPreviewPlaceholder(text, body));
+      return;
+    }
+    if (!show_raw_checkbox->isChecked()) {
+      const QString body = QString("CSV: %1\n(标定结果预览占位)").arg(off_csv_path->text().isEmpty() ? "(未选)" : off_csv_path->text());
+      preview_widget->SetImage(BuildPreviewPlaceholder("标定结果图预览", body));
+      return;
+    }
+    const QString dir = ImageDirectoryForHandeyePosesCsv(off_csv_path->text().trimmed());
+    const QString name = (off_image_preview->count() > 0) ? off_image_preview->currentText() : QString();
+    if (!name.isEmpty() && QFileInfo::exists(QDir(dir).filePath(name))) {
+      const QString abs = QDir(dir).filePath(name);
+      QImage im;
+      if (im.load(abs)) {
+        preview_widget->SetImage(im);
+        return;
+      }
+    }
+    const QString body = QString("CSV: %1\n图像: %2\n(若无法显示请检查同目录下是否存在该文件)")
+      .arg(off_csv_path->text().isEmpty() ? "(未选文件)" : off_csv_path->text())
+      .arg(name.isEmpty() ? "(无列表)" : name);
+    preview_widget->SetImage(BuildPreviewPlaceholder("离线图像预览", body));
   };
   auto image_subscription = std::make_shared<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr>();
   auto image_sub_mutex = std::make_shared<std::mutex>();
@@ -362,18 +477,39 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
       });
     append_log(QString("已订阅图像话题: %1").arg(topic));
   };
-  QObject::connect(refresh_preview_btn, &QPushButton::clicked, [=]() { subscribe_preview_topic(); });
-  QObject::connect(show_raw_checkbox, &QCheckBox::toggled, [=](bool) { subscribe_preview_topic(); });
-  QObject::connect(run_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) { subscribe_preview_topic(); });
+  QObject::connect(refresh_preview_btn, &QPushButton::clicked, [=]() {
+    if (run_mode->currentIndex() == 0) {
+      subscribe_preview_topic();
+    } else {
+      repopulate_offline_from_csv(false);
+      update_preview();
+    }
+  });
+  QObject::connect(show_raw_checkbox, &QCheckBox::toggled, [=](bool) {
+    subscribe_preview_topic();
+    update_preview();
+  });
+  QObject::connect(run_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) {
+    subscribe_preview_topic();
+    update_preview();
+  });
   QObject::connect(rt_image_topic, &QComboBox::currentTextChanged, [=](const QString &) { subscribe_preview_topic(); });
-  QObject::connect(off_image_topic, &QComboBox::currentTextChanged, [=](const QString &) { update_preview(); });
+  QObject::connect(off_image_preview, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) { update_preview(); });
+  QObject::connect(off_csv_path, &QLineEdit::editingFinished, [=]() { repopulate_offline_from_csv(false); });
 
   QObject::connect(run_btn, &QPushButton::clicked, [=]() {
     QString err;
+    const HandeyeSetupMode hm = handeye_setup->currentIndex() == 0 ? HandeyeSetupMode::EyeInHand : HandeyeSetupMode::EyeToHand;
+    const std::vector<std::pair<QString, QString>> extra_fields = {
+      {"handeye_setup", HandeyeSetupModeToYamlString(hm)},
+      {"base_frame", rt_base_frame->text()},
+      {"ee_frame", rt_ee_frame->text()},
+      {HandeyeThirdFrameYamlKey(hm), rt_third_frame->text()},
+    };
     if (!SaveCalibrationYaml(
           output_yaml->text(), "手眼标定", "online", rt_image_topic->currentText(),
           board_type->currentText(), distortion_model->currentText(),
-          rt_image_topic->currentText(), rt_camera_info_topic->currentText(), {}, &err)) {
+          rt_image_topic->currentText(), rt_camera_info_topic->currentText(), extra_fields, &err)) {
       QMessageBox::critical(this, "错误", "保存标定结果失败: " + err);
       append_log("实时标定失败: " + err);
       return;
@@ -384,21 +520,38 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
 
   QObject::connect(off_run_btn, &QPushButton::clicked, [=]() {
     QString err;
-    if (!ValidateRosbagDirectory(off_bag_dir->text(), &err)) {
-      QMessageBox::warning(this, "bag校验失败", err);
+    const QString csv = off_csv_path->text().trimmed();
+    if (!ValidateHandeyePosesCsvFile(csv, &err)) {
+      QMessageBox::warning(this, "CSV 无效", err);
       append_log("离线标定失败: " + err);
       return;
     }
-    std::vector<std::pair<QString, QString>> extra_fields = {{"bag_dir", off_bag_dir->text()}};
+    std::vector<QString> check_names;
+    if (!ListImageFilenamesFromHandeyePosesCsv(csv, &check_names, nullptr, &err)) {
+      QMessageBox::warning(this, "CSV 解析失败", err);
+      append_log("离线标定失败: " + err);
+      return;
+    }
+    const QString image_dir = ImageDirectoryForHandeyePosesCsv(csv);
+    const HandeyeSetupMode hm = handeye_setup->currentIndex() == 0 ? HandeyeSetupMode::EyeInHand : HandeyeSetupMode::EyeToHand;
+    const std::vector<std::pair<QString, QString>> extra_fields = {{"pose_csv", csv},
+      {"image_dir", image_dir},
+      {"handeye_setup", HandeyeSetupModeToYamlString(hm)},
+      {"base_frame", off_base_frame->text()},
+      {"ee_frame", off_ee_frame->text()},
+      {HandeyeThirdFrameYamlKey(hm), off_third_frame->text()}};
     if (!SaveCalibrationYaml(
-          output_yaml->text(), "手眼标定", "offline", off_bag_dir->text(),
+          output_yaml->text(), "手眼标定", "offline", csv,
           board_type->currentText(), distortion_model->currentText(),
-          off_image_topic->currentText(), off_camera_info_topic->currentText(), extra_fields, &err)) {
+          image_dir, off_camera_info_topic->currentText(), extra_fields, &err)) {
       QMessageBox::critical(this, "错误", "保存标定结果失败: " + err);
       append_log("离线标定失败: " + err);
       return;
     }
-    append_log(QString("离线标定完成，bag目录: %1，结果: %2").arg(off_bag_dir->text()).arg(output_yaml->text()));
+    append_log(QString("离线标定结果已保存: %1 (CSV: %2，共 %3 行)")
+        .arg(output_yaml->text())
+        .arg(csv)
+        .arg(static_cast<int>(check_names.size())));
     if (!show_raw_checkbox->isChecked()) update_preview();
   });
 
@@ -412,14 +565,24 @@ HandeyeCalibrationWidget::HandeyeCalibrationWidget(QWidget * parent)
       rt_camera_info_topic->setCurrentText(cfg.pose_endpoint);
       off_camera_info_topic->setCurrentText(cfg.pose_endpoint);
     }
+    handeye_setup->setCurrentIndex(
+      HandeyeSetupModeFromYamlString(cfg.handeye_setup) == HandeyeSetupMode::EyeInHand ? 0 : 1);
+    sync_handeye_frame_labels();
+    if (!cfg.handeye_poses_csv.trimmed().isEmpty()) {
+      off_csv_path->setText(cfg.handeye_poses_csv);
+    }
     append_log("已加载默认配置: " + default_cfg);
   } else {
     PopulateTopicCombo(rt_image_topic, ListOnlineImageTopics(), "/camera/image_raw");
     append_log("默认配置加载失败，使用界面默认值。");
   }
   PopulateTopicCombo(rt_camera_info_topic, ListOnlineCameraInfoTopics(), rt_camera_info_topic->currentText());
-  PopulateTopicCombo(off_image_topic, {}, "/camera/image_raw");
   PopulateTopicCombo(off_camera_info_topic, {}, "/camera/camera_info");
+  if (!off_csv_path->text().trimmed().isEmpty()) {
+    repopulate_offline_from_csv(false);
+  }
+  update_mode_visibility();
+  sync_handeye_frame_labels();
   subscribe_preview_topic();
 }
 
