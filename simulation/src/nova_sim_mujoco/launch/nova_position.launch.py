@@ -56,6 +56,11 @@ def generate_launch_description():
         default_value='true',
         description='Publish real MuJoCo raster RGB/depth camera streams.',
     )
+    start_all_joints_reset_node_arg = DeclareLaunchArgument(
+        name='start_all_joints_reset_node',
+        default_value='false',
+        description='Start all_joints_reset_node listener for /nova_sim/reset_all_joints.',
+    )
 
     # 启动 MuJoCo（包含 robot_state_publisher + MuJoCo viewer 进程）
     mujoco_launch = IncludeLaunchDescription(
@@ -107,6 +112,7 @@ def generate_launch_description():
         package='nova_sim_mujoco',
         executable='all_joints_reset_node',
         output='screen',
+        condition=IfCondition(LaunchConfiguration('start_all_joints_reset_node')),
         sigterm_timeout='2',
         sigkill_timeout='2',
     )
@@ -160,6 +166,7 @@ def generate_launch_description():
         start_motion_stack_arg,
         start_tf_render_cameras_arg,
         start_mujoco_raster_cameras_arg,
+        start_all_joints_reset_node_arg,
         mujoco_launch,
         rviz_node,
         ui_log,

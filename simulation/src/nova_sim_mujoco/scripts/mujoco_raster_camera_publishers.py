@@ -51,15 +51,32 @@ class CamDef:
     width: int = 1280
     height: int = 720
     rel_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    rel_quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+    # Store as ROS quaternion order (x, y, z, w). Converted to MuJoCo (w, x, y, z) when injecting.
+    rel_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     target_body: str = ""
+    track_target: bool = False
+    fovy_deg: float = 58.0
+
+
+@dataclass(frozen=True)
+class WorldTargetDef:
+    body_name: str
+    pos_world: tuple[float, float, float]
 
 
 class MujocoRasterCameraPublishers(Node):
     def __init__(self) -> None:
         super().__init__("mujoco_raster_camera_publishers")
         self.declare_parameter("publish_hz", 15.0)
+        self.declare_parameter("enable_target_tracking", True)
+        self.declare_parameter("enable_depth", False)
+        self.declare_parameter("image_width", 1280)
+        self.declare_parameter("image_height", 720)
         hz = float(self.get_parameter("publish_hz").value)
+        self._enable_target_tracking = bool(self.get_parameter("enable_target_tracking").value)
+        self._enable_depth = bool(self.get_parameter("enable_depth").value)
+        self._image_width = int(self.get_parameter("image_width").value)
+        self._image_height = int(self.get_parameter("image_height").value)
         self._period = 1.0 / max(1.0, hz)
 
         self._cams = [
@@ -67,25 +84,44 @@ class MujocoRasterCameraPublishers(Node):
             CamDef(
                 0, "world", "camera0_rgb_sensor", "camera0_rgb_sensor", "camera0_depth_sensor",
                 "camera0_optical_frame",
+                width=self._image_width,
+                height=self._image_height,
                 rel_pos=(0.5299998, -0.4994585, 1.10),
-                rel_quat_wxyz=(0.0, 0.9999996, 0.00079449, -0.00039816),
+                # Match camera0_optical_frame orientation (ROS xyzw order).
+                rel_quat_xyzw=(0.9999996, 0.00079449, -0.00039816, 0.0),
                 target_body="aruco_board_base_mid",
+                track_target=True,
+                fovy_deg=68.0,
             ),
             # Attach camera1/camera2 to surviving wrist bodies in MJCF.
             CamDef(
                 1, "J1_6", "camera1_rgb_sensor", "camera1_rgb_sensor", "camera1_depth_sensor",
                 "camera1_optical_frame",
-                rel_pos=(0.00, -0.05, 0.05),
-                rel_quat_wxyz=(0.9999999, -0.00039816, 0.0, 0.00000184),
+                width=self._image_width,
+                height=self._image_height,
+                rel_pos=(0.00, -0.20, 0.10),
+                # Flip optical direction to top-down view (previously bottom-up).
+                rel_quat_xyzw=(1.0, 0.0, 0.0, 0.0),
                 target_body="aruco_board_base_mid",
+                fovy_deg=78.0,
             ),
             CamDef(
                 2, "J2_6", "camera2_rgb_sensor", "camera2_rgb_sensor", "camera2_depth_sensor",
                 "camera2_optical_frame",
-                rel_pos=(0.00, -0.05, 0.05),
-                rel_quat_wxyz=(0.9999999, -0.00039816, 0.0, 0.00000184),
+                width=self._image_width,
+                height=self._image_height,
+                rel_pos=(0.00, -0.20, 0.10),
+                # Keep cam2 orientation consistent with cam1.
+                rel_quat_xyzw=(1.0, 0.0, 0.0, 0.0),
                 target_body="aruco_board_base_arm1",
+                fovy_deg=78.0,
             ),
+        ]
+        # URDF->MJCF conversion may strip board link bodies. Recreate stable world targets
+        # so cameras can keep using targetbodycom in real raster rendering.
+        self._world_targets = [
+            WorldTargetDef("aruco_board_base_mid", (0.42, -0.14, 0.02)),
+            WorldTargetDef("aruco_board_base_arm1", (0.65, -0.14, 0.02)),
         ]
 
         self._rgb_pubs = []
@@ -136,6 +172,9 @@ class MujocoRasterCameraPublishers(Node):
             self.get_logger().error(f"Failed loading MuJoCo model for cameras: {exc}")
 
     def _inject_cameras(self, xml_text: str) -> str:
+        def xyzw_to_wxyz(q: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+            return (q[3], q[0], q[1], q[2])
+
         root = ET.fromstring(xml_text)
         worldbody = root.find("worldbody")
         if worldbody is None:
@@ -163,28 +202,47 @@ class MujocoRasterCameraPublishers(Node):
             if name:
                 body_by_name[name] = body
 
+        for target in self._world_targets:
+            if target.body_name in body_by_name:
+                continue
+            injected = ET.SubElement(
+                worldbody,
+                "body",
+                {
+                    "name": target.body_name,
+                    "pos": f"{target.pos_world[0]} {target.pos_world[1]} {target.pos_world[2]}",
+                },
+            )
+            ET.SubElement(injected, "site", {"name": f"{target.body_name}_site", "size": "0.001"})
+            body_by_name[target.body_name] = injected
+
         for cam in self._cams:
             if cam.parent_body == "world":
                 target = worldbody
             else:
                 target = body_by_name.get(cam.parent_body)
                 if target is None:
+                    self.get_logger().warning(
+                        f"Skip injecting camera '{cam.camera_name}': parent body '{cam.parent_body}' not found in MJCF.")
                     continue
             has_camera = any(c.attrib.get("name") == cam.camera_name for c in target.findall("camera"))
             if has_camera:
                 continue
+            target_exists = bool(cam.target_body) and cam.target_body in body_by_name
+            use_tracking = self._enable_target_tracking and cam.track_target
+            mode = "targetbodycom" if (use_tracking and target_exists) else "fixed"
             attrs = {
                 "name": cam.camera_name,
-                "mode": "targetbodycom" if cam.target_body else "fixed",
+                "mode": mode,
                 "pos": f"{cam.rel_pos[0]} {cam.rel_pos[1]} {cam.rel_pos[2]}",
-                "quat": (
-                    f"{cam.rel_quat_wxyz[0]} {cam.rel_quat_wxyz[1]} "
-                    f"{cam.rel_quat_wxyz[2]} {cam.rel_quat_wxyz[3]}"
-                ),
-                "fovy": "45",
+                "quat": " ".join(str(v) for v in xyzw_to_wxyz(cam.rel_quat_xyzw)),
+                "fovy": f"{cam.fovy_deg}",
             }
-            if cam.target_body:
+            if use_tracking and target_exists:
                 attrs["target"] = cam.target_body
+            elif use_tracking and cam.target_body:
+                self.get_logger().warning(
+                    f"Camera '{cam.camera_name}' target body '{cam.target_body}' not found, using fixed mode.")
             ET.SubElement(target, "camera", attrs)
         return ET.tostring(root, encoding="unicode")
 
@@ -199,21 +257,37 @@ class MujocoRasterCameraPublishers(Node):
             cam_id = self._camera_name_to_id.get(cam.camera_name)
             if cam_id is None:
                 continue
+            rgb_sub_count = self._rgb_pubs[i].get_subscription_count()
+            depth_sub_count = self._depth_pubs[i].get_subscription_count()
+            info_sub_count = self._rgb_info_pubs[i].get_subscription_count() + self._depth_info_pubs[i].get_subscription_count()
+            if rgb_sub_count == 0 and depth_sub_count == 0 and info_sub_count == 0:
+                continue
 
-            self._renderer.update_scene(self._data, camera=cam.camera_name)
-            rgb = self._renderer.render()
-            rgb_msg = self._to_rgb_msg(rgb, cam.frame_id, stamp)
             info_msg = self._make_info(cam, cam_id, stamp)
-            self._rgb_pubs[i].publish(rgb_msg)
-            self._rgb_info_pubs[i].publish(info_msg)
+            if rgb_sub_count > 0 or self._rgb_info_pubs[i].get_subscription_count() > 0:
+                self._renderer.update_scene(self._data, camera=cam.camera_name)
+                rgb = self._renderer.render()
+                # MuJoCo/OpenGL image origin is bottom-left; ROS image consumers expect top-left.
+                rgb = np.flipud(rgb)
+                if rgb_sub_count > 0:
+                    rgb_msg = self._to_rgb_msg(rgb, cam.frame_id, stamp)
+                    self._rgb_pubs[i].publish(rgb_msg)
+                if self._rgb_info_pubs[i].get_subscription_count() > 0:
+                    self._rgb_info_pubs[i].publish(info_msg)
 
-            self._renderer.enable_depth_rendering()
-            self._renderer.update_scene(self._data, camera=cam.camera_name)
-            depth = self._renderer.render().astype(np.float32)
-            self._renderer.disable_depth_rendering()
-            depth_msg = self._to_depth_msg(depth, cam.frame_id, stamp)
-            self._depth_pubs[i].publish(depth_msg)
-            self._depth_info_pubs[i].publish(info_msg)
+            if depth_sub_count > 0 or self._depth_info_pubs[i].get_subscription_count() > 0:
+                if not self._enable_depth:
+                    continue
+                self._renderer.enable_depth_rendering()
+                self._renderer.update_scene(self._data, camera=cam.camera_name)
+                depth = self._renderer.render().astype(np.float32)
+                depth = np.flipud(depth)
+                self._renderer.disable_depth_rendering()
+                if depth_sub_count > 0:
+                    depth_msg = self._to_depth_msg(depth, cam.frame_id, stamp)
+                    self._depth_pubs[i].publish(depth_msg)
+                if self._depth_info_pubs[i].get_subscription_count() > 0:
+                    self._depth_info_pubs[i].publish(info_msg)
 
     def _apply_joint_states(self) -> None:
         if not self._joint_map:

@@ -4,6 +4,7 @@ import tempfile
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, Shutdown, ExecuteProcess, TimerAction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterFile, ParameterValue
@@ -133,6 +134,7 @@ def launch_setup(context, *args, **kwargs):
     delayed_zero_pose = TimerAction(
         period=4.0,
         actions=[zero_pose_command],
+        condition=IfCondition(LaunchConfiguration('publish_startup_zero_pose')),
     )
 
     return [
@@ -154,8 +156,14 @@ def generate_launch_description():
         default_value=os.path.join(your_pkg, 'urdf', 'nova_robot_position.urdf'),
         description='URDF file path'
     )
+    publish_startup_zero_arg = DeclareLaunchArgument(
+        name='publish_startup_zero_pose',
+        default_value='false',
+        description='Publish one-shot all-zero command to /arm_controller/commands after startup.',
+    )
 
     return LaunchDescription([
         urdf_file_arg,
+        publish_startup_zero_arg,
         OpaqueFunction(function=launch_setup),
     ])
