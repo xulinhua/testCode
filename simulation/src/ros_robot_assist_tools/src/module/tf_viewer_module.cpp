@@ -9,6 +9,8 @@
 #include <thread>
 #include <unordered_set>
 
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
 #include <tf2/exceptions.h>
 #include <tf2/time.h>
 #include <tf2_ros/buffer.h>
@@ -23,16 +25,6 @@ namespace ros_robot_assist_tools::ui
 {
 namespace
 {
-struct Quaternion
-{
-  double x = 0.0;
-  double y = 0.0;
-  double z = 0.0;
-  double w = 1.0;
-};
-
-double Clamp(double v) { return std::max(-1.0, std::min(1.0, v)); }
-
 QString FormatAligned(double value, int width = 11, int precision = 6)
 {
   return QString("%1").arg(value, width, 'f', precision);
@@ -53,25 +45,6 @@ QString FormatMatrix4x4(
     .arg(FormatAligned(0.0)).arg(FormatAligned(0.0)).arg(FormatAligned(0.0)).arg(FormatAligned(1.0));
 }
 
-Quaternion Normalize(const Quaternion & q)
-{
-  const double n = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-  if (n < 1e-12) { return {}; }
-  return {q.x / n, q.y / n, q.z / n, q.w / n};
-}
-
-std::array<std::array<double, 3>, 3> RotationFromQuaternion(const Quaternion & q_in)
-{
-  const Quaternion q = Normalize(q_in);
-  const double xx = q.x * q.x, yy = q.y * q.y, zz = q.z * q.z;
-  const double xy = q.x * q.y, xz = q.x * q.z, yz = q.y * q.z;
-  const double wx = q.w * q.x, wy = q.w * q.y, wz = q.w * q.z;
-  return {{
-      {{1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy)}},
-      {{2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)}},
-      {{2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy)}}
-    }};
-}
 }  // namespace
 
 class TfViewerBackend::Impl
@@ -190,25 +163,49 @@ bool TfViewerBackend::BuildTransformReport(
     const auto tf = impl_->buffer_->lookupTransform(
       to_frame.toStdString(), from_frame.toStdString(), tf2::TimePointZero, tf2::durationFromSec(0.2));
     const double tx = tf.transform.translation.x, ty = tf.transform.translation.y, tz = tf.transform.translation.z;
-    const Quaternion qn = Normalize({tf.transform.rotation.x, tf.transform.rotation.y, tf.transform.rotation.z, tf.transform.rotation.w});
-    const auto r = RotationFromQuaternion(qn);
-    const double roll = std::atan2(r[2][1], r[2][2]) * 180.0 / M_PI;
-    const double pitch = std::asin(-Clamp(r[2][0])) * 180.0 / M_PI;
-    const double yaw = std::atan2(r[1][0], r[0][0]) * 180.0 / M_PI;
-    const double trans_norm = std::sqrt(tx * tx + ty * ty + tz * tz);
-    const double rot_deg = 2.0 * std::acos(Clamp(qn.w)) * 180.0 / M_PI;
+    tf2::Quaternion tq(
+      tf.transform.rotation.x, tf.transform.rotation.y, tf.transform.rotation.z, tf.transform.rotation.w);
+    tq.normalize();
+    tf2::Matrix3x3 m(tq);
+    double roll_r = 0.0;
+    double pitch_r = 0.0;
+    double yaw_r = 0.0;
+    m.getRPY(roll_r, pitch_r, yaw_r);
+    std::array<std::array<double, 3>, 3> r;
+    for (int i = 0; i < 3; ++i) {
+      for (int j = 0; j < 3; ++j) {
+        r[i][j] = m[i][j];
+      }
+    }
     if (matrix_text != nullptr) {
       *matrix_text = FormatMatrix4x4(r, tx, ty, tz);
     }
+    const double roll = roll_r * 180.0 / M_PI;
+    const double pitch = pitch_r * 180.0 / M_PI;
+    const double yaw = yaw_r * 180.0 / M_PI;
     if (meaning_text != nullptr) {
       *meaning_text = QString(
         "变换方向: %1 -> %2\n"
-        "实际意义: 将 %1 坐标系下的点，转换到 %2 坐标系。\n\n"
-        "位置偏差 (m):\n  dx=%3, dy=%4, dz=%5\n  平移模长=%6\n\n"
-        "角度偏差 (deg, ZYX):\n  roll=%7, pitch=%8, yaw=%9\n  总旋转角=%10")
+        "实际意义: 将 %1 坐标系下的点，转换到 %2 坐标系。\n"
+        "对应查询: lookupTransform(%2, %1)\n\n"
+        "位置偏移 (m):\n"
+        "  dx=%3, dy=%4, dz=%5\n\n"
+        "角度偏移 (deg, RPY):\n"
+        "  roll=%6, pitch=%7, yaw=%8\n\n"
+        "终端指令:\n"
+        "  ros2 run tf2_ros tf2_echo %2 %1\n\n"
+        "At time 0.0\n"
+        "- Translation: [%9, %10, %11]\n"
+        "- Rotation: in Quaternion (xyzw) [%12, %13, %14, %15]\n"
+        "- Rotation: in RPY (radian) [%16, %17, %18]\n"
+        "- Rotation: in RPY (degree) [%19, %20, %21]\n")
         .arg(from_frame).arg(to_frame)
-        .arg(tx, 0, 'f', 6).arg(ty, 0, 'f', 6).arg(tz, 0, 'f', 6).arg(trans_norm, 0, 'f', 6)
-        .arg(roll, 0, 'f', 3).arg(pitch, 0, 'f', 3).arg(yaw, 0, 'f', 3).arg(rot_deg, 0, 'f', 3);
+        .arg(tx, 0, 'f', 6).arg(ty, 0, 'f', 6).arg(tz, 0, 'f', 6)
+        .arg(roll, 0, 'f', 3).arg(pitch, 0, 'f', 3).arg(yaw, 0, 'f', 3)
+        .arg(tx, 0, 'f', 3).arg(ty, 0, 'f', 3).arg(tz, 0, 'f', 3)
+        .arg(tq.x(), 0, 'f', 3).arg(tq.y(), 0, 'f', 3).arg(tq.z(), 0, 'f', 3).arg(tq.w(), 0, 'f', 3)
+        .arg(roll_r, 0, 'f', 3).arg(pitch_r, 0, 'f', 3).arg(yaw_r, 0, 'f', 3)
+        .arg(roll, 0, 'f', 3).arg(pitch, 0, 'f', 3).arg(yaw, 0, 'f', 3);
     }
     return true;
   } catch (const tf2::TransformException & e) {

@@ -438,7 +438,7 @@ KinematicsSolverWidget::KinematicsSolverWidget(QWidget * parent)
   QPushButton * run_b2w = new QPushButton("计算 ω_l, ω_r");
   b2w_l->addWidget(run_b2w, 1);
   dvl->addWidget(b2w);
-  QGroupBox * diff_formula_group = new QGroupBox("差速模型示意与正逆解");
+  QGroupBox * diff_formula_group = new QGroupBox("差速模型正逆解");
   QVBoxLayout * diff_formula_l = new QVBoxLayout(diff_formula_group);
   QTextBrowser * diff_formula_text = new QTextBrowser();
   diff_formula_text->setOpenExternalLinks(true);
@@ -449,12 +449,10 @@ KinematicsSolverWidget::KinematicsSolverWidget(QWidget * parent)
   diff_formula_text->document()->setDocumentMargin(2);
   diff_formula_text->setHtml(
     QString("<div style='font-family:Arial,sans-serif; font-size:12px; margin:0; padding:0;'>"
-            "<div><b>示意图（本地资源）</b></div>"
+            "<div><b>正逆解（矩阵形式）</b></div>"
             "<div><img src='file://%1' width='100%%' style='display:block;'></div>"
-            "<div style='margin-top:6px;'><b>正逆解（矩阵形式）</b></div>"
-            "<div><img src='file://%2' width='100%%' style='display:block;'></div>"
             "</div>")
-      .arg(KinematicsAssetPath("diff_drive_diagram_local.png"), KinematicsAssetPath("diff_formula_local.png")));
+      .arg(KinematicsAssetPath("diff_formula_local.png")));
   diff_formula_l->addWidget(diff_formula_text, 1);
   dvl->addWidget(diff_formula_group, 0);
   dvl->addStretch();
@@ -572,7 +570,7 @@ KinematicsSolverWidget::KinematicsSolverWidget(QWidget * parent)
     ack_inverse_group->setVisible(bike);
     (void)ideal_inner;
   };
-  QGroupBox * ack_formula_group = new QGroupBox("阿克曼模型示意与正逆解");
+  QGroupBox * ack_formula_group = new QGroupBox("阿克曼模型正逆解");
   QVBoxLayout * ack_formula_l = new QVBoxLayout(ack_formula_group);
   QTextBrowser * ack_formula_text = new QTextBrowser();
   ack_formula_text->setOpenExternalLinks(true);
@@ -590,33 +588,27 @@ KinematicsSolverWidget::KinematicsSolverWidget(QWidget * parent)
     if (m == "bike") {
       ack_formula_text->setHtml(
         QString("<div style='font-family:Arial,sans-serif; font-size:12px; margin:0; padding:0;'>"
-                "<div><b>示意图（本地资源）</b></div>"
+                "<div><b>自行车模型（矩阵/公式）</b></div>"
                 "<div><img src='file://%1' width='100%%' style='display:block;'></div>"
-                "<div style='margin-top:6px;'><b>自行车模型（矩阵/公式）</b></div>"
-                "<div><img src='file://%2' width='100%%' style='display:block;'></div>"
                 "</div>")
-          .arg(KinematicsAssetPath("ackermann_diagram_local.png"), KinematicsAssetPath("ack_bike_formula_local.png")));
+          .arg(KinematicsAssetPath("ack_bike_formula_local.png")));
       return;
     }
     if (m == "ideal_inner") {
       ack_formula_text->setHtml(
         QString("<div style='font-family:Arial,sans-serif; font-size:12px; margin:0; padding:0;'>"
-                "<div><b>示意图（本地资源）</b></div>"
+                "<div><b>理想阿克曼（内轮角）</b></div>"
                 "<div><img src='file://%1' width='100%%' style='display:block;'></div>"
-                "<div style='margin-top:6px;'><b>理想阿克曼（内轮角）</b></div>"
-                "<div><img src='file://%2' width='100%%' style='display:block;'></div>"
                 "</div>")
-          .arg(KinematicsAssetPath("ackermann_diagram_local.png"), KinematicsAssetPath("ack_inner_formula_local.png")));
+          .arg(KinematicsAssetPath("ack_inner_formula_local.png")));
       return;
     }
     ack_formula_text->setHtml(
       QString("<div style='font-family:Arial,sans-serif; font-size:12px; margin:0; padding:0;'>"
-              "<div><b>示意图（本地资源）</b></div>"
+              "<div><b>理想阿克曼（内外轮角）</b></div>"
               "<div><img src='file://%1' width='100%%' style='display:block;'></div>"
-              "<div style='margin-top:6px;'><b>理想阿克曼（内外轮角）</b></div>"
-              "<div><img src='file://%2' width='100%%' style='display:block;'></div>"
               "</div>")
-        .arg(KinematicsAssetPath("ackermann_diagram_local.png"), KinematicsAssetPath("ack_pair_formula_local.png")));
+        .arg(KinematicsAssetPath("ack_pair_formula_local.png")));
   };
   QObject::connect(ack_model_, qOverload<int>(&QComboBox::currentIndexChanged), [sync_ack_visibility, update_ack_formula](int) {
     sync_ack_visibility();

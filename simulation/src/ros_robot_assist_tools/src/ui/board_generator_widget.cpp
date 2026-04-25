@@ -1,5 +1,6 @@
 #include "ros_robot_assist_tools/ui/board_generator_widget.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
@@ -12,6 +13,7 @@
 #include <QImage>
 #include <QFileInfo>
 #include <QLabel>
+#include <QObject>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMouseEvent>
@@ -101,7 +103,9 @@ QString BuildBoardExportBaseName(
   const QString & board_w_mm,
   const QString & board_h_mm,
   int rows,
-  int cols)
+  int cols,
+  bool aruco_border_on = false,
+  int aruco_border_px = 0)
 {
   QString board_key = "board";
   switch (board_type_idx) {
@@ -127,6 +131,9 @@ QString BuildBoardExportBaseName(
   QString size_key;
   if (board_type_idx == 0) {
     size_key = QString("%1px").arg(marker_size_px.trimmed());
+    if (aruco_border_on && aruco_border_px > 0) {
+      size_key += QString("_bs%1").arg(aruco_border_px);
+    }
   } else {
     size_key = QString("%1x%2mm_%3x%4")
       .arg(board_w_mm.trimmed())
@@ -172,12 +179,36 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
   QLineEdit * tag_size_mm = new QLineEdit("12");
   QLineEdit * marker_ratio = new QLineEdit("0.75");
 
+  QLabel * aruco_dict_hint = new QLabel(
+    QStringLiteral("说明：名称中「4×4 / 5×5 …」为码内编码位数；末尾 50 / 100 / 250 / 1000 为字典中不同标记的个数（"
+                   "可用 ID 为 0～N−1），与下方 MarkSize 像素尺寸不是同一含义。"));
+  aruco_dict_hint->setWordWrap(true);
+  aruco_dict_hint->setStyleSheet("color: #5a6c7a; font-size: 11px;");
+  QWidget * aruco_border_wrap = new QWidget();
+  QHBoxLayout * aruco_border_layout = new QHBoxLayout(aruco_border_wrap);
+  aruco_border_layout->setContentsMargins(0, 0, 0, 0);
+  QCheckBox * aruco_border_enable = new QCheckBox(QStringLiteral("增加白边"));
+  QSpinBox * aruco_border_px = new QSpinBox();
+  aruco_border_px->setRange(0, 2000);
+  aruco_border_px->setValue(20);
+  aruco_border_px->setEnabled(false);
+  aruco_border_px->setSuffix(QStringLiteral(" px"));
+  aruco_border_px->setToolTip(
+    QStringLiteral("四边对称留白（像素/侧）。输出边长 = MarkSize + 2×该值（例：MarkSize=100、每侧 20 → 边长 140）。"));
+  aruco_border_layout->addWidget(aruco_border_enable);
+  aruco_border_layout->addWidget(new QLabel(QStringLiteral("每侧宽度:")));
+  aruco_border_layout->addWidget(aruco_border_px);
+  aruco_border_layout->addStretch();
+  QObject::connect(aruco_border_enable, &QCheckBox::toggled, aruco_border_px, &QWidget::setEnabled);
+
   QFormLayout * form = new QFormLayout();
   form->addRow("标定板类型:", board_type);
   form->addRow("字典:", dict);
+  form->addRow(aruco_dict_hint);
+  form->addRow("MarkSize (像素):", marker_size);
   form->addRow("Aruco ID:", marker_id);
   form->addRow("起始ID:", start_id);
-  form->addRow("像素尺寸:", marker_size);
+  form->addRow(QStringLiteral("白边:"), aruco_border_wrap);
   form->addRow("行", grid_rows);
   form->addRow("列", grid_cols);
   form->addRow("圆点半径:", circle_radius);
@@ -214,13 +245,17 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     const bool show_marker_ratio = (t == 4);
     const bool show_tag_size = (t == 5);
     const bool show_circle_diameter_mm = (t == 2 || t == 3);
-    const bool show_cell_size_mm = (t != 5);
+    const bool show_cell_size_mm = (t != 5 && t != 0);
     const bool show_marker_size = (t != 5);
     const bool show_circle_radius_ui = (t == 2 || t == 3);
-    const bool show_board_size = true;
-    const bool show_rows_cols = true;
+    const bool show_board_size = (t != 0);
+    const bool show_rows_cols = (t != 0);
+    const bool show_aruco_extra = (t == 0);
     if (auto * l = form->labelForField(dict)) { l->setVisible(show_dict); }
     dict->setVisible(show_dict);
+    aruco_dict_hint->setVisible(show_aruco_extra);
+    aruco_border_wrap->setVisible(show_aruco_extra);
+    if (auto * l = form->labelForField(aruco_border_wrap)) { l->setVisible(show_aruco_extra); }
     if (auto * l = form->labelForField(marker_id)) { l->setVisible(show_marker_id); }
     marker_id->setVisible(show_marker_id);
     if (auto * l = form->labelForField(start_id)) { l->setVisible(show_start_id); }
@@ -233,7 +268,14 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     tag_size_mm->setVisible(show_tag_size);
     if (auto * l = form->labelForField(marker_ratio)) { l->setVisible(show_marker_ratio); }
     marker_ratio->setVisible(show_marker_ratio);
-    if (auto * l = form->labelForField(marker_size)) { l->setVisible(show_marker_size); }
+    if (auto * w = form->labelForField(marker_size)) {
+      w->setVisible(show_marker_size);
+      if (show_marker_size) {
+        if (auto * lbl = qobject_cast<QLabel *>(w)) {
+          lbl->setText((t == 0) ? QStringLiteral("MarkSize (像素):") : QStringLiteral("像素尺寸:"));
+        }
+      }
+    }
     marker_size->setVisible(show_marker_size);
     if (auto * l = form->labelForField(cell_size_mm)) { l->setVisible(show_cell_size_mm); }
     cell_size_mm->setVisible(show_cell_size_mm);
@@ -279,6 +321,8 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     params.circle_diameter_mm = circle_diameter_mm->text().toDouble();
     params.tag_size_mm = tag_size_mm->text().toDouble();
     params.marker_ratio = marker_ratio->text().toDouble();
+    params.aruco_white_border = (params.board_type == 0 && aruco_border_enable->isChecked());
+    params.aruco_border_px = aruco_border_px->value();
 
     QString err;
     if (!GenerateCalibrationBoard(params, board_image.get(), &err)) {
@@ -288,14 +332,25 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     QImage img(board_image->data, board_image->cols, board_image->rows, board_image->step, QImage::Format_Grayscale8);
     // copy：避免与后续 Generate 复用的 cv::Mat 缓冲区别名；全分辨率供缩放。
     preview->setBoardPixmap(QPixmap::fromImage(img.copy()));
-    log->append(QString("%1 生成成功。参数: %2x%3, 板尺寸=%4x%5mm, 圆直径=%6mm, 起始ID=%7")
-                .arg(board_type->currentText())
-                .arg(params.cols)
-                .arg(params.rows)
-                .arg(params.board_width_mm, 0, 'f', 1)
-                .arg(params.board_height_mm, 0, 'f', 1)
-                .arg(params.circle_diameter_mm, 0, 'f', 1)
-                .arg(params.start_id));
+    if (params.board_type == 0) {
+      log->append(QString("Aruco 生成成功：字典=%1，MarkSize=%2 px，ID=%3，输出边长=%4 px%5")
+                    .arg(dict->currentText())
+                    .arg(params.marker_size)
+                    .arg(params.marker_id)
+                    .arg(board_image->cols)
+                    .arg(params.aruco_white_border && params.aruco_border_px > 0
+                           ? QStringLiteral("（每侧白边 %1 px，边长=MarkSize+2×%1）").arg(params.aruco_border_px)
+                           : QString()));
+    } else {
+      log->append(QString("%1 生成成功。参数: %2x%3, 板尺寸=%4x%5mm, 圆直径=%6mm, 起始ID=%7")
+                  .arg(board_type->currentText())
+                  .arg(params.cols)
+                  .arg(params.rows)
+                  .arg(params.board_width_mm, 0, 'f', 1)
+                  .arg(params.board_height_mm, 0, 'f', 1)
+                  .arg(params.circle_diameter_mm, 0, 'f', 1)
+                  .arg(params.start_id));
+    }
   });
 
   QObject::connect(save_img, &QPushButton::clicked, [=]() {
@@ -310,7 +365,9 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
       board_width_mm->text(),
       board_height_mm->text(),
       grid_rows->value(),
-      grid_cols->value());
+      grid_cols->value(),
+      aruco_border_enable->isChecked(),
+      aruco_border_px->value());
     const QString default_path = QDir::homePath() + "/" + default_base_name + ".bmp";
     const QString path = QFileDialog::getSaveFileName(this, "导出图片", default_path, "Image (*.png *.bmp *.jpg)");
     if (path.isEmpty()) { return; }
@@ -334,7 +391,9 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
       board_width_mm->text(),
       board_height_mm->text(),
       grid_rows->value(),
-      grid_cols->value());
+      grid_cols->value(),
+      aruco_border_enable->isChecked(),
+      aruco_border_px->value());
     const QString default_path = QDir::homePath() + "/" + default_base_name + ".dae";
     const QString dae_path = QFileDialog::getSaveFileName(this, "导出DAE", default_path, "DAE (*.dae)");
     if (dae_path.isEmpty()) { return; }

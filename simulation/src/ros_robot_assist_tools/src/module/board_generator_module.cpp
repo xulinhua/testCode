@@ -39,6 +39,24 @@ bool GenerateCalibrationBoard(const BoardGeneratorParams & p, cv::Mat * out_imag
       if (err_msg != nullptr) { *err_msg = "out_image is null"; }
       return false;
     }
+    const int type = p.board_type;
+    if (type == 0) {
+      const int marker_px = std::max(8, p.marker_size);
+      int border_side = 0;
+      if (p.aruco_white_border && p.aruco_border_px > 0) {
+        border_side = std::min(2048, p.aruco_border_px);
+      }
+      const int out_wh = marker_px + 2 * border_side;
+      out_image->release();
+      out_image->create(out_wh, out_wh, CV_8UC1);
+      out_image->setTo(cv::Scalar(255));
+      cv::aruco::Dictionary dict_obj = cv::aruco::getPredefinedDictionary(DictTypeFromIndex(p.dict_index));
+      cv::Mat marker_img;
+      dict_obj.generateImageMarker(p.marker_id, marker_px, marker_img);
+      marker_img.copyTo((*out_image)(cv::Rect(border_side, border_side, marker_px, marker_px)));
+      return true;
+    }
+
     const int size = std::max(128, p.marker_size);
     const int rows = std::max(2, p.rows);
     const int cols = std::max(2, p.cols);
@@ -64,16 +82,7 @@ bool GenerateCalibrationBoard(const BoardGeneratorParams & p, cv::Mat * out_imag
     const int board_y = (size - board_h_px) / 2;
     cv::rectangle(*out_image, cv::Rect(board_x, board_y, board_w_px, board_h_px), cv::Scalar(255), cv::FILLED);
 
-    const int type = p.board_type;
-    if (type == 0) {
-    cv::aruco::Dictionary dict_obj = cv::aruco::getPredefinedDictionary(DictTypeFromIndex(p.dict_index));
-    const int marker_px = std::max(20, std::min(board_w_px, board_h_px));
-    cv::Mat marker_img;
-    dict_obj.generateImageMarker(p.marker_id, marker_px, marker_img);
-    const int mx = board_x + (board_w_px - marker_px) / 2;
-    const int my = board_y + (board_h_px - marker_px) / 2;
-    marker_img.copyTo((*out_image)(cv::Rect(mx, my, marker_px, marker_px)));
-    } else if (type == 1) {
+    if (type == 1) {
     const int cell = std::max(2, static_cast<int>(std::round(cell_mm * ppm)));
     const int grid_w = cols * cell;
     const int grid_h = rows * cell;

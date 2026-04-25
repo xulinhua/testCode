@@ -46,6 +46,9 @@ struct BoardGeneratorParams
   int marker_id = 0;
   int start_id = 0;
   int marker_size = 400;
+  /// Aruco 单码：勾选后为四边对称白边宽度（像素/侧），图像边长 = marker_size + 2 * aruco_border_px。
+  bool aruco_white_border = false;
+  int aruco_border_px = 0;
   int rows = 7;
   int cols = 10;
   double board_width_mm = 297.0;
