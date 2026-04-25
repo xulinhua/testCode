@@ -1,8 +1,11 @@
 // MoveIt2ArmExecutorCpp：GetPositionIK 请求构造、关节顺序与夹爪开合阈值。
 #include "nova_sim/moveit2_arm_executor.hpp"
 
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 
 #include "moveit_msgs/msg/constraints.hpp"
 #include "moveit_msgs/msg/joint_constraint.hpp"
@@ -171,9 +174,26 @@ void MoveIt2ArmExecutorCpp::process_pose_goal(
 
   const int request_arm_id = arm_id;
   const auto request_prefix = arm_prefix_[request_arm_id];
+  bool snapshot_refreshed = false;
+  if (locked_snapshot_arm_id_ != request_arm_id || locked_non_target_snapshot_.empty()) {
+    locked_non_target_snapshot_ = snapshot_non_target_joints(request_arm_id);
+    locked_snapshot_arm_id_ = request_arm_id;
+    snapshot_refreshed = true;
+  }
+  const auto non_target_snapshot = locked_non_target_snapshot_;
+  {
+    std_msgs::msg::String snap_msg;
+    std::ostringstream snap_ss;
+    snap_ss << (snapshot_refreshed ? "[POSE_SNAPSHOT_LOCK_SET] " : "[POSE_SNAPSHOT_LOCK_REUSE] ")
+            << "req_arm=" << request_arm_id
+            << " non_target_joint_count=" << non_target_snapshot.size()
+            << " stamp_ns=" << this->now().nanoseconds();
+    snap_msg.data = snap_ss.str();
+    pose_log_pub_->publish(snap_msg);
+  }
   ik_client_->async_send_request(
     ik_req,
-    [this, request_arm_id, request_prefix](
+    [this, request_arm_id, request_prefix, non_target_snapshot](
       rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedFuture future) {
       auto result = future.get();
       if (result->error_code.val != 1) {
@@ -186,7 +206,8 @@ void MoveIt2ArmExecutorCpp::process_pose_goal(
         return;
       }
 
-      std::unordered_map<std::string, double> command_map = current_joint_map_;
+      // 锁定非目标臂：使用发起本次 pose 命令前抓取的当前值，避免串扰被持续写回。
+      std::unordered_map<std::string, double> command_map = non_target_snapshot;
       const auto & names = result->solution.joint_state.name;
       const auto & pos = result->solution.joint_state.position;
       for (size_t i = 0; i < names.size() && i < pos.size(); ++i) {
@@ -203,6 +224,7 @@ void MoveIt2ArmExecutorCpp::process_pose_goal(
         }
       }
       publish_command(command_map);
+      publish_pose_joint_debug_lines(command_map, request_arm_id);
       arm_id_ = request_arm_id;
       RCLCPP_INFO(this->get_logger(), "Pose command sent for arm_id=%d", request_arm_id);
       std_msgs::msg::String log_msg;
@@ -245,6 +267,31 @@ void MoveIt2ArmExecutorCpp::on_gripper_goal(const std_msgs::msg::String::SharedP
   RCLCPP_INFO(this->get_logger(), "Gripper command sent for arm_id=%d", arm_id_);
 }
 
+std::unordered_map<std::string, double> MoveIt2ArmExecutorCpp::snapshot_non_target_joints(
+  int target_arm_id) const
+{
+  std::unordered_map<std::string, double> snapshot;
+  if (arm_prefix_.count(target_arm_id) == 0) {
+    return snapshot;
+  }
+  const std::string & target_prefix = arm_prefix_.at(target_arm_id);
+  for (const auto & joint : control_joint_order_) {
+    if (joint.rfind(target_prefix, 0) == 0) {
+      continue;
+    }
+    auto it_cur = current_joint_map_.find(joint);
+    if (it_cur != current_joint_map_.end()) {
+      snapshot[joint] = it_cur->second;
+      continue;
+    }
+    auto it_last = last_published_command_map_.find(joint);
+    if (it_last != last_published_command_map_.end()) {
+      snapshot[joint] = it_last->second;
+    }
+  }
+  return snapshot;
+}
+
 void MoveIt2ArmExecutorCpp::publish_command(const std::unordered_map<std::string, double> & command_map)
 {
   constexpr double kJointDeadband = 3e-4;
@@ -274,6 +321,33 @@ void MoveIt2ArmExecutorCpp::publish_command(const std::unordered_map<std::string
   }
   has_last_command_ = true;
   command_pub_->publish(msg);
+}
+
+void MoveIt2ArmExecutorCpp::publish_pose_joint_debug_lines(
+  const std::unordered_map<std::string, double> & command_map, int request_arm_id)
+{
+  const std::array<int, 4> arms{0, 1, 2, 3};
+  for (const int arm : arms) {
+    std::ostringstream oss;
+    oss << "[POSE_DEBUG] req_arm=" << request_arm_id
+        << " arm" << arm << ":";
+    const std::string prefix = "J" + std::to_string(arm + 1) + "_";
+    bool first = true;
+    for (const auto & joint_name : control_joint_order_) {
+      if (joint_name.rfind(prefix, 0) != 0) {
+        continue;
+      }
+      const double value = resolve_command_value(joint_name, command_map);
+      if (!first) {
+        oss << ",";
+      }
+      first = false;
+      oss << " " << joint_name << "=" << std::fixed << std::setprecision(5) << value;
+    }
+    std_msgs::msg::String msg;
+    msg.data = oss.str();
+    pose_log_pub_->publish(msg);
+  }
 }
 
 double MoveIt2ArmExecutorCpp::resolve_command_value(

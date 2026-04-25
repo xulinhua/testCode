@@ -1,0 +1,16 @@
+arm:
+  backend: kdl
+  urdf_path: /home/hs/testCode/simulation/src/nova_isaac_sim/nova_robot_position.urdf
+  base_link: base_link
+  tip_link: J1_6
+  moveit_group: arm
+  moveit_ik_link: tool0
+  moveit_service: /compute_ik
+  moveit_frame_id: base_link
+  moveit_node_name: /move_group
+  moveit_seed_text: ""
+diff:
+  track_m: 0.29999999999999999
+  wheel_radius_m: 0.050000000000000003
+ack:
+  wheelbase_m: 1

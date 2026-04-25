@@ -30,6 +30,9 @@ private:
   void process_pose_goal(int arm_id, const geometry_msgs::msg::PoseStamped & pose_in);
   void on_gripper_goal(const std_msgs::msg::String::SharedPtr msg);
   void publish_command(const std::unordered_map<std::string, double> & command_map);
+  void publish_pose_joint_debug_lines(
+    const std::unordered_map<std::string, double> & command_map, int request_arm_id);
+  std::unordered_map<std::string, double> snapshot_non_target_joints(int target_arm_id) const;
   double resolve_command_value(
     const std::string & joint, const std::unordered_map<std::string, double> & command_map) const;
 
@@ -43,7 +46,9 @@ private:
   std::unordered_map<int, std::pair<double, double>> gripper_close_;
   std::unordered_map<std::string, double> current_joint_map_;
   std::unordered_map<std::string, double> last_published_command_map_;
+  std::unordered_map<std::string, double> locked_non_target_snapshot_;
   bool has_last_command_{false};
+  int locked_snapshot_arm_id_{-1};
 
   rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedPtr ik_client_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr command_pub_;
