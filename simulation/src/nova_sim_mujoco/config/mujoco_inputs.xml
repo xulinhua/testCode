@@ -1,6 +1,10 @@
 <mujoco_inputs>
   <raw_inputs>
     <option integrator="implicitfast" timestep="0.001" iterations="120"/>
+    <visual>
+      <!-- Camera frustum color (yellow, semi-transparent) -->
+      <rgba frustum="1 1 0 0.25" camera="0.9 0.9 0.4 1"/>
+    </visual>
     <default>
       <!-- 提高关节被动阻尼与转子惯量，压低高频颤振 -->
       <joint damping="8.0" armature="0.08"/>

@@ -1014,14 +1014,32 @@
     </inertial>
   </link>
   
-  <!-- Camera0 光学坐标系 -->
- <joint name="camera0_optical_joint" type="fixed">
+  <!-- 光学系（REP-105：相对 camera*_link 零平移、仅绕关节 RPY 对齐 +Z_光轴；base_link 下与 camera*_link 原点重合，位姿只差 link->opt 旋转） -->
+  <joint name="camera0_optical_joint" type="fixed">
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera0_link"/>
     <child link="camera0_optical_frame"/>
   </joint>
   
   <link name="camera0_optical_frame"/>
+
+  <!-- Debug frustum proxy (visual only): camera0 optical axis -->
+  <joint name="camera0_frustum_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="camera0_optical_frame"/>
+    <child link="camera0_frustum"/>
+  </joint>
+  <link name="camera0_frustum">
+    <visual>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.06" length="0.30"/>
+      </geometry>
+      <material name="camera_frustum_yellow">
+        <color rgba="1.0 1.0 0.0 0.25"/>
+      </material>
+    </visual>
+  </link>
   
   <!-- Camera0 RGB相机Gazebo配置（参考 Orbbec Gemini335） -->
   <gazebo reference="camera0_link">
@@ -1135,14 +1153,32 @@
     </inertial>
   </link>
   
-  <!-- Camera1 光学坐标系 -->
- <joint name="camera1_optical_joint" type="fixed">
+  <!-- 同 camera0：link→optical 零平移，仅 rpy；base 下与 camera1_link 位置一致 -->
+  <joint name="camera1_optical_joint" type="fixed">
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera1_link"/>
     <child link="camera1_optical_frame"/>
   </joint>
   
   <link name="camera1_optical_frame"/>
+
+  <!-- Debug frustum proxy (visual only): camera1 optical axis -->
+  <joint name="camera1_frustum_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="camera1_optical_frame"/>
+    <child link="camera1_frustum"/>
+  </joint>
+  <link name="camera1_frustum">
+    <visual>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.06" length="0.30"/>
+      </geometry>
+      <material name="camera_frustum_yellow">
+        <color rgba="1.0 1.0 0.0 0.25"/>
+      </material>
+    </visual>
+  </link>
   
   <!-- Camera1 RGB相机Gazebo配置 -->
   <gazebo reference="camera1_link">
@@ -1226,14 +1262,32 @@
     </inertial>
   </link>
   
-  <!-- Camera2 光学坐标系 -->
- <joint name="camera2_optical_joint" type="fixed">
+  <!-- 同 camera0：link→optical 零平移，仅 rpy；base 下与 camera2_link 位置一致 -->
+  <joint name="camera2_optical_joint" type="fixed">
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
     <parent link="camera2_link"/>
     <child link="camera2_optical_frame"/>
   </joint>
   
   <link name="camera2_optical_frame"/>
+
+  <!-- Debug frustum proxy (visual only): camera2 optical axis -->
+  <joint name="camera2_frustum_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="camera2_optical_frame"/>
+    <child link="camera2_frustum"/>
+  </joint>
+  <link name="camera2_frustum">
+    <visual>
+      <origin xyz="0 0 0.15" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.06" length="0.30"/>
+      </geometry>
+      <material name="camera_frustum_yellow">
+        <color rgba="1.0 1.0 0.0 0.25"/>
+      </material>
+    </visual>
+  </link>
   
   <!-- Camera2 RGB相机Gazebo配置 -->
   <gazebo reference="camera2_link">
@@ -1291,6 +1345,8 @@
   <ros2_control name="GazeboSystem" type="system">
     <hardware>
       <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      <param name="camera_publish_rate">0.0</param>
+      <param name="lidar_publish_rate">0.0</param>
     </hardware>
     
     <!-- 定义所有关节 -->

@@ -40,22 +40,77 @@ except ModuleNotFoundError:
         raise
 
 
+def _q_from_rpy_radians(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
+    """URDF 固定轴 rpy（弧度）→ 四元数 x,y,z,w，与 RSP 常用 tf 约定一致。"""
+    try:
+        from tf_transformations import quaternion_from_euler
+
+        q = quaternion_from_euler(roll, pitch, yaw)
+    except Exception:  # noqa: BLE001
+        from scipy.spatial.transform import Rotation as Rf
+
+        q = Rf.from_euler("xyz", (roll, pitch, yaw), degrees=False).as_quat()
+    return (float(q[0]), float(q[1]), float(q[2]), float(q[3]))
+
+
+def _q_mult_xyzw(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    try:
+        from tf_transformations import quaternion_multiply
+
+        o = quaternion_multiply(a, b)
+    except Exception:  # noqa: BLE001
+        ax, ay, az, aw = a
+        bx, by, bz, bw = b
+        x = aw * bx + ax * bw + ay * bz - az * by
+        y = aw * by - ax * bz + ay * bw + az * bx
+        z = aw * bz + ax * by - ay * bx + az * bw
+        w = aw * bw - ax * bx - ay * by - az * bz
+        o = (x, y, z, w)
+    return (float(o[0]), float(o[1]), float(o[2]), float(o[3]))
+
+
+# 与 nova_robot_position.urdf: camera*_optical_joint，parent=camera*_link, xyz=0, rpy=-pi/2 0 -pi/2
+_Q_LINK_TO_OPT = _q_from_rpy_radians(-1.57079632679, 0.0, -1.57079632679)
+# camera0: gantry_connector->camera0_link, xyz 0,0,-0.15, rpy 1.57,1.57,-1.5708
+_Q_GANTRY0_LINK = _q_from_rpy_radians(1.57, 1.57, -1.5708)
+_Q_CAM0_IN_GANTRY = _q_mult_xyzw(_Q_GANTRY0_LINK, _Q_LINK_TO_OPT)
+# 龙门+opt 链在 base_link(=world 同原点) 下零关节的 camera0_optical 位姿；MJCF 无 camera0_link/gantry 时挂 base/world
+_POS_BASE_CAM0_OPT = (0.52999978, -0.4994585, 1.04)
+_Q_BASE_CAM0_OPT = (-0.9999996, -0.0007945, 0.0003982, 0.0)  # xyzw，与 robot_state_publisher+URDF 一致
+# MuJoCo camera forward uses -Z; ROS optical uses +Z forward.
+_Q_ROS_OPT_TO_MJ_CAM = _q_from_rpy_radians(3.14159265359, 0.0, 0.0)
+# J1_6->camera1_link / J2_6->camera2_link 与 URDF 中 camera1_joint / camera2_joint 的 rpy 一致（fallback 为挂不到 camera*_link 时）
+_RPY_J1_TO_CAM1_LINK = (0.0, -1.57, 1.5708)
+_RPY_J2_TO_CAM2_LINK = (0.0, -1.57, 1.5708)
+_Q_J1_TO_CAM1_LINK = _q_from_rpy_radians(*_RPY_J1_TO_CAM1_LINK)
+_Q_J2_TO_CAM2_LINK = _q_from_rpy_radians(*_RPY_J2_TO_CAM2_LINK)
+_Q_CAM1_IN_J = _q_mult_xyzw(_Q_J1_TO_CAM1_LINK, _Q_LINK_TO_OPT)
+_Q_CAM2_IN_J = _q_mult_xyzw(_Q_J2_TO_CAM2_LINK, _Q_LINK_TO_OPT)
+
+# 每条为 (父 body 名, 相对位姿(米), 四元数 xyzw)；优先挂在 camera*_link 上仅加 optical，避免与 world 人为机位/错误腕偏移
+MountSpec = tuple[str, tuple[float, float, float], tuple[float, float, float, float]]
+
+
 @dataclass(frozen=True)
 class CamDef:
     index: int
-    parent_body: str
-    camera_name: str
+    # Unique MJCF camera name used by renderer (avoid collisions with converted cameras/sensors).
+    mjcf_camera_name: str
     rgb_topic_prefix: str
     depth_topic_prefix: str
     frame_id: str
+    # 按序尝试；首命中的 body 上注入，与 TF/URDF 的 camera*_optical_frame 一致
+    mount_chain: tuple[MountSpec, ...]
     width: int = 1280
     height: int = 720
-    rel_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    # Store as ROS quaternion order (x, y, z, w). Converted to MuJoCo (w, x, y, z) when injecting.
-    rel_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     target_body: str = ""
     track_target: bool = False
     fovy_deg: float = 58.0
+    # 2D 后处理；仅在确有镜像时再打开
+    image_fliplr: bool = False
+    image_rot180: bool = False
 
 
 @dataclass(frozen=True)
@@ -80,41 +135,72 @@ class MujocoRasterCameraPublishers(Node):
         self._period = 1.0 / max(1.0, hz)
 
         self._cams = [
-            # camera0 optical frame link is removed by URDF->MJCF converter; use a world-fixed camera.
             CamDef(
-                0, "world", "camera0_rgb_sensor", "camera0_rgb_sensor", "camera0_depth_sensor",
+                0,
+                "raster_cam0",
+                "camera0_rgb_sensor",
+                "camera0_depth_sensor",
                 "camera0_optical_frame",
+                mount_chain=(
+                    # Calibration path: prefer URDF camera0_link -> camera0_optical_frame.
+                    ("camera0_link", (0.0, 0.0, 0.0), _q_mult_xyzw(_Q_LINK_TO_OPT, _Q_ROS_OPT_TO_MJ_CAM)),
+                    ("gantry_connector", (0.0, 0.0, -0.15), _q_mult_xyzw(_Q_CAM0_IN_GANTRY, _Q_ROS_OPT_TO_MJ_CAM)),
+                    ("base_link", _POS_BASE_CAM0_OPT, _q_mult_xyzw(_Q_BASE_CAM0_OPT, _Q_ROS_OPT_TO_MJ_CAM)),
+                    ("world", _POS_BASE_CAM0_OPT, _q_mult_xyzw(_Q_BASE_CAM0_OPT, _Q_ROS_OPT_TO_MJ_CAM)),
+                ),
                 width=self._image_width,
                 height=self._image_height,
-                rel_pos=(0.5299998, -0.4994585, 1.10),
-                # Match camera0_optical_frame orientation (ROS xyzw order).
-                rel_quat_xyzw=(0.9999996, 0.00079449, -0.00039816, 0.0),
-                target_body="aruco_board_base_mid",
-                track_target=True,
-                fovy_deg=68.0,
+                target_body="",
+                track_target=False,
+                fovy_deg=43.0,
+                image_fliplr=True,
+                image_rot180=True,
             ),
-            # Attach camera1/camera2 to surviving wrist bodies in MJCF.
             CamDef(
-                1, "J1_6", "camera1_rgb_sensor", "camera1_rgb_sensor", "camera1_depth_sensor",
+                1,
+                "raster_cam1",
+                "camera1_rgb_sensor",
+                "camera1_depth_sensor",
                 "camera1_optical_frame",
+                mount_chain=(
+                    ("camera1_link", (0.0, 0.0, 0.0), _q_mult_xyzw(_Q_LINK_TO_OPT, _Q_ROS_OPT_TO_MJ_CAM)),
+                    ("J1_6", (0.0, -0.08, 0.041), _q_mult_xyzw(_Q_CAM1_IN_J, _Q_ROS_OPT_TO_MJ_CAM)),
+                ),
                 width=self._image_width,
                 height=self._image_height,
-                rel_pos=(0.00, -0.20, 0.10),
-                # Flip optical direction to top-down view (previously bottom-up).
-                rel_quat_xyzw=(1.0, 0.0, 0.0, 0.0),
                 target_body="aruco_board_base_mid",
-                fovy_deg=78.0,
+                track_target=False,
+                # RealSense D405-like narrower vertical FOV (was too wide at 78 deg).
+                fovy_deg=58.0,
+                image_fliplr=True,
+                image_rot180=True,
             ),
             CamDef(
-                2, "J2_6", "camera2_rgb_sensor", "camera2_rgb_sensor", "camera2_depth_sensor",
+                2,
+                "raster_cam2",
+                "camera2_rgb_sensor",
+                "camera2_depth_sensor",
                 "camera2_optical_frame",
+                mount_chain=(
+                    (
+                        "camera2_link",
+                        (0.0, 0.0, 0.0),
+                        _q_mult_xyzw(_Q_LINK_TO_OPT, _Q_ROS_OPT_TO_MJ_CAM),
+                    ),
+                    (
+                        "J2_6",
+                        (0.0, -0.08, 0.041),
+                        _q_mult_xyzw(_Q_CAM2_IN_J, _Q_ROS_OPT_TO_MJ_CAM),
+                    ),
+                ),
                 width=self._image_width,
                 height=self._image_height,
-                rel_pos=(0.00, -0.20, 0.10),
-                # Keep cam2 orientation consistent with cam1.
-                rel_quat_xyzw=(1.0, 0.0, 0.0, 0.0),
                 target_body="aruco_board_base_arm1",
-                fovy_deg=78.0,
+                track_target=False,
+                # RealSense D405-like narrower vertical FOV (was too wide at 78 deg).
+                fovy_deg=58.0,
+                image_fliplr=True,
+                image_rot180=True,
             ),
         ]
         # URDF->MJCF conversion may strip board link bodies. Recreate stable world targets
@@ -167,7 +253,19 @@ class MujocoRasterCameraPublishers(Node):
                 mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_CAMERA, i): i
                 for i in range(self._model.ncam)
             }
-            self.get_logger().info(f"Loaded MuJoCo model for raster camera publishing, ncam={self._model.ncam}.")
+            cam_names = [mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_CAMERA, i) for i in range(self._model.ncam)]
+            self.get_logger().info(
+                f"Loaded MuJoCo model for raster camera publishing, ncam={self._model.ncam}, cams={cam_names}."
+            )
+            for cam in self._cams:
+                cam_id = self._camera_name_to_id.get(cam.mjcf_camera_name)
+                self.get_logger().info(
+                    f"Raster map: /{cam.rgb_topic_prefix}/image_raw -> {cam.mjcf_camera_name} (id={cam_id})"
+                )
+                if cam_id is None:
+                    self.get_logger().error(
+                        f"未注入 {cam.mjcf_camera_name}（无对应 MJCF 父 body？或名称冲突）。"
+                    )
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"Failed loading MuJoCo model for cameras: {exc}")
 
@@ -217,34 +315,54 @@ class MujocoRasterCameraPublishers(Node):
             body_by_name[target.body_name] = injected
 
         for cam in self._cams:
-            if cam.parent_body == "world":
-                target = worldbody
-            else:
-                target = body_by_name.get(cam.parent_body)
-                if target is None:
-                    self.get_logger().warning(
-                        f"Skip injecting camera '{cam.camera_name}': parent body '{cam.parent_body}' not found in MJCF.")
-                    continue
-            has_camera = any(c.attrib.get("name") == cam.camera_name for c in target.findall("camera"))
+            chosen: tuple[str, tuple[float, float, float], tuple[float, float, float, float]] | None = None
+            target = None
+            for spec in cam.mount_chain:
+                bname, rel_pos, rel_quat = spec
+                tnode = worldbody if bname == "world" else body_by_name.get(bname)
+                if tnode is not None:
+                    chosen = spec
+                    target = tnode
+                    break
+            if target is None or chosen is None:
+                tried = [s[0] for s in cam.mount_chain]
+                self.get_logger().warning(
+                    f"Skip injecting camera '{cam.mjcf_camera_name}': none of parent bodies in MJCF: {tried}.")
+                continue
+            has_camera = any(c.attrib.get("name") == cam.mjcf_camera_name for c in target.findall("camera"))
             if has_camera:
                 continue
+            bname, rel_pos, rel_quat = chosen
+            self.get_logger().info(
+                f"Injecting '{cam.mjcf_camera_name}' on body '{bname}' pos={rel_pos} (URDF camera*_optical 对齐)")
+
             target_exists = bool(cam.target_body) and cam.target_body in body_by_name
             use_tracking = self._enable_target_tracking and cam.track_target
             mode = "targetbodycom" if (use_tracking and target_exists) else "fixed"
             attrs = {
-                "name": cam.camera_name,
+                "name": cam.mjcf_camera_name,
                 "mode": mode,
-                "pos": f"{cam.rel_pos[0]} {cam.rel_pos[1]} {cam.rel_pos[2]}",
-                "quat": " ".join(str(v) for v in xyzw_to_wxyz(cam.rel_quat_xyzw)),
+                "pos": f"{rel_pos[0]} {rel_pos[1]} {rel_pos[2]}",
+                "quat": " ".join(str(v) for v in xyzw_to_wxyz(rel_quat)),
                 "fovy": f"{cam.fovy_deg}",
             }
             if use_tracking and target_exists:
                 attrs["target"] = cam.target_body
             elif use_tracking and cam.target_body:
                 self.get_logger().warning(
-                    f"Camera '{cam.camera_name}' target body '{cam.target_body}' not found, using fixed mode.")
+                    f"Camera '{cam.mjcf_camera_name}' target body '{cam.target_body}' not found, using fixed mode.")
             ET.SubElement(target, "camera", attrs)
         return ET.tostring(root, encoding="unicode")
+
+    @staticmethod
+    def _postprocess_raster(
+        arr: np.ndarray, fliplr: bool, rot180: bool
+    ) -> np.ndarray:
+        if fliplr:
+            arr = np.fliplr(arr)
+        if rot180:
+            arr = np.rot90(arr, 2)
+        return arr
 
     def _on_timer(self) -> None:
         if self._model is None or self._data is None or self._renderer is None:
@@ -254,7 +372,7 @@ class MujocoRasterCameraPublishers(Node):
         stamp = self.get_clock().now().to_msg()
 
         for i, cam in enumerate(self._cams):
-            cam_id = self._camera_name_to_id.get(cam.camera_name)
+            cam_id = self._camera_name_to_id.get(cam.mjcf_camera_name)
             if cam_id is None:
                 continue
             rgb_sub_count = self._rgb_pubs[i].get_subscription_count()
@@ -265,10 +383,11 @@ class MujocoRasterCameraPublishers(Node):
 
             info_msg = self._make_info(cam, cam_id, stamp)
             if rgb_sub_count > 0 or self._rgb_info_pubs[i].get_subscription_count() > 0:
-                self._renderer.update_scene(self._data, camera=cam.camera_name)
+                self._renderer.update_scene(self._data, camera=cam.mjcf_camera_name)
                 rgb = self._renderer.render()
                 # MuJoCo/OpenGL image origin is bottom-left; ROS image consumers expect top-left.
                 rgb = np.flipud(rgb)
+                rgb = self._postprocess_raster(rgb, cam.image_fliplr, cam.image_rot180)
                 if rgb_sub_count > 0:
                     rgb_msg = self._to_rgb_msg(rgb, cam.frame_id, stamp)
                     self._rgb_pubs[i].publish(rgb_msg)
@@ -279,9 +398,10 @@ class MujocoRasterCameraPublishers(Node):
                 if not self._enable_depth:
                     continue
                 self._renderer.enable_depth_rendering()
-                self._renderer.update_scene(self._data, camera=cam.camera_name)
+                self._renderer.update_scene(self._data, camera=cam.mjcf_camera_name)
                 depth = self._renderer.render().astype(np.float32)
                 depth = np.flipud(depth)
+                depth = self._postprocess_raster(depth, cam.image_fliplr, cam.image_rot180)
                 self._renderer.disable_depth_rendering()
                 if depth_sub_count > 0:
                     depth_msg = self._to_depth_msg(depth, cam.frame_id, stamp)

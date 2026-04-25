@@ -120,6 +120,7 @@ private:
     const HandEyeQualityMetrics & quality,
     const cv::Mat & t_cam_gripper,
     bool has_cam_gripper);
+  bool appendDynamicTargetFromCurrentPose();
 
   void cancelInitDelayTimer();
   void republishLastCameraImagesToUi();
@@ -195,6 +196,10 @@ private:
 
   std::vector<Sample> samples_;
   std::size_t target_index_;
+  std::size_t target_attempts_;
+  std::size_t max_target_attempts_;
+  std::size_t dynamic_targets_added_;
+  std::size_t max_dynamic_targets_;
   bool waiting_arm_reached_;
   bool waiting_capture_;
   bool finished_;
