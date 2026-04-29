@@ -61,6 +61,8 @@ private:
   QFormLayout * fk_joints_form_{nullptr};
   std::vector<QDoubleSpinBox *> fk_joints_spins_;
   QComboBox * dh_mode_combo_{nullptr};
+  QComboBox * mdh_angle_unit_combo_{nullptr};
+  QComboBox * mdh_length_unit_combo_{nullptr};
   QTableWidget * mdh_table_{nullptr};
   QLineEdit * seed_line_{nullptr};
   QDoubleSpinBox * px_{nullptr};

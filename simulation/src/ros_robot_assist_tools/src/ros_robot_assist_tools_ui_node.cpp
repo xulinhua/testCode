@@ -2,6 +2,7 @@
 // 参考 calib_sim 架构
 
 #include "ros_robot_assist_tools/ros_robot_assist_tools_ui.hpp"
+#include "ros_robot_assist_tools/preferences/app_preferences.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <csignal>
 #include <QApplication>
@@ -16,6 +17,7 @@ void signalHandler(int /*signal*/) {
 }
 
 int main(int argc, char ** argv) {
+  ros_robot_assist_tools::ApplyRosDomainFromSavedPreferences();
   // 初始化 ROS2
   rclcpp::init(argc, argv);
   

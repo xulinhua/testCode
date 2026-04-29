@@ -37,7 +37,7 @@ struct ResourceUsage
 struct ProcessRow { QString pid; QString cpu; QString mem; QString command; };
 struct NodeInfoRow { QString name; QString startup_file; };
 struct ParamRow { QString name; QString value; };
-struct TopicTypeRow { QString topic; QString type; };
+struct TopicTypeRow { QString topic; QString type; QString hz; };
 
 struct BoardGeneratorParams
 {

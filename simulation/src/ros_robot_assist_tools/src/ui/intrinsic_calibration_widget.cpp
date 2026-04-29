@@ -22,7 +22,6 @@
 #include <QVBoxLayout>
 #include <atomic>
 #include <mutex>
-#include <thread>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -30,6 +29,7 @@
 #include "ros_robot_assist_tools/module/calibration_module.h"
 #include "ros_robot_assist_tools/module/intrinsic_calibration_module.h"
 #include "ros_robot_assist_tools/ui/shared_refresh_pool.h"
+#include "ros_robot_assist_tools/ui/shared_ui_executor.hpp"
 #include "ros_robot_assist_tools/ui/zoomable_image_widget.h"
 
 namespace ros_robot_assist_tools::ui
@@ -362,14 +362,9 @@ IntrinsicCalibrationWidget::IntrinsicCalibrationWidget(QWidget * parent)
   auto image_generation = std::make_shared<std::atomic<uint64_t>>(0);
   const auto stamp = static_cast<unsigned long long>(QDateTime::currentMSecsSinceEpoch());
   auto image_node = rclcpp::Node::make_shared("ros_robot_assist_tools_intrinsic_preview_" + std::to_string(stamp));
-  auto image_executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
-  image_executor->add_node(image_node);
-  auto image_spin_thread = std::make_shared<std::thread>([image_executor]() { image_executor->spin(); });
+  SharedUiExecutor::instance().add_node(image_node);
   QObject::connect(this, &QObject::destroyed, [=]() {
-    image_executor->cancel();
-    if (image_spin_thread->joinable()) {
-      image_spin_thread->join();
-    }
+    SharedUiExecutor::instance().remove_node(image_node);
   });
   auto subscribe_preview_topic = [=]() {
     const bool online_mode = (run_mode->currentIndex() == 0);

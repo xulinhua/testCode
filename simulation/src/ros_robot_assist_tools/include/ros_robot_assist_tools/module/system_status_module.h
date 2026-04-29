@@ -2,6 +2,7 @@
 #define ROS_ROBOT_ASSIST_TOOLS__MODULE__SYSTEM_STATUS_MODULE_H_
 
 #include <QString>
+#include <atomic>
 #include <chrono>
 #include <vector>
 
@@ -18,7 +19,9 @@ std::vector<QString> ReadRos2NodeRows();
 std::vector<NodeInfoRow> ReadRos2NodeInfoRows();
 std::vector<QString> ReadRos2SimpleList(const QString & subcommand);
 std::vector<TopicTypeRow> ReadRos2TopicTypeRows();
-std::vector<ParamRow> ReadRos2ParamRows(const QString & node_name);
+std::vector<ParamRow> ReadRos2ParamRows(
+  const QString & node_name, const std::atomic_bool * cancel_flag = nullptr,
+  int timeout_ms = 1500);
 ResourceUsage ReadResourceUsage(
   unsigned long long & prev_idle, unsigned long long & prev_total,
   unsigned long long & prev_rx, unsigned long long & prev_tx,

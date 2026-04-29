@@ -290,21 +290,37 @@ bool ListImageFilenamesFromHandeyePosesCsv(
   }
   QTextStream in(&f);
   int total = 0;
-  bool is_first_data_candidate = true;
+  bool use_raw_image_column = false;
+  int raw_image_col = -1;
+  bool header_processed = false;
   while (!in.atEnd()) {
     const QString line = in.readLine();
     if (line.trimmed().isEmpty() || line.trimmed().startsWith("#")) {
       continue;
     }
-    const QString cell = FirstColumnCell(line);
+    if (!header_processed) {
+      header_processed = true;
+      const QStringList header_cols = line.split(',', Qt::KeepEmptyParts);
+      raw_image_col = header_cols.indexOf("raw_image");
+      if (raw_image_col >= 0) {
+        use_raw_image_column = true;
+        continue;  // 跳过表头
+      }
+    }
+    QString cell;
+    if (use_raw_image_column) {
+      const QStringList cols = line.split(',', Qt::KeepEmptyParts);
+      if (raw_image_col >= 0 && raw_image_col < cols.size()) {
+        cell = cols[raw_image_col].trimmed();
+      }
+    } else {
+      cell = FirstColumnCell(line);
+    }
     if (cell.isEmpty()) {
       continue;
     }
-    if (is_first_data_candidate) {
-      is_first_data_candidate = false;
-      if (LikelyHeaderRowFirstColumn(cell)) {
-        continue;
-      }
+    if (!use_raw_image_column && total == 0 && LikelyHeaderRowFirstColumn(cell)) {
+      continue;
     }
     basenames->push_back(cell);
     total++;

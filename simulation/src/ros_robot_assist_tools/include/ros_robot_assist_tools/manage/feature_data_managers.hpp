@@ -5,6 +5,7 @@
 #include "ros_robot_assist_tools/manage/feature_data_manager_base.hpp"
 #include "ros_robot_assist_tools/manage/feature_data_manager_hub.hpp"
 #include "ros_robot_assist_tools/manage/handeye_calibration_data_manager.hpp"
+#include "ros_robot_assist_tools/manage/image_viewer_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/intrinsic_calibration_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/kinematics_solver_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/multi_sensor_calibration_data_manager.hpp"

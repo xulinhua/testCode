@@ -273,9 +273,27 @@ KinematicsSolverWidget::KinematicsSolverWidget(QWidget * parent)
     dh_mode_combo_->addItem("MDH (Craig 1989)", "mdh");
     dh_mode_combo_->addItem("DH (Denavit-Hartenberg 1955)", "dh");
     mode_row->addWidget(dh_mode_combo_, 1);
+    mode_row->addWidget(new QLabel("角度单位:"));
+    mdh_angle_unit_combo_ = new QComboBox();
+    mdh_angle_unit_combo_->addItem("rad", "rad");
+    mdh_angle_unit_combo_->addItem("deg", "deg");
+    mdh_angle_unit_combo_->setCurrentIndex(0);
+    mode_row->addWidget(mdh_angle_unit_combo_);
+    mode_row->addWidget(new QLabel("长度单位:"));
+    mdh_length_unit_combo_ = new QComboBox();
+    mdh_length_unit_combo_->addItem("m", "m");
+    mdh_length_unit_combo_->addItem("mm", "mm");
+    mdh_length_unit_combo_->setCurrentIndex(0);
+    mode_row->addWidget(mdh_length_unit_combo_);
     g_mdh_l->addLayout(mode_row);
     QObject::connect(
       dh_mode_combo_, qOverload<int>(&QComboBox::currentIndexChanged),
+      [this](int) { refreshMdhTable(); });
+    QObject::connect(
+      mdh_angle_unit_combo_, qOverload<int>(&QComboBox::currentIndexChanged),
+      [this](int) { refreshMdhTable(); });
+    QObject::connect(
+      mdh_length_unit_combo_, qOverload<int>(&QComboBox::currentIndexChanged),
       [this](int) { refreshMdhTable(); });
   }
   {
@@ -289,7 +307,7 @@ KinematicsSolverWidget::KinematicsSolverWidget(QWidget * parent)
   mdh_table_ = new QTableWidget(0, 5);
   mdh_table_->setHorizontalHeaderLabels(
     {QString::fromUtf8("i"), QString::fromUtf8("α_{i-1} (rad)"), QString::fromUtf8("a_{i-1} (m)"),
-     QString::fromUtf8("d_i (m)"), QString::fromUtf8("θ_i / 变量列")});
+     QString::fromUtf8("d_i (m)"), QString::fromUtf8("θ_i / 变量 (rad)")});
   mdh_table_->verticalHeader()->setVisible(false);
   mdh_table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
   mdh_table_->setSelectionMode(QAbstractItemView::NoSelection);
@@ -926,11 +944,31 @@ void KinematicsSolverWidget::refreshMdhTable()
   if (!mdh_table_ || !urdf_path_ || !base_link_ || !tip_link_) {
     return;
   }
+  const bool ang_deg = mdh_angle_unit_combo_ && mdh_angle_unit_combo_->currentData().toString() == "deg";
+  const bool len_mm = mdh_length_unit_combo_ && mdh_length_unit_combo_->currentData().toString() == "mm";
+  const QString au = ang_deg ? QStringLiteral("deg") : QStringLiteral("rad");
+  const QString lu = len_mm ? QStringLiteral("mm") : QStringLiteral("m");
+  mdh_table_->setHorizontalHeaderLabels({
+    QString::fromUtf8("i"),
+    QString::fromUtf8("α_{i-1} (%1)").arg(au),
+    QString::fromUtf8("a_{i-1} (%1)").arg(lu),
+    QString::fromUtf8("d_i (%1)").arg(lu),
+    QString::fromUtf8("θ_i / 变量 (%1)").arg(au),
+  });
+
   mdh_table_->clearContents();
   mdh_table_->clearSpans();
   mdh_table_->setRowCount(0);
   const std::string key = urdf_path_->text().toStdString() + "|" + base_link_->currentText().toStdString() +
     "|" + tip_link_->currentText().toStdString();
+  const auto fmt_len = [len_mm](double m_m) {
+    const double v = len_mm ? m_m * 1000.0 : m_m;
+    return QString::number(v, 'g', 6);
+  };
+  const auto fmt_ang = [ang_deg](double rad) {
+    const double v = ang_deg ? rad * (180.0 / M_PI) : rad;
+    return QString::number(v, 'g', 6);
+  };
   if (!kdl_cache_.kdl || kdl_cache_.key != key) {
     return;
   }
@@ -965,7 +1003,6 @@ void KinematicsSolverWidget::refreshMdhTable()
     mdh_table_->setItem(r, 0, i_i);
     if (!row.fit_ok) {
       ++fallback_rows;
-      const auto fmtg = [](double v) { return QString::number(v, 'g', 6); };
       auto * fb = new QTableWidgetItem(QString::fromUtf8("FB(xyz/rpy)"));
       fb->setTextAlignment(Qt::AlignCenter);
       fb->setForeground(QBrush(orange));
@@ -974,12 +1011,12 @@ void KinematicsSolverWidget::refreshMdhTable()
       }
       auto * xyz = new QTableWidgetItem(
         QString::fromUtf8("x=%1, y=%2, z=%3")
-          .arg(fmtg(row.fallback_x), fmtg(row.fallback_y), fmtg(row.fallback_z)));
+          .arg(fmt_len(row.fallback_x), fmt_len(row.fallback_y), fmt_len(row.fallback_z)));
       xyz->setTextAlignment(Qt::AlignCenter);
       xyz->setForeground(QBrush(black));
       auto * rpy = new QTableWidgetItem(
         QString::fromUtf8("r=%1, p=%2, y=%3")
-          .arg(fmtg(row.fallback_roll), fmtg(row.fallback_pitch), fmtg(row.fallback_yaw)));
+          .arg(fmt_ang(row.fallback_roll), fmt_ang(row.fallback_pitch), fmt_ang(row.fallback_yaw)));
       rpy->setTextAlignment(Qt::AlignCenter);
       rpy->setForeground(QBrush(black));
       const bool pris = (row.kind == kinematics::MdhCraig1989TableRow::JointKind::Prismatic);
@@ -999,23 +1036,22 @@ void KinematicsSolverWidget::refreshMdhTable()
       mdh_table_->setItem(r, 4, kitem);
       continue;
     }
-    const auto fmtg = [](double v) { return QString::number(v, 'g', 6); };
-    auto * i_al = new QTableWidgetItem(fmtg(row.alpha_im1));
+    auto * i_al = new QTableWidgetItem(fmt_ang(row.alpha_im1));
     i_al->setTextAlignment(Qt::AlignCenter);
     i_al->setForeground(QBrush(black));
-    auto * i_a = new QTableWidgetItem(fmtg(row.a_im1));
+    auto * i_a = new QTableWidgetItem(fmt_len(row.a_im1));
     i_a->setTextAlignment(Qt::AlignCenter);
     i_a->setForeground(QBrush(black));
     const bool pris = (row.kind == kinematics::MdhCraig1989TableRow::JointKind::Prismatic);
     const bool revo = (row.kind == kinematics::MdhCraig1989TableRow::JointKind::Revolute);
-    QString d_cell = fmtg(row.d_i);
-    QString t_cell = fmtg(row.theta_offset);
+    QString d_cell = fmt_len(row.d_i);
+    QString t_cell = fmt_ang(row.theta_offset);
     if (pris) {
-      d_cell = QString::fromUtf8("d0=%1  +q (m)").arg(fmtg(row.d_i));
+      d_cell = QString::fromUtf8("d0=%1  +q (%2)").arg(fmt_len(row.d_i), lu);
     }
     if (revo) {
       const QString jt = jlabel.isEmpty() ? QString::fromUtf8("关节") : jlabel;
-      t_cell = QString::fromUtf8("θ0=%1  +q [%2] (rad)").arg(fmtg(row.theta_offset), jt);
+      t_cell = QString::fromUtf8("θ0=%1  +q [%2] (%3)").arg(fmt_ang(row.theta_offset), jt, au);
     }
     auto * i_d = new QTableWidgetItem(d_cell);
     i_d->setTextAlignment(Qt::AlignCenter);

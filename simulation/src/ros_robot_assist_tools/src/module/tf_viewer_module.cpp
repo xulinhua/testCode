@@ -6,7 +6,6 @@
 #include <memory>
 #include <queue>
 #include <set>
-#include <thread>
 #include <unordered_set>
 
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -17,9 +16,10 @@
 #include <tf2_ros/transform_listener.h>
 #include <yaml-cpp/yaml.h>
 
-#include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <QStringList>
+
+#include "ros_robot_assist_tools/ui/shared_ui_executor.hpp"
 
 namespace ros_robot_assist_tools::ui
 {
@@ -56,21 +56,21 @@ public:
     buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
     buffer_->setUsingDedicatedThread(true);
     listener_ = std::make_shared<tf2_ros::TransformListener>(*buffer_, node_, false);
-    executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
-    executor_->add_node(node_);
-    spin_thread_ = std::thread([this]() { executor_->spin(); });
+    SharedUiExecutor::instance().add_node(node_);
   }
   ~Impl()
   {
-    if (executor_ != nullptr) { executor_->cancel(); }
-    if (spin_thread_.joinable()) { spin_thread_.join(); }
+    listener_.reset();
+    buffer_.reset();
+    if (node_) {
+      SharedUiExecutor::instance().remove_node(node_);
+      node_.reset();
+    }
   }
 
   rclcpp::Node::SharedPtr node_;
   std::shared_ptr<tf2_ros::Buffer> buffer_;
   std::shared_ptr<tf2_ros::TransformListener> listener_;
-  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
-  std::thread spin_thread_;
 };
 
 TfViewerBackend::TfViewerBackend() : impl_(new Impl()) {}

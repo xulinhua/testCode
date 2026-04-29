@@ -11,7 +11,9 @@
 
 #include "ros_robot_assist_tools/ui/board_generator_widget.h"
 #include "ros_robot_assist_tools/ui/handeye_calibration_widget.h"
+#include "ros_robot_assist_tools/ui/image_viewer_widget.h"
 #include "ros_robot_assist_tools/ui/intrinsic_calibration_widget.h"
+#include "ros_robot_assist_tools/ui/lazy_feature_page.hpp"
 #include "ros_robot_assist_tools/ui/kinematics_solver_widget.h"
 #include "ros_robot_assist_tools/ui/multi_sensor_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/pose_transform_widget.h"
@@ -25,7 +27,7 @@ QMainWindow * CreateMainWindow()
 {
   QMainWindow * window = new QMainWindow();
   window->setWindowTitle("Assist Tool");
-  window->resize(1400, 880);
+  window->resize(1400, 760);
   QWidget * central = new QWidget(window);
   window->setCentralWidget(central);
   QHBoxLayout * root = new QHBoxLayout(central);
@@ -41,16 +43,25 @@ QMainWindow * CreateMainWindow()
   stack->setStyleSheet("background:#f7fafc;");
 
   auto * system_status_widget = new SystemStatusWidget();
+  auto * lazy_image = new LazyFeaturePage([](QWidget * p) { return new ImageViewerWidget(p); });
+  auto * lazy_board = new LazyFeaturePage([](QWidget * p) { return new BoardGeneratorWidget(p); });
+  auto * lazy_pose = new LazyFeaturePage([](QWidget * p) { return new PoseTransformWidget(p); });
+  auto * lazy_kin = new LazyFeaturePage([](QWidget * p) { return new KinematicsSolverWidget(p); });
+  auto * lazy_intrinsic = new LazyFeaturePage([](QWidget * p) { return new IntrinsicCalibrationWidget(p); });
+  auto * lazy_stereo = new LazyFeaturePage([](QWidget * p) { return new StereoCalibrationWidget(p); });
+  auto * lazy_multi = new LazyFeaturePage([](QWidget * p) { return new MultiSensorCalibrationWidget(p); });
+  auto * lazy_handeye = new LazyFeaturePage([](QWidget * p) { return new HandeyeCalibrationWidget(p); });
   stack->addWidget(system_status_widget);
-  stack->addWidget(new BoardGeneratorWidget());
-  stack->addWidget(new PoseTransformWidget());
-  stack->addWidget(new KinematicsSolverWidget());
-  stack->addWidget(new IntrinsicCalibrationWidget());
-  stack->addWidget(new StereoCalibrationWidget());
-  stack->addWidget(new MultiSensorCalibrationWidget());
-  stack->addWidget(new HandeyeCalibrationWidget());
+  stack->addWidget(lazy_image);
+  stack->addWidget(lazy_board);
+  stack->addWidget(lazy_pose);
+  stack->addWidget(lazy_kin);
+  stack->addWidget(lazy_intrinsic);
+  stack->addWidget(lazy_stereo);
+  stack->addWidget(lazy_multi);
+  stack->addWidget(lazy_handeye);
 
-  const QStringList items = {"系统状态", "标定板生成", "姿态转换", "运动学计算", "内参标定", "双目标定", "多传感器标定", "手眼标定"};
+  const QStringList items = {"系统状态", "图像查看", "标定板生成", "姿态转换", "运动学计算", "内参标定", "双目标定", "多传感器标定", "手眼标定"};
   for (int i = 0; i < items.size(); ++i) {
     QPushButton * btn = new QPushButton(items[i]);
     btn->setFixedHeight(40);
@@ -61,10 +72,20 @@ QMainWindow * CreateMainWindow()
     nav_layout->addWidget(btn);
   }
   nav_layout->addStretch();
-  QObject::connect(stack, QOverload<int>::of(&QStackedWidget::currentChanged), [system_status_widget](int index) {
+  auto sync_image_active = [lazy_image](bool on) {
+    if (on) {
+      lazy_image->ensureBuilt();
+    }
+    if (auto * iv = dynamic_cast<ImageViewerWidget *>(lazy_image->content())) {
+      iv->SetActive(on);
+    }
+  };
+  QObject::connect(stack, QOverload<int>::of(&QStackedWidget::currentChanged), [system_status_widget, sync_image_active](int index) {
     system_status_widget->SetActive(index == 0);
+    sync_image_active(index == 1);
   });
   system_status_widget->SetActive(true);
+  sync_image_active(false);
   root->addWidget(nav);
   root->addWidget(stack, 1);
   window->statusBar()->addPermanentWidget(new QLabel("ROS2 Humble | C++17 | Qt"));

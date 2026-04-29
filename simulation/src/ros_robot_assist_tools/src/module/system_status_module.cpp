@@ -1,15 +1,20 @@
 #include "ros_robot_assist_tools/module/system_status_module.h"
 
 #include <cstdio>
+#include <chrono>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <unordered_map>
 
 #include <QFileInfo>
+#include <QProcess>
 #include <QRegExp>
 #include <QStringList>
+#include <rclcpp/executors/single_threaded_executor.hpp>
 #include <yaml-cpp/yaml.h>
 
 namespace ros_robot_assist_tools::ui
@@ -17,6 +22,102 @@ namespace ros_robot_assist_tools::ui
 namespace
 {
 QString ShellQuote(const QString & raw) { QString escaped = raw; escaped.replace("'", "'\\''"); return "'" + escaped + "'"; }
+
+class TopicRateSampler
+{
+public:
+  TopicRateSampler()
+  : last_tp_(std::chrono::steady_clock::now())
+  {
+    if (!rclcpp::ok()) {
+      return;
+    }
+    node_ = rclcpp::Node::make_shared("ros_robot_assist_tools_topic_rate_sampler");
+    exec_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+    exec_->add_node(node_);
+    spin_thread_ = std::thread([this]() {
+      while (!stop_.load()) {
+        exec_->spin_some(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+    });
+  }
+
+  ~TopicRateSampler()
+  {
+    stop_.store(true);
+    if (spin_thread_.joinable()) {
+      spin_thread_.join();
+    }
+    if (exec_ && node_) {
+      exec_->remove_node(node_);
+    }
+  }
+
+  std::vector<TopicTypeRow> Snapshot()
+  {
+    std::vector<TopicTypeRow> rows;
+    if (!node_) {
+      return rows;
+    }
+    const auto names_and_types = node_->get_topic_names_and_types();
+    std::lock_guard<std::mutex> lk(mu_);
+    for (const auto & kv : names_and_types) {
+      const std::string & topic = kv.first;
+      if (topic.empty() || topic.rfind("/_ros2cli", 0) == 0) {
+        continue;
+      }
+      const std::string type = kv.second.empty() ? std::string{} : kv.second.front();
+      TopicTypeRow row;
+      row.topic = QString::fromStdString(topic);
+      row.type = type.empty() ? "-" : QString::fromStdString(type);
+      rows.push_back(row);
+      if (subs_.find(topic) == subs_.end() && !type.empty()) {
+        try {
+          auto sub = node_->create_generic_subscription(
+            topic, type, rclcpp::SensorDataQoS(),
+            [this, topic](std::shared_ptr<rclcpp::SerializedMessage>) {
+              std::lock_guard<std::mutex> g(mu_);
+              counts_[topic] += 1ULL;
+            });
+          subs_[topic] = sub;
+          counts_.emplace(topic, 0ULL);
+          last_counts_.emplace(topic, 0ULL);
+        } catch (...) {
+        }
+      }
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const double dt = std::chrono::duration<double>(now - last_tp_).count();
+    for (auto & row : rows) {
+      const std::string key = row.topic.toStdString();
+      const auto it_cur = counts_.find(key);
+      const auto it_prev = last_counts_.find(key);
+      if (it_cur == counts_.end() || it_prev == last_counts_.end() || dt <= 0.0001) {
+        row.hz = "-";
+        continue;
+      }
+      const uint64_t cur = it_cur->second;
+      const uint64_t prev = it_prev->second;
+      const double hz = static_cast<double>(cur - prev) / dt;
+      row.hz = QString("%1 Hz").arg(hz, 0, 'f', 2);
+      it_prev->second = cur;
+    }
+    last_tp_ = now;
+    return rows;
+  }
+
+private:
+  std::mutex mu_;
+  rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> exec_;
+  std::thread spin_thread_;
+  std::atomic<bool> stop_{false};
+  std::unordered_map<std::string, rclcpp::GenericSubscription::SharedPtr> subs_;
+  std::unordered_map<std::string, uint64_t> counts_;
+  std::unordered_map<std::string, uint64_t> last_counts_;
+  std::chrono::steady_clock::time_point last_tp_;
+};
 }
 
 bool ReadCpuCounters(unsigned long long & idle_all, unsigned long long & total_all)
@@ -168,33 +269,38 @@ std::vector<QString> ReadRos2SimpleList(const QString & subcommand)
 
 std::vector<TopicTypeRow> ReadRos2TopicTypeRows()
 {
-  std::vector<TopicTypeRow> rows;
-  FILE * pipe = popen("bash -lc 'source /opt/ros/humble/setup.bash >/dev/null 2>&1 && ros2 topic list -t 2>/dev/null'", "r");
-  if (pipe == nullptr) return rows;
-  char line[1024] = {0};
-  while (fgets(line, sizeof(line), pipe) != nullptr) {
-    const QString value = QString::fromUtf8(line).trimmed();
-    if (value.isEmpty()) continue;
-    const int lb = value.indexOf('['); const int rb = value.lastIndexOf(']');
-    TopicTypeRow row;
-    if (lb > 0 && rb > lb) { row.topic = value.left(lb).trimmed(); row.type = value.mid(lb + 1, rb - lb - 1).trimmed(); }
-    else { row.topic = value; row.type = "-"; }
-    rows.push_back(row);
-  }
-  pclose(pipe);
-  return rows;
+  static TopicRateSampler sampler;
+  return sampler.Snapshot();
 }
 
-std::vector<ParamRow> ReadRos2ParamRows(const QString & node_name)
+std::vector<ParamRow> ReadRos2ParamRows(
+  const QString & node_name, const std::atomic_bool * cancel_flag,
+  int timeout_ms)
 {
   std::vector<ParamRow> rows;
   if (node_name.trimmed().isEmpty()) return rows;
-  const QString dump_cmd = QString("bash -lc 'source /opt/ros/humble/setup.bash >/dev/null 2>&1 && ros2 param dump %1 2>/dev/null'").arg(ShellQuote(node_name.trimmed()));
-  FILE * dump_pipe = popen(dump_cmd.toStdString().c_str(), "r");
-  if (dump_pipe == nullptr) return rows;
-  std::string yaml_text; char line[1024] = {0};
-  while (fgets(line, sizeof(line), dump_pipe) != nullptr) yaml_text += line;
-  pclose(dump_pipe);
+  const QString dump_cmd = QString("source /opt/ros/humble/setup.bash >/dev/null 2>&1 && ros2 param dump %1 2>/dev/null")
+                             .arg(ShellQuote(node_name.trimmed()));
+  QProcess dump_proc;
+  dump_proc.setProcessChannelMode(QProcess::MergedChannels);
+  dump_proc.start("bash", {"-lc", dump_cmd});
+  if (!dump_proc.waitForStarted(200)) {
+    return rows;
+  }
+  int waited_ms = 0;
+  const int wait_step_ms = 50;
+  while (!dump_proc.waitForFinished(wait_step_ms)) {
+    waited_ms += wait_step_ms;
+    if ((cancel_flag && cancel_flag->load()) || waited_ms >= timeout_ms) {
+      dump_proc.kill();
+      dump_proc.waitForFinished(100);
+      return rows;
+    }
+  }
+  const std::string yaml_text = QString::fromUtf8(dump_proc.readAllStandardOutput()).toStdString();
+  if (yaml_text.empty()) {
+    return rows;
+  }
   try {
     YAML::Node root = YAML::Load(yaml_text); YAML::Node params;
     if (root[node_name.toStdString()]) params = root[node_name.toStdString()]["ros__parameters"];

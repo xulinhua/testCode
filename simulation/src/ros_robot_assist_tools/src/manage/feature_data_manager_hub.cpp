@@ -8,6 +8,7 @@ namespace ros_robot_assist_tools::manage
 void FeatureDataManagerHub::SetConfigRoot(const std::string & config_root)
 {
   system_status.SetConfigPath(JoinConfigPath(config_root, "system_status.yaml"));
+  image_viewer.SetConfigPath(JoinConfigPath(config_root, "image_viewer.yaml"));
   board_generator.SetConfigPath(JoinConfigPath(config_root, "board_generator.yaml"));
   pose_transform.SetConfigPath(JoinConfigPath(config_root, "pose_transform.yaml"));
   kinematics_solver.SetConfigPath(JoinConfigPath(config_root, "kinematics_solver.yaml"));
@@ -21,6 +22,7 @@ void FeatureDataManagerHub::SetConfigRoot(const std::string & config_root)
 bool FeatureDataManagerHub::EnsureAllConfigFiles() const
 {
   return system_status.EnsureFileExists() &&
+         image_viewer.EnsureFileExists() &&
          board_generator.EnsureFileExists() &&
          pose_transform.EnsureFileExists() &&
          kinematics_solver.EnsureFileExists() &&
@@ -34,6 +36,7 @@ bool FeatureDataManagerHub::EnsureAllConfigFiles() const
 bool FeatureDataManagerHub::LoadAll()
 {
   return system_status.Load() &&
+         image_viewer.Load() &&
          board_generator.Load() &&
          pose_transform.Load() &&
          kinematics_solver.Load() &&
@@ -47,6 +50,7 @@ bool FeatureDataManagerHub::LoadAll()
 bool FeatureDataManagerHub::SaveAll() const
 {
   return system_status.Save() &&
+         image_viewer.Save() &&
          board_generator.Save() &&
          pose_transform.Save() &&
          kinematics_solver.Save() &&

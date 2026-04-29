@@ -38,11 +38,17 @@ include_directories(
 )
 
 add_library(ros_robot_assist_tools_core STATIC
+  src/preferences/app_preferences.cpp
   src/ros_robot_assist_tools_ui.cpp
   src/ui/main_window.cpp
+  src/ui/lazy_feature_page.cpp
+  src/ui/preferences_dialog.cpp
   src/ui/shared_refresh_pool.cpp
+  src/ui/shared_ui_executor.cpp
   src/ui/system_status_widget.cpp
+  src/ui/image_viewer_widget.cpp
   src/module/system_status_module.cpp
+  src/module/image_viewer_module.cpp
   src/ui/zoomable_image_widget.cpp
   src/module/intrinsic_calibration_module.cpp
   src/module/stereo_calibration_module.cpp
@@ -67,6 +73,7 @@ add_library(ros_robot_assist_tools_core STATIC
   src/module/tf_viewer_module.cpp
   src/manage/feature_data_manager_base.cpp
   src/manage/system_status_data_manager.cpp
+  src/manage/image_viewer_data_manager.cpp
   src/manage/board_generator_data_manager.cpp
   src/manage/pose_transform_data_manager.cpp
   src/manage/kinematics_solver_data_manager.cpp

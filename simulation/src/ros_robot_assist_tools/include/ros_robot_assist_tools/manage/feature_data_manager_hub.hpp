@@ -5,6 +5,7 @@
 
 #include "ros_robot_assist_tools/manage/board_generator_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/handeye_calibration_data_manager.hpp"
+#include "ros_robot_assist_tools/manage/image_viewer_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/intrinsic_calibration_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/kinematics_solver_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/multi_sensor_calibration_data_manager.hpp"
@@ -25,6 +26,7 @@ public:
   bool SaveAll() const;
 
   SystemStatusDataManager system_status;
+  ImageViewerDataManager image_viewer;
   BoardGeneratorDataManager board_generator;
   PoseTransformDataManager pose_transform;
   KinematicsSolverDataManager kinematics_solver;

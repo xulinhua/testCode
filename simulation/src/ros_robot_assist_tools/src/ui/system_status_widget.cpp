@@ -160,6 +160,7 @@ SystemStatusWidget::SystemStatusWidget(QWidget * parent)
   auto selected_param_node = std::make_shared<std::string>("");
   auto selected_param_node_mutex = std::make_shared<std::mutex>();
   auto force_refresh = std::make_shared<std::atomic<bool>>(true);
+  auto param_scan_cancel = std::make_shared<std::atomic_bool>(false);
 
   QObject::connect(param_node_combo, &QComboBox::currentTextChanged, [=](const QString & text) {
     {
@@ -168,7 +169,13 @@ SystemStatusWidget::SystemStatusWidget(QWidget * parent)
     }
     force_refresh->store(true);
   });
-  QObject::connect(monitor_type_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) {
+  QObject::connect(monitor_type_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int idx) {
+    // 切离“节点参数”时，优先请求中断参数扫描，避免卡住后续类型刷新。
+    if (idx != 5) {
+      param_scan_cancel->store(true);
+    } else {
+      param_scan_cancel->store(false);
+    }
     force_refresh->store(true);
   });
   QObject::connect(ros_filter_edit, &QLineEdit::textChanged, [=](const QString &) {
@@ -310,17 +317,20 @@ SystemStatusWidget::SystemStatusWidget(QWidget * parent)
       const std::vector<QString> action_rows = (monitor_type == 4) ? ReadRos2SimpleList("ros2 action list") : std::vector<QString>{};
       std::vector<ParamRow> param_rows;
       if (monitor_type == 5) {
+        param_scan_cancel->store(false);
         const auto now = std::chrono::steady_clock::now();
         const bool node_changed = (param_node_name != cached_param_node_name);
         const bool interval_reached = (now - last_param_refresh_t) >= std::chrono::milliseconds(1200);
         if (refresh_requested || node_changed || interval_reached) {
           cached_node_options = ReadRos2NodeRows();
-          cached_param_rows = ReadRos2ParamRows(QString::fromStdString(param_node_name));
+          cached_param_rows = ReadRos2ParamRows(QString::fromStdString(param_node_name), param_scan_cancel.get(), 600);
           cached_param_node_name = param_node_name;
           last_param_refresh_t = now;
         }
         node_options = cached_node_options;
         param_rows = cached_param_rows;
+      } else {
+        param_scan_cancel->store(true);
       }
 
       QMetaObject::invokeMethod(this, [=]() {
@@ -367,23 +377,28 @@ SystemStatusWidget::SystemStatusWidget(QWidget * parent)
           const QString keyword = ros_filter_edit->text().trimmed();
           std::vector<TopicTypeRow> filtered_topics;
           for (const auto & t : topic_rows) {
-            if (keyword.isEmpty() || t.topic.contains(keyword, Qt::CaseInsensitive) || t.type.contains(keyword, Qt::CaseInsensitive)) {
+            if (keyword.isEmpty() || t.topic.contains(keyword, Qt::CaseInsensitive) ||
+                t.type.contains(keyword, Qt::CaseInsensitive) || t.hz.contains(keyword, Qt::CaseInsensitive)) {
               filtered_topics.push_back(t);
             }
           }
-          monitor_table->setColumnCount(2);
-          monitor_table->setHorizontalHeaderLabels({"ROS2 Topic", "Topic Type"});
+          monitor_table->setColumnCount(3);
+          monitor_table->setHorizontalHeaderLabels({"ROS2 Topic", "Topic Type", "发布频率"});
           monitor_table->setRowCount(static_cast<int>(filtered_topics.size()));
           for (int i = 0; i < static_cast<int>(filtered_topics.size()); ++i) {
             auto * topic_item = new QTableWidgetItem(filtered_topics[i].topic);
             auto * type_item = new QTableWidgetItem(filtered_topics[i].type);
+            auto * hz_item = new QTableWidgetItem(filtered_topics[i].hz);
             topic_item->setToolTip(filtered_topics[i].topic);
             type_item->setToolTip(filtered_topics[i].type);
+            hz_item->setToolTip(QString("当前窗口采样估计值：%1").arg(filtered_topics[i].hz));
             monitor_table->setItem(i, 0, topic_item);
             monitor_table->setItem(i, 1, type_item);
+            monitor_table->setItem(i, 2, hz_item);
           }
           monitor_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
           monitor_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+          monitor_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
         } else if (monitor_type == 5) {
           const QString keyword = ros_filter_edit->text().trimmed();
           const double param_refresh_hz = 1000.0 / 1200.0;

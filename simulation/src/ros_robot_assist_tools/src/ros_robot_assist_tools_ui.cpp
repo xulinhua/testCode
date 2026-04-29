@@ -4,7 +4,15 @@
 #include "ros_robot_assist_tools/ros_robot_assist_tools_ui.hpp"
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QAction>
+#include <QDesktopServices>
+#include <QFileInfo>
+#include <QKeySequence>
 #include <QMainWindow>
+#include <QMenu>
+#include <QMenuBar>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
@@ -32,18 +40,167 @@
 #include <QTextEdit>
 #include <cmath>
 
+#include <QtGlobal>
+
 #include "ros_robot_assist_tools/ui/board_generator_widget.h"
 #include "ros_robot_assist_tools/ui/handeye_calibration_widget.h"
+#include "ros_robot_assist_tools/ui/image_viewer_widget.h"
 #include "ros_robot_assist_tools/ui/intrinsic_calibration_widget.h"
+#include "ros_robot_assist_tools/ui/lazy_feature_page.hpp"
 #include "ros_robot_assist_tools/ui/kinematics_solver_widget.h"
 #include "ros_robot_assist_tools/ui/multi_sensor_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/pose_transform_widget.h"
 #include "ros_robot_assist_tools/ui/stereo_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/system_status_widget.h"
 #include "ros_robot_assist_tools/ui/tf_viewer_widget.h"
+#include "ros_robot_assist_tools/ui/shared_ui_executor.hpp"
+#include "ros_robot_assist_tools/ui/preferences_dialog.h"
+#include "ros_robot_assist_tools/module/system_status_module.h"
+#include "ros_robot_assist_tools/preferences/app_preferences.hpp"
 
 namespace ros_robot_assist_tools
 {
+namespace
+{
+
+QString ResolveShareConfigDir()
+{
+  const QString exe_dir = QCoreApplication::applicationDirPath();
+  const QStringList candidates = {
+    exe_dir + "/../../share/ros_robot_assist_tools/config",
+    QDir::current().absoluteFilePath("../share/ros_robot_assist_tools/config"),
+    QDir::current().absoluteFilePath("install/ros_robot_assist_tools/share/ros_robot_assist_tools/config"),
+    QDir::current().absoluteFilePath("simulation/install/ros_robot_assist_tools/share/ros_robot_assist_tools/config"),
+    QDir::current().absoluteFilePath("src/ros_robot_assist_tools/config"),
+  };
+  for (const QString & rel : candidates) {
+    const QString canon = QDir(rel).canonicalPath();
+    if (!canon.isEmpty() && QFileInfo(canon).isDir()) {
+      return canon;
+    }
+  }
+  return QDir(exe_dir + "/../../share/ros_robot_assist_tools/config").canonicalPath();
+}
+
+QString ResolveHelpPdfPath()
+{
+  const QString exe_dir = QCoreApplication::applicationDirPath();
+  const QStringList candidates = {
+    exe_dir + "/../../share/ros_robot_assist_tools/assets/docs/AssistTool_UserGuide.pdf",
+    QDir::current().absoluteFilePath("src/ros_robot_assist_tools/assets/docs/AssistTool_UserGuide.pdf"),
+    QDir::current().absoluteFilePath("assets/docs/AssistTool_UserGuide.pdf"),
+  };
+  for (const QString & p : candidates) {
+    const QString c = QDir(p).canonicalPath();
+    if (!c.isEmpty() && QFileInfo(c).isFile()) {
+      return c;
+    }
+  }
+  return {};
+}
+
+void SetupAssistToolMenuBar(QMainWindow * window, QStackedWidget * stack, const QStringList & page_names)
+{
+  QMenuBar * bar = window->menuBar();
+  QStatusBar * sb = window->statusBar();
+
+  QMenu * m_file = bar->addMenu(QStringLiteral("文件(&F)"));
+  QAction * a_open_cfg = m_file->addAction(QStringLiteral("打开配置目录(&O)..."));
+  a_open_cfg->setShortcut(QKeySequence::Open);
+  QObject::connect(a_open_cfg, &QAction::triggered, [window]() {
+    const QString dir = ResolveShareConfigDir();
+    if (dir.isEmpty() || !QFileInfo(dir).isDir()) {
+      QMessageBox::warning(
+        window, QStringLiteral("打开目录"),
+        QStringLiteral("未找到 share/ros_robot_assist_tools/config。\n"
+                       "请从工作空间执行 install 后运行，或手动在资源管理器中打开 config。"));
+      return;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(dir))) {
+      QMessageBox::warning(window, QStringLiteral("打开目录"), QStringLiteral("无法打开目录：\n%1").arg(dir));
+    }
+  });
+  QAction * a_reload = m_file->addAction(QStringLiteral("重新加载配置(&R)"));
+  QObject::connect(a_reload, &QAction::triggered, [window]() {
+    QMessageBox::information(
+      window, QStringLiteral("重新加载配置"),
+      QStringLiteral(
+        "各模块在打开对应页面时会从 yaml 读取配置；修改文件后请：\n"
+        "• 使用各页内的「应用 / 保存」等按钮，或\n"
+        "• 重启本程序。\n\n"
+        "（全局一键重载各页状态尚未接入，避免与未保存编辑冲突。）"));
+  });
+  m_file->addSeparator();
+  QAction * a_quit = m_file->addAction(QStringLiteral("退出(&Q)"));
+  a_quit->setShortcut(QKeySequence::Quit);
+  QObject::connect(a_quit, &QAction::triggered, qApp, &QApplication::quit);
+
+  QMenu * m_edit = bar->addMenu(QStringLiteral("编辑(&E)"));
+  QAction * a_prefs = m_edit->addAction(QStringLiteral("首选项(&P)..."));
+  a_prefs->setShortcut(QKeySequence::Preferences);
+  QObject::connect(a_prefs, &QAction::triggered, [window]() { ui::ShowPreferencesDialog(window); });
+
+  QMenu * m_view = bar->addMenu(QStringLiteral("视图(&V)"));
+  QMenu * m_goto = m_view->addMenu(QStringLiteral("跳转到(&G)"));
+  for (int i = 0; i < page_names.size(); ++i) {
+    QAction * a = m_goto->addAction(QStringLiteral("%1. %2").arg(i + 1).arg(page_names[i]));
+    const int idx = i;
+    QObject::connect(a, &QAction::triggered, [stack, idx]() { stack->setCurrentIndex(idx); });
+  }
+  QAction * a_full = m_view->addAction(QStringLiteral("全屏(&U)"));
+  a_full->setCheckable(true);
+  a_full->setShortcut(QKeySequence(Qt::Key_F11));
+  auto * was_max_before_full = new bool(window->isMaximized());
+  QObject::connect(a_full, &QAction::toggled, [window, was_max_before_full](bool on) {
+    if (on) {
+      *was_max_before_full = window->isMaximized();
+      window->showFullScreen();
+      return;
+    }
+    if (*was_max_before_full) {
+      window->showMaximized();
+    } else {
+      window->showNormal();
+    }
+  });
+  QAction * esc_exit = new QAction(window);
+  esc_exit->setShortcut(QKeySequence(Qt::Key_Escape));
+  window->addAction(esc_exit);
+  QObject::connect(esc_exit, &QAction::triggered, [a_full, window]() {
+    if (window->isFullScreen()) {
+      a_full->setChecked(false);
+    }
+  });
+  QAction * a_status = m_view->addAction(QStringLiteral("显示状态栏(&S)"));
+  a_status->setCheckable(true);
+  a_status->setChecked(sb->isVisible());
+  QObject::connect(a_status, &QAction::toggled, [sb](bool on) { sb->setVisible(on); });
+
+  QMenu * m_help = bar->addMenu(QStringLiteral("帮助(&H)"));
+  QAction * a_help = m_help->addAction(QStringLiteral("使用说明(&D)..."));
+  QObject::connect(a_help, &QAction::triggered, [window]() {
+    const QString pdf = ResolveHelpPdfPath();
+    if (pdf.isEmpty()) {
+      QMessageBox::warning(window, QStringLiteral("使用说明"), QStringLiteral("未找到用户手册 PDF。"));
+      return;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(pdf))) {
+      QMessageBox::warning(window, QStringLiteral("使用说明"), QStringLiteral("打开 PDF 失败：\n%1").arg(pdf));
+    }
+  });
+  m_help->addSeparator();
+  QAction * a_about = m_help->addAction(QStringLiteral("About Assist Tool(&A)..."));
+  QObject::connect(a_about, &QAction::triggered, [window]() {
+    QMessageBox::about(
+      window, QStringLiteral("About Assist Tool"),
+      QStringLiteral(
+        "<h3>Assist Tool</h3>"
+        "<p>Qt %1 &nbsp;|&nbsp; Built with C++17</p>")
+        .arg(QString::fromUtf8(qVersion())));
+  });
+}
+
+}  // namespace
 
 /// 系统监控实现 - 直接在 .cpp 中定义，不使用 Q_OBJECT
 class SystemMonitor {
@@ -109,58 +266,47 @@ private:
   }
   
   void updateNetworkBase() {
-    // 获取初始网络字节数
-    QProcess process;
-    process.start("sh", QStringList() << "-c" << "cat /proc/net/dev | grep -E 'eth0|enp' | head -n1");
-    if (process.waitForFinished(500)) {
-      QString output = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
-      QStringList parts = output.split(QRegExp("\\s+"), Qt::SkipEmptyParts);
-      if (parts.size() >= 10) {
-        lastRxBytes_ = parts[1].toULongLong();  // 接收字节
-        lastTxBytes_ = parts[9].toULongLong();  // 发送字节
-      }
+    // 与「系统状态」页一致：汇总除 lo 外所有接口（避免仅匹配 eth0/enp* 时无输出）
+    unsigned long long rx = 0, tx = 0;
+    if (ui::ReadNetworkBytes(rx, tx)) {
+      lastRxBytes_ = rx;
+      lastTxBytes_ = tx;
     }
   }
-  
+
   void updateNetwork() {
-    QProcess process;
-    process.start("sh", QStringList() << "-c" << "cat /proc/net/dev | grep -E 'eth0|enp' | head -n1");
-    if (process.waitForFinished(500)) {
-      QString output = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
-      QStringList parts = output.split(QRegExp("\\s+"), Qt::SkipEmptyParts);
-      
-      if (parts.size() >= 10) {
-        unsigned long long currentRx = parts[1].toULongLong();
-        unsigned long long currentTx = parts[9].toULongLong();
-        
-        // 计算速率 (bytes/s)
-        unsigned long long rxRate = currentRx - lastRxBytes_;
-        unsigned long long txRate = currentTx - lastTxBytes_;
-        
-        lastRxBytes_ = currentRx;
-        lastTxBytes_ = currentTx;
-        
-        // 格式化显示
-        QString rxText, txText;
-        if (rxRate > 1024 * 1024) {
-          rxText = QString("↓ %.1f MB/s").arg(rxRate / (1024.0 * 1024.0));
-        } else if (rxRate > 1024) {
-          rxText = QString("↓ %.1f KB/s").arg(rxRate / 1024.0);
-        } else {
-          rxText = QString("↓ %1 B/s").arg(rxRate);
-        }
-        
-        if (txRate > 1024 * 1024) {
-          txText = QString("↑ %.1f MB/s").arg(txRate / (1024.0 * 1024.0));
-        } else if (txRate > 1024) {
-          txText = QString("↑ %.1f KB/s").arg(txRate / 1024.0);
-        } else {
-          txText = QString("↑ %1 B/s").arg(txRate);
-        }
-        
-        if (netDownLabel_) netDownLabel_->setText(rxText);
-        if (netUpLabel_) netUpLabel_->setText(txText);
-      }
+    unsigned long long cur_rx = 0, cur_tx = 0;
+    if (!ui::ReadNetworkBytes(cur_rx, cur_tx)) {
+      return;
+    }
+    const unsigned long long rxRate =
+      (cur_rx >= lastRxBytes_) ? (cur_rx - lastRxBytes_) : cur_rx;
+    const unsigned long long txRate =
+      (cur_tx >= lastTxBytes_) ? (cur_tx - lastTxBytes_) : cur_tx;
+    lastRxBytes_ = cur_rx;
+    lastTxBytes_ = cur_tx;
+
+    QString rxText, txText;
+    // Qt 的 arg() 使用 %1/%2 占位符，不能写 printf 风格的 %.1f
+    if (rxRate > 1024 * 1024) {
+      rxText = QStringLiteral("↓ %1 MB/s").arg(rxRate / (1024.0 * 1024.0), 0, 'f', 1);
+    } else if (rxRate > 1024) {
+      rxText = QStringLiteral("↓ %1 KB/s").arg(rxRate / 1024.0, 0, 'f', 1);
+    } else {
+      rxText = QStringLiteral("↓ %1 B/s").arg(rxRate);
+    }
+    if (txRate > 1024 * 1024) {
+      txText = QStringLiteral("↑ %1 MB/s").arg(txRate / (1024.0 * 1024.0), 0, 'f', 1);
+    } else if (txRate > 1024) {
+      txText = QStringLiteral("↑ %1 KB/s").arg(txRate / 1024.0, 0, 'f', 1);
+    } else {
+      txText = QStringLiteral("↑ %1 B/s").arg(txRate);
+    }
+    if (netDownLabel_) {
+      netDownLabel_->setText(rxText);
+    }
+    if (netUpLabel_) {
+      netUpLabel_->setText(txText);
     }
   }
   
@@ -424,7 +570,7 @@ QWidget* createKinematicsSolverPage() {
 QMainWindow* createMainWindow() {
   QMainWindow* window = new QMainWindow();
   window->setWindowTitle("Assist Tool");
-  window->resize(1200, 800);
+  window->resize(1200, 700);
   
   // 中心部件
   QWidget* centralWidget = new QWidget(window);
@@ -453,21 +599,32 @@ QMainWindow* createMainWindow() {
   // 页面堆叠
   QStackedWidget* stackedWidget = new QStackedWidget(centralWidget);
   
-  // 创建功能页面（按需求保留并排序）
+  // 仅首屏立即构造；其余模块首次进入页面时再构造，减少启动时 ROS/DDS 初始化开销
   auto * systemStatusWidget = new ui::SystemStatusWidget();
-  stackedWidget->addWidget(systemStatusWidget);  // 系统状态
-  stackedWidget->addWidget(new ui::BoardGeneratorWidget());  // 标定板生成
-  stackedWidget->addWidget(new ui::PoseTransformWidget());  // 姿态转换
-  stackedWidget->addWidget(new ui::KinematicsSolverWidget());  // 运动学计算
-  stackedWidget->addWidget(new ui::TfViewerWidget());  // TF查看
-  stackedWidget->addWidget(new ui::IntrinsicCalibrationWidget());  // 内参标定
-  stackedWidget->addWidget(new ui::StereoCalibrationWidget());  // 双目标定
-  stackedWidget->addWidget(new ui::MultiSensorCalibrationWidget());  // 多传感器标定
-  stackedWidget->addWidget(new ui::HandeyeCalibrationWidget());  // 手眼标定
+  auto * lazy_image = new ui::LazyFeaturePage([](QWidget * p) { return new ui::ImageViewerWidget(p); });
+  auto * lazy_board = new ui::LazyFeaturePage([](QWidget * p) { return new ui::BoardGeneratorWidget(p); });
+  auto * lazy_pose = new ui::LazyFeaturePage([](QWidget * p) { return new ui::PoseTransformWidget(p); });
+  auto * lazy_kin = new ui::LazyFeaturePage([](QWidget * p) { return new ui::KinematicsSolverWidget(p); });
+  auto * lazy_tf = new ui::LazyFeaturePage([](QWidget * p) { return new ui::TfViewerWidget(p); });
+  auto * lazy_intrinsic = new ui::LazyFeaturePage([](QWidget * p) { return new ui::IntrinsicCalibrationWidget(p); });
+  auto * lazy_stereo = new ui::LazyFeaturePage([](QWidget * p) { return new ui::StereoCalibrationWidget(p); });
+  auto * lazy_multi = new ui::LazyFeaturePage([](QWidget * p) { return new ui::MultiSensorCalibrationWidget(p); });
+  auto * lazy_handeye = new ui::LazyFeaturePage([](QWidget * p) { return new ui::HandeyeCalibrationWidget(p); });
+
+  stackedWidget->addWidget(systemStatusWidget);
+  stackedWidget->addWidget(lazy_image);
+  stackedWidget->addWidget(lazy_board);
+  stackedWidget->addWidget(lazy_pose);
+  stackedWidget->addWidget(lazy_kin);
+  stackedWidget->addWidget(lazy_tf);
+  stackedWidget->addWidget(lazy_intrinsic);
+  stackedWidget->addWidget(lazy_stereo);
+  stackedWidget->addWidget(lazy_multi);
+  stackedWidget->addWidget(lazy_handeye);
   
   // 创建导航按钮
   QStringList buttonNames = {
-    "系统状态", "标定板生成", "姿态转换", "运动学计算", "TF查看",
+    "系统状态", "图像查看", "标定板生成", "姿态转换", "运动学计算", "TF查看",
     "内参标定", "双目标定", "多传感器标定", "手眼标定"
   };
   for (int i = 0; i < buttonNames.size(); ++i) {
@@ -486,10 +643,20 @@ QMainWindow* createMainWindow() {
     navLayout->addWidget(btn);
   }
 
-  QObject::connect(stackedWidget, QOverload<int>::of(&QStackedWidget::currentChanged), [systemStatusWidget](int index) {
+  auto sync_image_active = [lazy_image](bool on) {
+    if (on) {
+      lazy_image->ensureBuilt();
+    }
+    if (auto * iv = dynamic_cast<ui::ImageViewerWidget *>(lazy_image->content())) {
+      iv->SetActive(on);
+    }
+  };
+  QObject::connect(stackedWidget, QOverload<int>::of(&QStackedWidget::currentChanged), [systemStatusWidget, sync_image_active](int index) {
     systemStatusWidget->SetActive(index == 0);
+    sync_image_active(index == 1);
   });
   systemStatusWidget->SetActive(true);
+  sync_image_active(false);
   
   navLayout->addStretch();
   
@@ -514,7 +681,9 @@ QMainWindow* createMainWindow() {
   SystemMonitor* monitor = new SystemMonitor(cpuLabel, memLabel, gpuLabel,
                                               netUpLabel, netDownLabel);
   monitor->start();
-  
+
+  SetupAssistToolMenuBar(window, stackedWidget, buttonNames);
+
   return window;
 }
 
@@ -527,7 +696,9 @@ RosRobotAssistToolsNode::RosRobotAssistToolsNode(const rclcpp::NodeOptions & opt
 int RunRosRobotAssistToolsUiApp(int argc, char ** argv) {
   // 初始化 Qt 应用
   QApplication app(argc, argv);
-  app.setStyle("Fusion");
+  AppPreferences prefs;
+  LoadAppPreferences(&prefs);
+  ApplyUiThemeToApplication(app, prefs.ui_theme);
   
   // 创建并显示主窗口
   QMainWindow* window = createMainWindow();
@@ -535,8 +706,9 @@ int RunRosRobotAssistToolsUiApp(int argc, char ** argv) {
   
   // 运行 Qt 事件循环
   int result = app.exec();
-  
+
   delete window;
+  ui::SharedUiExecutor::instance().shutdown();
   return result;
 }
 
