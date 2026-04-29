@@ -327,6 +327,10 @@ CalibNode::CalibNode(
   has_arm_state_(false),
   arm_reached_(false),
   target_index_(0),
+  target_attempts_(0),
+  max_target_attempts_(0),
+  dynamic_targets_added_(0),
+  max_dynamic_targets_(12),
   waiting_arm_reached_(false),
   waiting_capture_(false),
   finished_(false),
@@ -411,6 +415,10 @@ CalibNode::CalibNode(const std::string & node_name, const rclcpp::NodeOptions & 
   has_arm_state_(false),
   arm_reached_(false),
   target_index_(0),
+  target_attempts_(0),
+  max_target_attempts_(0),
+  dynamic_targets_added_(0),
+  max_dynamic_targets_(12),
   waiting_arm_reached_(false),
   waiting_capture_(false),
   finished_(false),
@@ -1171,7 +1179,22 @@ void CalibNode::controlTimerCallback()
   }
 
   const auto pose_count = target_poses_flat_.size() / kPoseDims;
-  if (target_index_ >= pose_count) {
+  if (pose_count == 0U) {
+    publishStatus("calibration_failed");
+    publishLog("[ERROR] calibration_failed: no target poses configured");
+    finished_ = true;
+    return;
+  }
+  if (max_target_attempts_ == 0U) {
+    const std::size_t min_attempts = static_cast<std::size_t>(std::max(min_samples_ * 3, min_samples_ + 4));
+    max_target_attempts_ = std::max(pose_count, min_attempts);
+    std::ostringstream oss;
+    oss << "target_sampling_plan pose_count=" << pose_count
+        << " min_samples=" << min_samples_
+        << " max_target_attempts=" << max_target_attempts_;
+    publishLog(oss.str());
+  }
+  if (samples_.size() >= static_cast<std::size_t>(min_samples_)) {
     logActiveCalibrationParams("before_run_calibration");
     if (runCalibration()) {
       logAndClearTargetReprojRejectStats("calibration_complete");
@@ -1195,12 +1218,31 @@ void CalibNode::controlTimerCallback()
     finished_ = true;
     return;
   }
+  if (target_attempts_ >= max_target_attempts_) {
+    logAndClearTargetReprojRejectStats("calibration_failed");
+    publishStatus("calibration_failed");
+    std::ostringstream oss;
+    oss << "[ERROR] Calibration finished without a valid result. samples=" << samples_.size()
+        << " min_samples=" << min_samples_
+        << " attempts=" << target_attempts_ << "/" << max_target_attempts_
+        << " (insufficient successful captures)";
+    publishLog(oss.str());
+    std_msgs::msg::String fail_text;
+    fail_text.data = std::string("[ERROR] Calibration failed.\n") + "sample_count: " +
+      std::to_string(samples_.size()) + "\nmin_samples: " + std::to_string(min_samples_) +
+      "\nattempts: " + std::to_string(target_attempts_) + "/" + std::to_string(max_target_attempts_) +
+      "\nSee log lines above (reach timeout / capture timeout).\n";
+    result_text_pub_->publish(fail_text);
+    finished_ = true;
+    return;
+  }
 
   if (!waiting_arm_reached_ && !waiting_capture_) {
     if (!auto_mode_ && !pending_step_) {
       publishStatus("paused_wait_step");
       return;
     }
+    target_index_ %= pose_count;
     if (!publishTargetPose(target_index_)) {
       publishStatus("target_publish_failed_" + std::to_string(target_index_));
       if (pending_step_) {
@@ -1393,7 +1435,8 @@ void CalibNode::controlTimerCallback()
       }
       publishStatus(oss.str());
       publishLog(oss.str());
-      ++target_index_;
+      ++target_attempts_;
+      target_index_ = (target_index_ + 1U) % pose_count;
       consecutive_reproj_rejects_ = 0;
       arm_reach_retry_count_ = 0;
       if (pending_step_) {
@@ -1410,7 +1453,11 @@ void CalibNode::controlTimerCallback()
         << " has_camera_info=" << (has_camera_info_ ? "true" : "false")
         << " detect_fail_reason=" << last_detect_fail_reason_;
     publishStatus(oss.str());
-    ++target_index_;
+    ++target_attempts_;
+    if (last_detect_fail_reason_ == "no_marker") {
+      (void)appendDynamicTargetFromCurrentPose();
+    }
+    target_index_ = (target_index_ + 1U) % pose_count;
     consecutive_reproj_rejects_ = 0;
     arm_reach_retry_count_ = 0;
     if (pending_step_) {
@@ -1441,6 +1488,9 @@ void CalibNode::controlCallback(const std_msgs::msg::String::ConstSharedPtr msg)
     captured_arm_poses_.clear();
     target_reproj_reject_counts_.clear();
     target_index_ = 0;
+    target_attempts_ = 0;
+    max_target_attempts_ = 0;
+    dynamic_targets_added_ = 0;
     waiting_arm_reached_ = false;
     waiting_capture_ = false;
     finished_ = false;
@@ -1681,7 +1731,11 @@ void CalibNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
   if (tryCaptureSample(bgr, annotated, detected_ids, img_stamp)) {
     consecutive_reproj_rejects_ = 0;
     waiting_capture_ = false;
-    ++target_index_;
+    ++target_attempts_;
+    const auto pose_count = target_poses_flat_.size() / kPoseDims;
+    if (pose_count > 0U) {
+      target_index_ = (target_index_ + 1U) % pose_count;
+    }
     RCLCPP_INFO(get_logger(), "Captured sample %zu", samples_.size());
     if (pending_step_) {
       pending_step_ = false;
@@ -1756,6 +1810,22 @@ bool CalibNode::tryFillGripperPoseFromTf(
       return false;
     }
   }
+  // Isaac 下图像与 TF 可能存在时序抖动；当两者时间差过大时跳过该样本，避免污染手眼链。
+  if (image_stamp.nanoseconds() > 0 &&
+    (tf_msg.header.stamp.sec != 0 || tf_msg.header.stamp.nanosec != 0))
+  {
+    const rclcpp::Time tf_stamp(tf_msg.header.stamp);
+    const double dt_sec = std::abs((image_stamp - tf_stamp).seconds());
+    constexpr double kMaxImageTfDeltaSec = 0.08;  // 80ms
+    if (dt_sec > kMaxImageTfDeltaSec) {
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(4)
+          << "[WARN] sample_skip tf_image_time_mismatch dt_sec=" << dt_sec
+          << " max_dt_sec=" << kMaxImageTfDeltaSec;
+      publishLog(oss.str());
+      return false;
+    }
+  }
   const auto & tr = tf_msg.transform.translation;
   const auto & q = tf_msg.transform.rotation;
   r_gripper_to_base = quatToRot(q.x, q.y, q.z, q.w);
@@ -1818,6 +1888,11 @@ bool CalibNode::tryCaptureSample(
   const bool used_tf = tryFillGripperPoseFromTf(
     image_stamp, sample.r_gripper_to_base, sample.t_gripper_to_base, &manifest_pose);
   if (!used_tf) {
+    if (use_tf_for_sample_pose_) {
+      // Avoid recording duplicated stale arm poses when TF sampling is required.
+      publishLog("[WARN] sample_skip tf_lookup_failed_for_gripper_pose");
+      return false;
+    }
     if (!has_arm_pose_) {
       return false;
     }
@@ -2262,6 +2337,53 @@ bool CalibNode::publishTargetPose(std::size_t idx)
       << cmd.pose.pose.orientation.z << ", " << cmd.pose.pose.orientation.w << ")";
   publishLog(oss.str());
   return sent;
+}
+
+bool CalibNode::appendDynamicTargetFromCurrentPose()
+{
+  if (!has_arm_pose_ || dynamic_targets_added_ >= max_dynamic_targets_) {
+    return false;
+  }
+  static const std::array<std::array<double, 6>, 8> kRetryPattern = {{
+    {{0.00, 0.00, 0.00, 0.0, 0.0, 0.0}},
+    {{0.02, 0.00, 0.01, 0.0, 4.0, 0.0}},
+    {{-0.02, 0.00, 0.01, 0.0, -4.0, 0.0}},
+    {{0.00, 0.02, 0.00, 4.0, 0.0, 0.0}},
+    {{0.00, -0.02, 0.00, -4.0, 0.0, 0.0}},
+    {{0.00, 0.00, 0.02, 0.0, 0.0, 6.0}},
+    {{0.015, 0.015, 0.00, 0.0, 0.0, -6.0}},
+    {{-0.015, -0.015, 0.00, 0.0, 0.0, 6.0}},
+  }};
+  const auto & p = kRetryPattern[dynamic_targets_added_ % kRetryPattern.size()];
+  const auto & base_pose = last_arm_pose_.pose.pose;
+  const auto & q = base_pose.orientation;
+  double qx = q.x;
+  double qy = q.y;
+  double qz = q.z;
+  double qw = q.w;
+  if (std::abs(p[3]) > 1e-9 || std::abs(p[4]) > 1e-9 || std::abs(p[5]) > 1e-9) {
+    const cv::Mat R_base = quatToRot(q.x, q.y, q.z, q.w);
+    const cv::Mat R_out = R_base * rpyDegToRdelta(p[3], p[4], p[5]);
+    mat3ToQuat(R_out, qx, qy, qz, qw);
+  }
+  target_poses_flat_.push_back(base_pose.position.x + p[0]);
+  target_poses_flat_.push_back(base_pose.position.y + p[1]);
+  target_poses_flat_.push_back(base_pose.position.z + p[2]);
+  target_poses_flat_.push_back(qx);
+  target_poses_flat_.push_back(qy);
+  target_poses_flat_.push_back(qz);
+  target_poses_flat_.push_back(qw);
+  ++dynamic_targets_added_;
+  const auto pose_count = target_poses_flat_.size() / kPoseDims;
+  max_target_attempts_ = std::max(max_target_attempts_, pose_count + static_cast<std::size_t>(min_samples_));
+  std::ostringstream oss;
+  oss << "dynamic_target_added idx=" << (pose_count - 1U)
+      << " total=" << pose_count
+      << " added=" << dynamic_targets_added_ << "/" << max_dynamic_targets_
+      << " dxyz=(" << p[0] << "," << p[1] << "," << p[2] << ")"
+      << " drpy_deg=(" << p[3] << "," << p[4] << "," << p[5] << ")";
+  publishLog(oss.str());
+  return true;
 }
 
 // ---------- 手眼求解、质量评估与结果保存 ----------

@@ -27,7 +27,7 @@
     robot_state_topic: "/robot_reached"
     robot_target_topic: "/robot_target_pose"
 
-    output_dir: "calib_output"
+    output_dir: "calib_output_gazebo"
 
     use_current_pose_as_center: false
 

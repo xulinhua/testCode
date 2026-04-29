@@ -3,6 +3,7 @@
 
 #include <opencv2/imgproc.hpp>
 
+#include <array>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -32,6 +33,18 @@ void mapArucoCornersFromFlippedToOriginal(
         p.x = wf - p.x;
         p.y = hf - p.y;
       }
+    }
+    // 翻转图检测后映射回原图时，需恢复角点顺序，避免 PnP 法向反转。
+    if (marker.size() == 4U) {
+      std::array<cv::Point2f, 4> reordered{marker[0], marker[1], marker[2], marker[3]};
+      if (flip_code == 1) {          // horizontal: [1,0,3,2]
+        reordered = {marker[1], marker[0], marker[3], marker[2]};
+      } else if (flip_code == 0) {   // vertical: [3,2,1,0]
+        reordered = {marker[3], marker[2], marker[1], marker[0]};
+      } else if (flip_code == -1) {  // both: [2,3,0,1]
+        reordered = {marker[2], marker[3], marker[0], marker[1]};
+      }
+      marker.assign(reordered.begin(), reordered.end());
     }
   }
 }

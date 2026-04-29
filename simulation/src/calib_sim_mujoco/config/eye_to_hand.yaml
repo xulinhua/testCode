@@ -32,7 +32,7 @@
     robot_state_topic: "/robot_reached"
     robot_target_topic: "/robot_target_pose"
 
-    output_dir: "calib_output"
+    output_dir: "calib_output_mujoco"
 
     # 绝对目标点：位置范围约 Y[-0.45,-0.30] X[0.11,0.35] Z[0.36,0.41]；姿态带约 ±12° 级 RPY 变化，利于手眼旋转可观测性
     use_current_pose_as_center: false

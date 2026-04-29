@@ -9,15 +9,15 @@
       state_timeout_sec: 2.0
       topic_wait_timeout_sec: 60.0
       joint_command_burst_count: 5
-      use_known_target_mount: false
+      use_known_target_mount: true
       target_to_gripper_pose:
       - 0.0
-      - 0.06
+      - 0.12
       - 0.01
       - 0.0
+      - 0.0
+      - 0.0
       - 1.0
-      - 0.0
-      - 0.0
       # 眼在手外/固定机位：板子更远、占画幅更小，门限与 eye_to_hand.yaml 一致（eih 腕部相机可更大）
       marker_bbox_ratio_min: 0.0008
       marker_bbox_ratio_max: 0.060
@@ -29,6 +29,9 @@
       # 固定 camera0：与 Isaac Camera_Pseudo_Depth 成像坐标系对齐
       tf_fixed_cam_ref_frame: Camera_Pseudo_Depth
       known_mount_quality_max_m: 0.23
+      post_reach_settle_sec: 2.0
+      post_reach_settle_require_joint: true
+      reach_require_joint_and_tf: false
       init_reset_burst_count: 6
       init_reset_burst_period_ms: 50
       init_delay_ms_after_reset: 500
@@ -49,7 +52,36 @@
       joint_names_arm0: ["J1_1_joint", "J1_2_joint", "J1_3_joint", "J1_4_joint", "J1_5_joint", "J1_6_joint"]
       joint_names_arm1: ["J2_1_joint", "J2_2_joint", "J2_3_joint", "J2_4_joint", "J2_5_joint", "J2_6_joint"]
       output_dir: calib_output_isaac
-      use_current_pose_as_center: false
+      use_current_pose_as_center: true
+      # 缩小步进，降低跨点大跳变带来的动力学/时序误差累积。
+      target_position_offsets: [
+        0.000,  0.000,  0.000,
+        0.020,  0.000,  0.000,
+       -0.020,  0.000,  0.000,
+        0.000,  0.020,  0.000,
+        0.000, -0.020,  0.000,
+        0.000,  0.000,  0.020,
+        0.000,  0.000, -0.020,
+        0.015,  0.015,  0.000,
+       -0.015, -0.015,  0.000,
+        0.020, -0.010,  0.010,
+       -0.020,  0.010,  0.010,
+        0.000,  0.000,  0.000
+      ]
+      target_orientation_offsets_rpy_deg: [
+        0.0,  0.0,  0.0,
+        0.0,  4.0,  0.0,
+        0.0, -4.0,  0.0,
+        4.0,  0.0,  0.0,
+       -4.0,  0.0,  0.0,
+        0.0,  0.0,  4.0,
+        0.0,  0.0, -4.0,
+        3.0,  3.0,  0.0,
+       -3.0, -3.0,  0.0,
+        0.0,  0.0,  6.0,
+        0.0,  0.0, -6.0,
+        0.0,  0.0,  0.0
+      ]
       target_poses:
       - 0.14
       - -0.3
@@ -341,15 +373,15 @@
       state_timeout_sec: 2.0
       topic_wait_timeout_sec: 60.0
       joint_command_burst_count: 5
-      use_known_target_mount: false
+      use_known_target_mount: true
       target_to_gripper_pose:
       - 0.0
-      - 0.06
+      - 0.12
       - 0.01
       - 0.0
+      - 0.0
+      - 0.0
       - 1.0
-      - 0.0
-      - 0.0
       # 同 eth0：眼在手外/固定机位
       marker_bbox_ratio_min: 0.0008
       marker_bbox_ratio_max: 0.060
@@ -361,6 +393,9 @@
       # 固定 camera0：与 Isaac Camera_Pseudo_Depth 成像坐标系对齐
       tf_fixed_cam_ref_frame: Camera_Pseudo_Depth
       known_mount_quality_max_m: 0.23
+      post_reach_settle_sec: 2.0
+      post_reach_settle_require_joint: true
+      reach_require_joint_and_tf: false
       init_reset_burst_count: 6
       init_reset_burst_period_ms: 50
       init_delay_ms_after_reset: 500
@@ -381,7 +416,35 @@
       joint_names_arm0: ["J1_1_joint", "J1_2_joint", "J1_3_joint", "J1_4_joint", "J1_5_joint", "J1_6_joint"]
       joint_names_arm1: ["J2_1_joint", "J2_2_joint", "J2_3_joint", "J2_4_joint", "J2_5_joint", "J2_6_joint"]
       output_dir: calib_output_isaac
-      use_current_pose_as_center: false
+      use_current_pose_as_center: true
+      target_position_offsets: [
+        0.000,  0.000,  0.000,
+        0.020,  0.000,  0.000,
+       -0.020,  0.000,  0.000,
+        0.000,  0.020,  0.000,
+        0.000, -0.020,  0.000,
+        0.000,  0.000,  0.020,
+        0.000,  0.000, -0.020,
+        0.015,  0.015,  0.000,
+       -0.015, -0.015,  0.000,
+        0.020, -0.010,  0.010,
+       -0.020,  0.010,  0.010,
+        0.000,  0.000,  0.000
+      ]
+      target_orientation_offsets_rpy_deg: [
+        0.0,  0.0,  0.0,
+        0.0,  4.0,  0.0,
+        0.0, -4.0,  0.0,
+        4.0,  0.0,  0.0,
+       -4.0,  0.0,  0.0,
+        0.0,  0.0,  4.0,
+        0.0,  0.0, -4.0,
+        3.0,  3.0,  0.0,
+       -3.0, -3.0,  0.0,
+        0.0,  0.0,  6.0,
+        0.0,  0.0, -6.0,
+        0.0,  0.0,  0.0
+      ]
       target_poses:
       - 0.14
       - -0.3

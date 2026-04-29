@@ -2174,6 +2174,8 @@ bool CalibNode::saveResult(
   const std::string file_name =
     run_dir + "/calib_result_" + (eye_in_hand_ ? "eye_in_hand" : "eye_to_hand") + ".yaml";
   const std::string manifest_file = run_dir + "/sample_manifest.csv";
+  const std::string intrinsics_file = run_dir + "/camera_intrinsics_used.yaml";
+  const std::string intrinsics_file_name = std::filesystem::path(intrinsics_file).filename().string();
   cv::FileStorage fs(file_name, cv::FileStorage::WRITE);
   if (!fs.isOpened()) {
     RCLCPP_ERROR(get_logger(), "Failed to open output file: %s", file_name.c_str());
@@ -2234,6 +2236,19 @@ bool CalibNode::saveResult(
   }
   fs.release();
 
+  {
+    cv::FileStorage intrinsics_fs(intrinsics_file, cv::FileStorage::WRITE);
+    if (intrinsics_fs.isOpened()) {
+      intrinsics_fs << "timestamp" << run_stamp;
+      intrinsics_fs << "camera_info_topic" << camera_info_topic_;
+      intrinsics_fs << "camera_matrix" << camera_matrix_;
+      intrinsics_fs << "distortion_coefficients" << dist_coeffs_;
+      intrinsics_fs.release();
+    } else {
+      RCLCPP_WARN(get_logger(), "Failed to open intrinsics output file: %s", intrinsics_file.c_str());
+    }
+  }
+
   const std::size_t sample_count = samples_.size();
   for (std::size_t i = 0; i < sample_count; ++i) {
     std::ostringstream raw_name;
@@ -2250,7 +2265,7 @@ bool CalibNode::saveResult(
 
   {
     std::ofstream manifest(manifest_file);
-    manifest << "index,raw_image,result_image,arm_id,px,py,pz,qx,qy,qz,qw\n";
+    manifest << "index,raw_image,result_image,intrinsics_file,arm_id,px,py,pz,qx,qy,qz,qw\n";
     for (std::size_t i = 0; i < sample_count; ++i) {
       std::ostringstream raw_name;
       raw_name << "raw_sample_" << std::setfill('0') << std::setw(2) << (i + 1) << ".png";
@@ -2275,6 +2290,7 @@ bool CalibNode::saveResult(
       manifest << (i + 1) << ","
                << raw_name.str() << ","
                << res_name.str() << ","
+               << intrinsics_file_name << ","
                << arm << ","
                << px << "," << py << "," << pz << ","
                << qx << "," << qy << "," << qz << "," << qw << "\n";
@@ -2328,6 +2344,7 @@ bool CalibNode::saveResult(
   }
   oss << "\ncalib_run_stamp: " << run_stamp << "\n";
   oss << "calib_run_dir: " << run_dir << "\n";
+  oss << "camera_intrinsics_file: " << intrinsics_file_name << "\n";
   result_msg.data = oss.str();
   result_text_pub_->publish(result_msg);
 

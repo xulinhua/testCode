@@ -34,7 +34,7 @@
       robot_pose_topic: /robot_pose
       robot_state_topic: /robot_reached
       robot_target_topic: /robot_target_pose
-      output_dir: calib_output
+      output_dir: calib_output_mujoco
       use_current_pose_as_center: false
       target_poses:
       - 0.14
@@ -282,7 +282,7 @@
       robot_pose_topic: /robot_pose
       robot_state_topic: /robot_reached
       robot_target_topic: /robot_target_pose
-      output_dir: calib_output
+      output_dir: calib_output_mujoco
       use_current_pose_as_center: false
       target_poses:
       - 0.14
@@ -542,7 +542,7 @@
       robot_pose_topic: /robot_pose
       robot_state_topic: /robot_reached
       robot_target_topic: /robot_target_pose
-      output_dir: calib_output
+      output_dir: calib_output_mujoco
       use_current_pose_as_center: false
       target_marker_id: 0
       image_topic: /camera1_rgb_sensor/image_raw
@@ -623,7 +623,7 @@
       robot_pose_topic: /robot_pose
       robot_state_topic: /robot_reached
       robot_target_topic: /robot_target_pose
-      output_dir: calib_output
+      output_dir: calib_output_mujoco
       use_current_pose_as_center: false
       target_marker_id: 1
       image_topic: /camera2_rgb_sensor/image_raw

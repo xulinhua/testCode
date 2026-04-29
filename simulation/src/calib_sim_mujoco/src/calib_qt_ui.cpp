@@ -432,7 +432,7 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   std::vector<std::string> selected_raw_images;
   int selected_sample_index = -1;
   std::string last_result_text_for_auto_pick;
-  const fs::path output_root("/home/hs/testCode/simulation/calib_output");
+  const fs::path output_root("/home/hs/testCode/simulation/calib_output_mujoco");
 
   const auto trimStr = [](std::string s) -> std::string {
     const auto first = s.find_first_not_of(" \t\r\n");
@@ -666,14 +666,14 @@ int RunCalibQtUiApp(const std::shared_ptr<CalibQtUiRosNode> & ros_node, int argc
   QObject::connect(btn_clear_all_data, &QPushButton::clicked, [&]() {
     const auto r = QMessageBox::question(
       &win, QString::fromUtf8("确认"),
-      QString::fromUtf8("将永久删除 calib_output 下所有 calib_run_* 目录，是否继续？"),
+      QString::fromUtf8("将永久删除 calib_output_mujoco 下所有 calib_run_* 目录，是否继续？"),
       QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (r != QMessageBox::Yes) {
       return;
     }
     std::error_code ec;
     if (!fs::exists(output_root, ec) || ec) {
-      appendUiLog("[历史数据] calib_output 不存在，跳过删除");
+      appendUiLog("[历史数据] calib_output_mujoco 不存在，跳过删除");
       refreshRunList();
       return;
     }

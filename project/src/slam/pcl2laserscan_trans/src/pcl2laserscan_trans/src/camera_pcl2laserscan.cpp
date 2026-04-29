@@ -3,6 +3,7 @@
 #include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
+#include <tf2_ros/create_timer_ros.h>
 #include <vector>
 #include <limits>
 #include <chrono>
@@ -35,7 +36,13 @@ void Camera_Pcl2laserscan::init(rclcpp::Node::SharedPtr nh)
                  target_frame_.c_str(), min_height_, max_height_);
 
     // 初始化TF
+    // 注意：相机到基座可能是动态链路（云台/机械臂末端），必须用点云时间戳查询 TF 以保证时空对齐
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(nh->get_clock());
+    // 关键：必须设置 CreateTimerInterface，否则 canTransform 的 timeout 参数不生效，
+    // 一旦点云时间稍微领先 TF 缓冲最新时刻，会立即失败返回
+    auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
+        nh->get_node_base_interface(), nh->get_node_timers_interface());
+    tf_buffer_->setCreateTimerInterface(timer_interface);
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     // 使用更大的队列大小和合适的QoS配置来订阅点云
@@ -66,6 +73,8 @@ void Camera_Pcl2laserscan::CloudCallback(const sensor_msgs::msg::PointCloud2::Sh
         std::string source_frame_id = laserCloudMsg->header.frame_id;
 
         // 坐标系处理逻辑
+        // 注意：此处的回退探测仅用于判断坐标系名是否存在于 TF 树，使用 TimePointZero 即可；
+        // 真正用于点云变换的查询在下方，仍使用点云时间戳以保证时空对齐
         if (source_frame_id.empty() || source_frame_id == "camera_depth_optical_frame")
         {
             // 如果是源帧是camera_depth_optical_frame，尝试查找可用的源帧
@@ -104,32 +113,54 @@ void Camera_Pcl2laserscan::CloudCallback(const sensor_msgs::msg::PointCloud2::Sh
         }
 
         // 检查目标坐标系变换
-        // 使用点云数据的时间戳来查询TF变换，避免时间戳不匹配问题
+        // 使用点云数据的时间戳来查询TF变换，保证动态链路（如云台/机械臂末端相机）时空对齐
         rclcpp::Time cloud_time(laserCloudMsg->header.stamp);
         tf2::TimePoint transform_time = tf2_ros::fromMsg(cloud_time);
-        
+
+        // 超时 0.1s；此超时仅在 CreateTimerInterface 已设置时生效
+        // 使用带 errstr 的重载获取底层错误原因，便于区分 "链路不通" 与 "超时"
+        std::string tf_err_str;
         if (!tf_buffer_->canTransform(target_frame_, source_frame_id,
-                                      transform_time, tf2::durationFromSec(0.1)))
+                                      transform_time, tf2::durationFromSec(0.1), &tf_err_str))
         {
-            LOG_WARN(PROJECT_NAME,
-                         "无法获取从 %s 到 %s 的坐标变换，正在检查可用的TF树", 
-                         source_frame_id.c_str(), target_frame_.c_str());
-            
-            // 尝试获取TF缓冲区中的详细信息
-            try {
-                auto all_frames = tf_buffer_->getAllFrameNames();
-                std::string frames_str;
-                for (size_t i = 0; i < all_frames.size(); ++i) {
-                    frames_str += all_frames[i];
-                    if (i < all_frames.size() - 1) {
-                        frames_str += ", ";
-                    }
-                }
-                LOG_INFO(PROJECT_NAME,
-                            "当前可用的坐标系: %s", frames_str.c_str());
-            } catch (...) {
+            // 二次探测：用 TimePointZero 查最新可用 TF，若能查到则证明链路连通，失败原因是"时间戳等待超时"
+            // 若依旧查不到，则是 "TF 链路不通"（frame 不存在或链条断开）
+            std::string probe_err;
+            bool link_ok = tf_buffer_->canTransform(target_frame_, source_frame_id,
+                                                    tf2::TimePointZero, tf2::durationFromSec(0.0), &probe_err);
+
+            if (link_ok)
+            {
+                // 链路通，仅仅是点云时间戳对应的 TF 没等到（发布延迟/帧率抖动/时钟不同步）
                 LOG_WARN(PROJECT_NAME,
-                            "无法获取TF树信息");
+                             "[TF超时] 从 %s 到 %s 的 TF 链路连通，但点云时间戳对应的变换在 0.1s 内未就绪 (cloud_stamp=%.3fs, tf_err='%s')",
+                             source_frame_id.c_str(), target_frame_.c_str(),
+                             cloud_time.seconds(), tf_err_str.c_str());
+            }
+            else
+            {
+                // 链路不通：frame 不存在或中间链条断开
+                LOG_WARN(PROJECT_NAME,
+                             "[TF链路不通] 无法获取从 %s 到 %s 的坐标变换 (err='%s', probe_err='%s')，正在检查可用的TF树",
+                             source_frame_id.c_str(), target_frame_.c_str(),
+                             tf_err_str.c_str(), probe_err.c_str());
+
+                // 仅在链路不通时输出 TF 树全量信息，便于排查 frame 名称拼写/发布缺失
+                try {
+                    auto all_frames = tf_buffer_->getAllFrameNames();
+                    std::string frames_str;
+                    for (size_t i = 0; i < all_frames.size(); ++i) {
+                        frames_str += all_frames[i];
+                        if (i < all_frames.size() - 1) {
+                            frames_str += ", ";
+                        }
+                    }
+                    LOG_INFO(PROJECT_NAME,
+                                "当前可用的坐标系: %s", frames_str.c_str());
+                } catch (...) {
+                    LOG_WARN(PROJECT_NAME,
+                                "无法获取TF树信息");
+                }
             }
             
             LOG_DEBUG(PROJECT_NAME,

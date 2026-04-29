@@ -121,10 +121,11 @@ ros2 run calib_sim <你的节点> --ros-args --params-file install/calib_sim/sha
 
 ## 输出结果
 
-默认写入参数 `output_dir` 下（如工作空间内 `calib_output/`），每次 run 带时间戳子目录，包含：
+默认写入参数 `output_dir` 下（如工作空间内 `calib_output_gazebo/`），每次 run 带时间戳子目录，包含：
 
 - `calib_result_eye_in_hand.yaml` 或 `calib_result_eye_to_hand.yaml`
 - `sample_manifest.csv`（若启用）
+- `camera_intrinsics_used.yaml`（本次标定实际使用的内参）
 - 文本结果经 `/calib_sim/result_text` 同步到 Qt
 
 YAML 中含 `T_cam_base`、`T_base_cam`、链式残差、`mean_corner_reprojection_error_px`、与 URDF 对比等字段。

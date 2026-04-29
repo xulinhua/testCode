@@ -10,7 +10,7 @@
     # 发目标后先 grace 秒再开始计 reached 超时；与 reached_wait_timeout_sec 相加为总等待上限
     arm_reach_timeout_grace_sec: 2.0
     # TF 到位后须再保持该时长才采图；期间若 post_reach_settle_require_joint 为 true 则关节也需一直在容差内
-    post_reach_settle_sec: 1.2
+    post_reach_settle_sec: 2.0
     post_reach_settle_require_joint: true
     # 为 true 时须关节与 TF 同时到位（易因仿真/URDF 不一致超时，一般保持 false）
     reach_require_joint_and_tf: false
@@ -18,10 +18,10 @@
     capture_wait_timeout_sec: 12.0
     topic_wait_timeout_sec: 60.0
     joint_command_burst_count: 5
-    use_known_target_mount: false
+    use_known_target_mount: true
     # target_to_gripper_pose (inverse of URDF gripper->target mount pose)
-    # tuned from recent run candidate: cfg*flipY + d(0,-0.06,0)
-    target_to_gripper_pose: [0.0, 0.06, 0.01, 0.0, 1.0, 0.0, 0.0]
+    # Align with calibrated MuJoCo setup for eye_to_hand board mount.
+    target_to_gripper_pose: [0.0, 0.12, 0.01, 0.0, 0.0, 0.0, 1.0]
     # rs405 固定机位下板子更小，再降一档最小面积门限
     marker_bbox_ratio_min: 0.0008
     marker_bbox_ratio_max: 0.060
@@ -63,7 +63,35 @@
     output_dir: "calib_output_isaac"
 
     # 绝对目标点：位置范围约 Y[-0.45,-0.30] X[0.11,0.35] Z[0.36,0.41]；姿态带约 ±12° 级 RPY 变化，利于手眼旋转可观测性
-    use_current_pose_as_center: false
+    use_current_pose_as_center: true
+    target_position_offsets: [
+      0.000,  0.000,  0.000,
+      0.020,  0.000,  0.000,
+     -0.020,  0.000,  0.000,
+      0.000,  0.020,  0.000,
+      0.000, -0.020,  0.000,
+      0.000,  0.000,  0.020,
+      0.000,  0.000, -0.020,
+      0.015,  0.015,  0.000,
+     -0.015, -0.015,  0.000,
+      0.020, -0.010,  0.010,
+     -0.020,  0.010,  0.010,
+      0.000,  0.000,  0.000
+    ]
+    target_orientation_offsets_rpy_deg: [
+      0.0,  0.0,  0.0,
+      0.0,  4.0,  0.0,
+      0.0, -4.0,  0.0,
+      4.0,  0.0,  0.0,
+     -4.0,  0.0,  0.0,
+      0.0,  0.0,  4.0,
+      0.0,  0.0, -4.0,
+      3.0,  3.0,  0.0,
+     -3.0, -3.0,  0.0,
+      0.0,  0.0,  6.0,
+      0.0,  0.0, -6.0,
+      0.0,  0.0,  0.0
+    ]
     target_poses: [
       0.14, -0.30, 0.37, -0.707107, 0.707107,  0.000000, 0.000000,
       0.19, -0.31, 0.38, -0.706999, 0.704416,  0.012341, 0.061628,

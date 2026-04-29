@@ -31,7 +31,7 @@ struct CalibConfigData
   std::string robot_pose_topic{"/robot_pose"};
   std::string robot_state_topic{"/robot_reached"};
   std::string robot_target_topic{"/robot_target_pose"};
-  std::string output_dir{"calib_output"};
+  std::string output_dir{"calib_output_mujoco"};
   bool use_current_pose_as_center{true};
   std::vector<double> target_poses;
   /// 机械臂 1 专用轨迹（与 target_poses 同格式）；为空则回退为 target_poses
