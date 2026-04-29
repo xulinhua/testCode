@@ -55,4 +55,5 @@ simulation/src/Universal_Robots_ROS2_Gazebo_Simulation/
 simulation/calib_output/
 simulation/calib_output_gazebo/
 simulation/calib_output_isaac/
+simulation/calib_output_mujoco/
 simulation/.pydeps/
