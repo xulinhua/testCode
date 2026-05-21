@@ -106,6 +106,7 @@ class UIBuilder:
         # 场景对象句柄。load_world() 创建，collect_data() 使用。
         self.camera = None
         self.render_product = None
+        self._camera_prim_path = None
         self.ground = None
         self.light = None
         # self.object 保存 /World/obj_i 这些容器 Prim 路径，用于采集前记录物体位姿。
@@ -225,6 +226,7 @@ class UIBuilder:
         self.light = None
         self.camera = None
         self.render_product = None
+        self._camera_prim_path = None
         self._camera_resolution = None
         self._physics_initialized = False
 
@@ -964,7 +966,7 @@ class UIBuilder:
         }
 
     def _clear_replicator_camera_prims(self):
-        """Remove stale Replicator-owned prims without touching the live viewport."""
+        """Remove stale Replicator camera graph without touching Hydra render products."""
         self.stage = omni.usd.get_context().get_stage()
         if not self.stage:
             return
@@ -978,17 +980,78 @@ class UIBuilder:
                 except Exception as exc:
                     print(f"Remove stale {prim_path}: {exc}")
 
-        hydra_textures = self.stage.GetPrimAtPath("/Render/OmniverseKit/HydraTextures")
-        if hydra_textures and hydra_textures.IsValid():
-            for child in list(hydra_textures.GetChildren()):
-                child_name = child.GetName()
-                if not child_name.startswith("Replicator"):
-                    continue
+    def _clear_sdg_pipeline_graph(self):
+        """Remove stale SDG graph nodes so a new Start creates one clean pipeline."""
+        self.stage = omni.usd.get_context().get_stage()
+        if not self.stage:
+            return
+
+        for prim_path in ("/Replicator/SDGPipeline", "/Render/PostProcess/SDGPipeline"):
+            prim = self.stage.GetPrimAtPath(prim_path)
+            if prim and prim.IsValid():
                 try:
-                    self.stage.RemovePrim(child.GetPath())
-                    print(f"Removed stale replicator render product: {child.GetPath()}")
+                    self.stage.RemovePrim(prim_path)
+                    print(f"Removed stale SDGPipeline graph: {prim_path}")
                 except Exception as exc:
-                    print(f"Remove stale {child.GetPath()}: {exc}")
+                    print(f"Remove {prim_path}: {exc}")
+
+    def _get_replicator_camera_xform_prim(self):
+        """Return the Replicator camera rig Xform prim used by rep.modify.pose."""
+        if self.stage is None:
+            self.stage = omni.usd.get_context().get_stage()
+
+        if self._camera_prim_path and self.stage:
+            prim = self.stage.GetPrimAtPath(self._camera_prim_path)
+            if prim and prim.IsValid():
+                return prim
+
+        if self.camera is None:
+            return None
+
+        try:
+            targets = rep.utils.get_node_targets(self.camera.node, "inputs:primsIn")
+        except Exception as exc:
+            print(f"Get Replicator camera xform target: {exc}")
+            targets = []
+
+        for target in targets:
+            prim = self.stage.GetPrimAtPath(str(target))
+            if prim and prim.IsValid():
+                self._camera_prim_path = str(prim.GetPath())
+                return prim
+
+        return None
+
+    @staticmethod
+    def _get_or_add_xform_op(xformable, op_type):
+        for op in xformable.GetOrderedXformOps():
+            if op.GetOpType() == op_type and not op.IsInverseOp():
+                return op
+
+        if op_type == UsdGeom.XformOp.TypeTranslate:
+            return xformable.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble)
+        if op_type == UsdGeom.XformOp.TypeRotateXYZ:
+            return xformable.AddRotateXYZOp(UsdGeom.XformOp.PrecisionFloat)
+        return None
+
+    def _set_camera_pose_usd(self, position, rotation=None):
+        """Update camera pose by editing USD xform ops, avoiding new Replicator graph nodes."""
+        prim = self._get_replicator_camera_xform_prim()
+        if prim is None:
+            print("Replicator camera xform prim not found; skip camera pose update.")
+            return False
+
+        xformable = UsdGeom.Xformable(prim)
+        translate_op = self._get_or_add_xform_op(xformable, UsdGeom.XformOp.TypeTranslate)
+        if translate_op is not None:
+            translate_op.Set(Gf.Vec3d(*[float(v) for v in position]))
+
+        if rotation is not None:
+            rotate_op = self._get_or_add_xform_op(xformable, UsdGeom.XformOp.TypeRotateXYZ)
+            if rotate_op is not None:
+                rotate_op.Set(Gf.Vec3f(*[float(v) for v in rotation]))
+
+        return True
 
     def _ensure_replicator_camera_from_ui(self):
         """按 UI 创建或重建 Replicator 相机与 render_product。"""
@@ -1004,19 +1067,26 @@ class UIBuilder:
             except Exception:
                 pass
 
+        if self.camera is not None and self._get_replicator_camera_xform_prim() is None:
+            self.camera = None
+            self.render_product = None
+            self._camera_prim_path = None
+            self._camera_resolution = None
+
         if self.camera is not None and self._camera_resolution != resolution:
             self.camera = None
             self.render_product = None
+            self._camera_prim_path = None
 
         if self.camera is None:
             self._clear_replicator_camera_prims()
-            self.camera = rep.create.camera(position=init_pos)
+            self.camera = rep.create.camera(position=init_pos, name="CaptureCamera")
             self.render_product = rep.create.render_product(self.camera, resolution)
             self._camera_resolution = resolution
+            self._set_camera_pose_usd(init_pos)
             print(f"✅ Replicator camera {resolution}, init position {init_pos}")
         else:
-            with self.camera:
-                rep.modify.pose(position=init_pos)
+            self._set_camera_pose_usd(init_pos)
 
         return settings
 
@@ -1256,34 +1326,41 @@ class UIBuilder:
         """
         rt_subframes = camera_settings.get("render_subframes", 8)
         self._capture_frame_poses = []
+        positions = []
+        rotations = []
+
+        for i in range(shots_count):
+            pose = generate_camera_pose(
+                cylinder_radius=cylinder["cylinder_radius"],
+                cylinder_height=cylinder["cylinder_height"],
+                obj_xy=np.array([cylinder["obj_x"], cylinder["obj_y"]]),
+                upper_cylinder_height=cylinder["upper_cylinder_height"],
+                obj_radius=cylinder["obj_radius"],
+            )
+            rot = pose["euler_angles"].copy()
+            rot[1] -= 90
+            positions.append(tuple(float(v) for v in pose["camera_position"]))
+            rotations.append(tuple(float(v) for v in rot))
+            self._capture_frame_poses.append(
+                {
+                    "frame_id": i,
+                    "camera_position": pose["camera_position"].tolist(),
+                    "target_point": pose["target_point"].tolist(),
+                    "quaternion_xyzw": pose["quaternion"].tolist(),
+                    "euler_zyx_deg": pose["euler_angles"].tolist(),
+                    "euler_applied_zyx_deg": rot.tolist(),
+                }
+            )
+
+        with rep.trigger.on_frame(max_execs=shots_count, rt_subframes=rt_subframes):
+            with self.camera:
+                rep.modify.pose(
+                    position=rep.distribution.sequence(positions),
+                    rotation=rep.distribution.sequence(rotations),
+                )
 
         for i in range(shots_count):
             print(f'---------------------------------------- Frame {i}')
-
-            with rep.trigger.on_frame():
-                with self.camera:
-                    pose = generate_camera_pose(
-                        cylinder_radius=cylinder["cylinder_radius"],
-                        cylinder_height=cylinder["cylinder_height"],
-                        obj_xy=np.array([cylinder["obj_x"], cylinder["obj_y"]]),
-                        upper_cylinder_height=cylinder["upper_cylinder_height"],
-                        obj_radius=cylinder["obj_radius"],
-                    )
-                    rot = pose["euler_angles"].copy()
-                    rot[1] -= 90
-                    rep.modify.pose(position=pose["camera_position"], rotation=rot)
-
-                    self._capture_frame_poses.append(
-                        {
-                            "frame_id": i,
-                            "camera_position": pose["camera_position"].tolist(),
-                            "target_point": pose["target_point"].tolist(),
-                            "quaternion_xyzw": pose["quaternion"].tolist(),
-                            "euler_zyx_deg": pose["euler_angles"].tolist(),
-                            "euler_applied_zyx_deg": rot.tolist(),
-                        }
-                    )
-
             await rep.orchestrator.step_async(
                 rt_subframes=rt_subframes,
                 delta_time=None,
@@ -1320,6 +1397,12 @@ class UIBuilder:
 
         self._ensure_physics_initialized()
         self._stop_timeline_after_load()
+
+        self._clear_sdg_pipeline_graph()
+        self.camera = None
+        self.render_product = None
+        self._camera_prim_path = None
+        self._camera_resolution = None
 
         camera_settings = self._ensure_replicator_camera_from_ui()
         if self.camera is None or self.render_product is None:

@@ -45,8 +45,22 @@ def lxSavePCD(
         rgb_data = rgb_data.numpy()[:, :3]
     else:
         rgb_data = rgb_data[:, :3]
+
+    pointcloud_data = np.asarray(pointcloud_data)
+    rgb_data = np.asarray(rgb_data)
+    if pointcloud_data.size == 0:
+        carb.log_warn(f"Skip empty PCD: {path}")
+        return
+    pointcloud_data = pointcloud_data.reshape(-1, 3)
+    rgb_data = rgb_data.reshape(-1, 3)
     # 点和颜色必须一一对应，否则 open3d 生成的点云颜色会错位。
-    assert rgb_data.shape[0] == pointcloud_data.shape[0]
+    if rgb_data.shape[0] != pointcloud_data.shape[0]:
+        carb.log_warn(
+            f"Skip PCD with mismatched point/color count: {path} "
+            f"points={pointcloud_data.shape[0]} colors={rgb_data.shape[0]}"
+        )
+        return
+
     pc = o3d.geometry.PointCloud()
     pc.points = o3d.utility.Vector3dVector(pointcloud_data.astype(np.float64))
     pc.colors = o3d.utility.Vector3dVector(rgb_data.astype(np.float64) / 255)
