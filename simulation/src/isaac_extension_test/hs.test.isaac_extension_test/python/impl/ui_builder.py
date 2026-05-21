@@ -963,6 +963,33 @@ class UIBuilder:
             "obj_radius": self._read_ui_float("obj_radius", 0.25),
         }
 
+    def _clear_replicator_camera_prims(self):
+        """Remove stale Replicator-owned prims without touching the live viewport."""
+        self.stage = omni.usd.get_context().get_stage()
+        if not self.stage:
+            return
+
+        for prim_path in ("/Replicator",):
+            prim = self.stage.GetPrimAtPath(prim_path)
+            if prim and prim.IsValid():
+                try:
+                    self.stage.RemovePrim(prim_path)
+                    print(f"Removed stale replicator prim: {prim_path}")
+                except Exception as exc:
+                    print(f"Remove stale {prim_path}: {exc}")
+
+        hydra_textures = self.stage.GetPrimAtPath("/Render/OmniverseKit/HydraTextures")
+        if hydra_textures and hydra_textures.IsValid():
+            for child in list(hydra_textures.GetChildren()):
+                child_name = child.GetName()
+                if not child_name.startswith("Replicator"):
+                    continue
+                try:
+                    self.stage.RemovePrim(child.GetPath())
+                    print(f"Removed stale replicator render product: {child.GetPath()}")
+                except Exception as exc:
+                    print(f"Remove stale {child.GetPath()}: {exc}")
+
     def _ensure_replicator_camera_from_ui(self):
         """按 UI 创建或重建 Replicator 相机与 render_product。"""
         settings = self.get_camera_settings_from_ui()
@@ -982,6 +1009,7 @@ class UIBuilder:
             self.render_product = None
 
         if self.camera is None:
+            self._clear_replicator_camera_prims()
             self.camera = rep.create.camera(position=init_pos)
             self.render_product = rep.create.render_product(self.camera, resolution)
             self._camera_resolution = resolution
