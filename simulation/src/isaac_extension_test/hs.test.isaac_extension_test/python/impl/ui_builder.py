@@ -129,6 +129,8 @@ class UIBuilder:
         self._camera_resolution = None
         self._capture_frame_poses = []
         self._info_dialog = None
+        self._info_dialog_sub = None
+        self._pending_info_dialog = None
 
     ###################################################################################
     #           The Functions Below Are Called Automatically By extension.py
@@ -198,18 +200,52 @@ class UIBuilder:
         except Exception as exc:
             print(f"timeline stop at t=0: {exc}")
 
-    def _finalize_load_after_spawn(self):
-        """与参考插件一致：Load 末尾 world.reset()；再 stop + t=0 便于看到悬空物体。"""
+    def _prepare_stage_for_load(self):
+        """第二次 Load 前清空 /World 与 World 注册，避免旧物体/地面残留。"""
+        try:
+            if self.world.is_playing():
+                self.world.stop()
+            self._timeline.stop()
+            self.world.clear()
+        except Exception as exc:
+            print(f"prepare stage: {exc}")
+
+        self.stage = omni.usd.get_context().get_stage()
+        if self.stage:
+            world_prim = self.stage.GetPrimAtPath("/World")
+            if world_prim and world_prim.IsValid():
+                for child in list(world_prim.GetChildren()):
+                    try:
+                        self.stage.RemovePrim(child.GetPath())
+                    except Exception as exc:
+                        print(f"Remove {child.GetPath()}: {exc}")
+
+        self.object = []
+        self.ground = None
+        self.light = None
+        self.camera = None
+        self.render_product = None
+        self._camera_resolution = None
+        self._physics_initialized = False
+
+    def _finalize_load_after_spawn(self, spawn_count: int, spawn_detail: str):
+        """Reset physics immediately after Load, matching the reference extension."""
         try:
             self.world.reset()
             self._physics_initialized = True
         except Exception as exc:
             print(f"world.reset after load: {exc}")
         self._stop_timeline_after_load()
-        print(
-            "Load complete. Objects spawn at z=2. Press Play to drop them, then Start capture. "
-            "If still invisible, click timeline Reset once (reference plugin behaves the same)."
+
+        summary = (
+            f"Spawned {spawn_count} object(s).\n"
+            f"{spawn_detail}\n\n"
+            "Timeline is at frame 0.\n"
+            "Press Play to drop objects, then Start capture.\n"
+            "If still invisible, click timeline Reset once."
         )
+        print(f"Load complete. {spawn_count} object(s).")
+        self._show_info_dialog("Load complete", summary)
 
     def cleanup_for_load(self):
         """Load 场景前清理采集/弹窗状态，不销毁主面板 UI 控件。"""
@@ -555,6 +591,7 @@ class UIBuilder:
         5. reset World，让物理系统接管物体下落。
         """
         self.cleanup_for_load()
+        self._prepare_stage_for_load()
 
         # 默认地面来自 Isaac Core；加语义标签后，分割和点云语义里能识别为 ground。
         self.ground = self.world.scene.add_default_ground_plane()
@@ -567,57 +604,43 @@ class UIBuilder:
         # _ = get_semantics(self.ground.prim)
         self.stage = omni.usd.get_context().get_stage()
 
-        if self.light is None:
-            # 创建一个平行光，给 RGB 图像提供稳定照明。
-            light_path = Sdf.Path("/World/DefaultLight")
-            if not self.stage.GetPrimAtPath(light_path):
-                self.light = UsdLux.DistantLight.Define(self.stage, light_path)
-                self.light.CreateIntensityAttr(3000)
-                self.light.CreateColorAttr(Gf.Vec3f(1.0, 0.95, 0.9))
-                self.light.CreateAngleAttr(0.53)
-                rot_z = Gf.Rotation(Gf.Vec3d.ZAxis(), 45)
-                rot_y = Gf.Rotation(Gf.Vec3d.YAxis(), -30)
-                xform = self.light.AddRotateXYZOp()
+        # 每次 Load 在清空 /World 后重建灯光。
+        light_path = Sdf.Path("/World/DefaultLight")
+        if not self.stage.GetPrimAtPath(light_path):
+            self.light = UsdLux.DistantLight.Define(self.stage, light_path)
+            self.light.CreateIntensityAttr(3000)
+            self.light.CreateColorAttr(Gf.Vec3f(1.0, 0.95, 0.9))
+            self.light.CreateAngleAttr(0.53)
+            rot_z = Gf.Rotation(Gf.Vec3d.ZAxis(), 45)
+            rot_y = Gf.Rotation(Gf.Vec3d.YAxis(), -30)
+            xform = self.light.AddRotateXYZOp()
 
-                # xform.Set(Gf.Vec3f(rot_y * rot_z).Decompose(Gf.Vec3d.XAxis(),
-                #                                             Gf.Vec3d.YAxis(),
-                #                                             Gf.Vec3d.ZAxis()))
-                # 1. 计算组合旋转
-                combined_rot = rot_y * rot_z
+            combined_rot = rot_y * rot_z
+            mat = Gf.Matrix4d(1.0)
+            mat.SetRotate(combined_rot)
+            rot_mat3 = mat.ExtractRotationMatrix()
 
-                # 2. 转换为 3x3 旋转矩阵
-                # 注意：SetRotate 可能需要 GfQuat* 或 GfRotation 作为输入来设置矩阵的旋转部分
-                mat = Gf.Matrix4d(1.0)  # 创建单位 4x4 矩阵
-                mat.SetRotate(combined_rot)  # 应用组合旋转
-                rot_mat3 = mat.ExtractRotationMatrix()  # 提取 3x3 旋转部分
+            import math
+            m = rot_mat3
+            epsilon = 1e-6
+            sy = math.sqrt(m[0][0] * m[0][0] + m[1][0] * m[1][0])
 
-                # 3. 从 3x3 矩阵手动计算 XYZ 顺序欧拉角 (度)
-                import math
-                m = rot_mat3
-                epsilon = 1e-6
-                sy = math.sqrt(m[0][0] * m[0][0] + m[1][0] * m[1][0])
+            if sy > epsilon:
+                euler_x_rad = math.atan2(m[2][1], m[2][2])
+                euler_y_rad = math.atan2(-m[2][0], sy)
+                euler_z_rad = math.atan2(m[1][0], m[0][0])
+            else:
+                euler_x_rad = math.atan2(-m[1][2], m[1][1])
+                euler_y_rad = math.atan2(-m[2][0], sy)
+                euler_z_rad = 0.0
 
-                if sy > epsilon:
-                    # No gimbal lock
-                    euler_x_rad = math.atan2(m[2][1], m[2][2])
-                    euler_y_rad = math.atan2(-m[2][0], sy)
-                    euler_z_rad = math.atan2(m[1][0], m[0][0])
-                else:
-                    # Gimbal lock
-                    euler_x_rad = math.atan2(-m[1][2], m[1][1])
-                    euler_y_rad = math.atan2(-m[2][0], sy)  # sy is close to zero
-                    euler_z_rad = 0.0
-
-                # 转换为度数
-                euler_angles_deg = Gf.Vec3f(
-                    math.degrees(euler_x_rad),
-                    math.degrees(euler_y_rad),
-                    math.degrees(euler_z_rad)
-                )
-
-                # 4. 设置 xform
-                xform.Set(euler_angles_deg)
-                print(f"成功设置灯光旋转 (XYZ degrees): {euler_angles_deg}")
+            euler_angles_deg = Gf.Vec3f(
+                math.degrees(euler_x_rad),
+                math.degrees(euler_y_rad),
+                math.degrees(euler_z_rad),
+            )
+            xform.Set(euler_angles_deg)
+            print(f"成功设置灯光旋转 (XYZ degrees): {euler_angles_deg}")
 
         # Replicator 相机在 Start 采集时再创建，避免 Load 阶段与 Viewport 抢 GPU。
 
@@ -685,15 +708,6 @@ class UIBuilder:
             print("No spawn plan: enable at least one class with Qty > 0.")
             return 1
 
-        if self.ground is None:
-            ground_usd_path = get_assets_root_path() + "/Isaac/Environments/Grid/default_environment.usd"
-            self.ground = rep.create.from_usd(ground_usd_path, semantics=[('select_classes', 'ground')])
-        if len(self.object):
-            for prim_path in list(self.object):
-                if self.stage.GetPrimAtPath(prim_path):
-                    self.stage.RemovePrim(prim_path)
-            self.object = []
-
         data_folder = self._raw_data_dir
 
         self.work_dir = self._ext_root
@@ -729,6 +743,7 @@ class UIBuilder:
         )
         print(f"Spawning {total_spawn} object(s) from spawn table")
 
+        spawn_lines = []
         class_spawn_index = {}
         for plan in spawn_plans:
             class_name = plan["name"]
@@ -749,7 +764,9 @@ class UIBuilder:
                 class_spawn_index[class_name] = class_idx + 1
 
                 added_obj = add_reference_to_stage(usd_path=obj_path, prim_path=prim_path)
-                print(f"Spawned {prim_path} <- {class_name}/{os.path.basename(obj_path)}")
+                line = f"{prim_path} <- {class_name}/{os.path.basename(obj_path)}"
+                print(f"Spawned {line}")
+                spawn_lines.append(line)
 
                 semantic_label = usd_stem
                 if semantic_label in self._classes_select or class_name in self._classes_select:
@@ -763,6 +780,7 @@ class UIBuilder:
                 y = random.uniform(y_lo, y_hi)
                 z = 2
                 self.set_obj_position(prim_path, (x, y, z))
+                print(f"Placed {prim_path} at ({x:.3f}, {y:.3f}, {z:.3f})")
 
                 obj_prim = self.stage.GetPrimAtPath(prim_path)
                 if not obj_prim:
@@ -786,7 +804,10 @@ class UIBuilder:
                 if num_collisions == 0:
                     print(f"No collision meshes under {prim_path}")
 
-        self._finalize_load_after_spawn()
+        detail = "\n".join(spawn_lines[:12])
+        if len(spawn_lines) > 12:
+            detail += f"\n... and {len(spawn_lines) - 12} more"
+        self._finalize_load_after_spawn(len(self.object), detail)
 
     # =====================================================
     # 3. 为所有子级 Mesh 添加 MeshCollisionAPI
@@ -978,20 +999,59 @@ class UIBuilder:
             return camera_settings["intrinsics_K"]
         return compute_intrinsics_k(640, 480, 24.0, 20.955, 15.2908)
 
-    def _close_info_dialog(self):
+    def _hide_info_dialog(self):
         dialog = getattr(self, "_info_dialog", None)
         if dialog is None:
             return
         try:
             dialog.visible = False
-            dialog.destroy()
         except Exception:
             pass
-        self._info_dialog = None
 
-    def _show_info_dialog(self, title: str, message: str):
-        """Show a simple English dialog after clear-data_log and similar actions."""
-        self._close_info_dialog()
+    def _close_info_dialog(self):
+        """关闭弹窗；destroy 延后到下一帧，避免 omni.ui 在事件里 destroy 报错。"""
+        self._pending_info_dialog = None
+        self._defer_info_dialog_teardown(create_next=False)
+
+    def _defer_info_dialog_teardown(self, create_next: bool = False):
+        self._hide_info_dialog()
+
+        def _on_update(_event):
+            sub = getattr(self, "_info_dialog_sub", None)
+            if sub is not None:
+                try:
+                    sub.unsubscribe()
+                except Exception:
+                    pass
+                self._info_dialog_sub = None
+
+            dialog = getattr(self, "_info_dialog", None)
+            if dialog is not None:
+                try:
+                    dialog.destroy()
+                except Exception:
+                    pass
+            self._info_dialog = None
+
+            pending = getattr(self, "_pending_info_dialog", None)
+            if create_next and pending is not None:
+                self._pending_info_dialog = None
+                self._build_info_dialog(*pending)
+
+        try:
+            old_sub = getattr(self, "_info_dialog_sub", None)
+            if old_sub is not None:
+                old_sub.unsubscribe()
+            stream = omni.kit.app.get_app().get_update_event_stream()
+            self._info_dialog_sub = stream.create_subscription_to_pop(_on_update)
+        except Exception:
+            self._info_dialog = None
+            if create_next and self._pending_info_dialog is not None:
+                title, message = self._pending_info_dialog
+                self._pending_info_dialog = None
+                self._build_info_dialog(title, message)
+
+    def _build_info_dialog(self, title: str, message: str):
         print(f"{title}\n{message}")
 
         line_count = max(1, message.count("\n") + 1)
@@ -1005,13 +1065,18 @@ class UIBuilder:
         )
 
         def on_ok():
-            self._close_info_dialog()
+            self._defer_info_dialog_teardown(create_next=False)
 
         with self._info_dialog.frame:
             with ui.VStack(spacing=10, height=0):
                 ui.Label(title, height=0)
                 ui.Label(message, word_wrap=True, height=0)
                 ui.Button("OK", clicked_fn=on_ok, height=28)
+
+    def _show_info_dialog(self, title: str, message: str):
+        """Show a simple English dialog after clear-data_log and similar actions."""
+        self._pending_info_dialog = (title, message)
+        self._defer_info_dialog_teardown(create_next=True)
 
     def _clear_data_log_impl(self):
         """清空扩展根目录下 data_log/ 内的全部采集结果。"""
@@ -1067,6 +1132,31 @@ class UIBuilder:
         abs_folder_path = self.work_dir + "/data_log/{}".format(folder_name)
         return abs_folder_path
 
+    def _pick_item_pose_prim(self, prim):
+        """Return the model Prim used for pose export, with safe fallbacks."""
+        children = [child for child in prim.GetChildren() if child and child.IsValid()]
+        if not children:
+            return prim
+
+        prim_name = prim.GetName()
+        class_hint = prim_name.split("_", 1)[0] if prim_name else ""
+        name_hints = [class_hint, *self._classes_select]
+        name_hints = [name.lower() for name in name_hints if name]
+
+        for child in children:
+            child_name = child.GetName().lower()
+            if any(hint in child_name for hint in name_hints):
+                return child
+
+        for child in children:
+            try:
+                if UsdGeom.Xformable(child):
+                    return child
+            except Exception:
+                pass
+
+        return prim
+
     def get_current_item_info(self):
         """
         读取当前场景中每个随机物体的世界位姿。
@@ -1101,16 +1191,9 @@ class UIBuilder:
             # print(dir(prim))
             # print(prim.GetAllChildrenNames())
 
-            # _ = prim.GetAllChildrenNames()
-            filtered = [
-                name for name in prim.GetAllChildrenNames()
-                if any(cls in name for cls in self._classes_select)
-            ]
-            # 模型导入后通常结构为 /World/obj_i/<模型名>，这里定位实际带类别名的子 Prim。
-            # currect_prim_path = filtered[0]
-            currect_prim_path = '{}/{}'.format(prim_path, filtered[0])
-            # currect_prim_path = '{}/{}'.format(prim_path, prim.GetAllChildrenNames()[1])
-            current_prim = self.stage.GetPrimAtPath(currect_prim_path)
+            # 模型导入后通常结构为 /World/<class>_xx_<asset>/<模型名>。
+            # 子节点命名不统一时，回退到第一个可变换子 Prim 或外层容器，避免采集中断。
+            current_prim = self._pick_item_pose_prim(prim)
             # position = rigid_body.GetTargetPositionAttr().Get(time)
             # orientation = rigid_body.GetTargetRotationAttr().Get(time)
 
@@ -1124,9 +1207,10 @@ class UIBuilder:
             quat_numpy = np.array([quat.GetReal(), *quat.GetImaginary()])
             # rr = {"name": prim.GetAllChildrenNames()[0], "translation": np.array(translation).tolist(), "quat": np.array(quat_numpy).tolist()}
             rr = {
-                "name": filtered[0],
+                "name": current_prim.GetName(),
                 "prim_path": str(prim_path),
-                "class": prim_name.split("_")[0] if prim_name else filtered[0],
+                "pose_prim_path": str(current_prim.GetPath()),
+                "class": prim_name.split("_")[0] if prim_name else current_prim.GetName(),
                 "translation": np.array(translation).tolist(),
                 "quat": np.array(quat_numpy).tolist(),
             }

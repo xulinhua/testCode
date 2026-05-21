@@ -64,7 +64,7 @@ def _set_asset_path(attr, asset_path: str) -> bool:
     from pxr import Sdf
 
     try:
-        if not attr or not attr.IsValid() or not attr.IsWritable():
+        if not attr or not attr.IsValid():
             return False
         if attr.GetTypeName() != Sdf.ValueTypeNames.Asset:
             return False
@@ -78,6 +78,23 @@ def _set_asset_path(attr, asset_path: str) -> bool:
         return False
 
 
+def _set_mdl_source_asset(shader) -> bool:
+    """Ensure the imported OmniPBR shader has a usable MDL source asset."""
+    from pxr import Sdf
+
+    try:
+        attr = shader.GetPrim().GetAttribute("info:mdl:sourceAsset")
+        if not attr or not attr.IsValid():
+            return False
+        current = attr.Get()
+        if isinstance(current, Sdf.AssetPath) and current.path == "OmniPBR.mdl":
+            return False
+        attr.Set(Sdf.AssetPath("OmniPBR.mdl"))
+        return True
+    except Exception:
+        return False
+
+
 def _force_shader_inputs_relative(root_prim, rel_map: Dict[str, str]) -> int:
     """按 MDL 输入名强制写入三张相对路径贴图（不依赖旧路径内容）。"""
     from pxr import Usd, UsdShade
@@ -86,7 +103,10 @@ def _force_shader_inputs_relative(root_prim, rel_map: Dict[str, str]) -> int:
     for prim in Usd.PrimRange(root_prim):
         if not prim.IsA(UsdShade.Shader):
             continue
-        for inp in UsdShade.Shader(prim).GetInputs():
+        shader = UsdShade.Shader(prim)
+        if _set_mdl_source_asset(shader):
+            fixed += 1
+        for inp in shader.GetInputs():
             target = _texture_for_input_name_exact(inp.GetBaseName(), rel_map)
             if not target:
                 continue
@@ -103,6 +123,14 @@ def _modify_layer_asset_paths(layer, model_dir: str, rel_map: Dict[str, str]) ->
     changed = [0]
 
     def rewrite(asset_path):
+        if isinstance(asset_path, str):
+            p = asset_path.replace("\\", "/")
+            if not _needs_texture_remap(p):
+                return asset_path
+            new_p = _rel_path_from_old_path(p, rel_map)
+            if new_p != p:
+                changed[0] += 1
+            return new_p
         if not asset_path or not asset_path.path:
             return asset_path
         p = asset_path.path.replace("\\", "/")
@@ -229,7 +257,10 @@ def _force_shader_inputs_absolute(root_prim, model_dir: str) -> int:
     for prim in Usd.PrimRange(root_prim):
         if not prim.IsA(UsdShade.Shader):
             continue
-        for inp in UsdShade.Shader(prim).GetInputs():
+        shader = UsdShade.Shader(prim)
+        if _set_mdl_source_asset(shader):
+            fixed += 1
+        for inp in shader.GetInputs():
             rel = _texture_for_input_name_exact(inp.GetBaseName(), rel_map)
             if not rel:
                 continue
