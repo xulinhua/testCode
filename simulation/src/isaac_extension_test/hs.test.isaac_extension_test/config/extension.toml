@@ -1,0 +1,26 @@
+[core]
+reloadable = true
+order = 0
+
+[package]
+version = "0.2.0"
+category = "Simulation"
+title = "Hs Test Isaac Extension Test"
+description = "Standalone grasping scene data capture extension"
+authors = ["xlh"]
+keywords = ["test", "grasping", "replicator"]
+changelog = "docs/CHANGELOG.md"
+readme = "docs/README.md"
+preview_image = "data/preview.png"
+icon = "data/icon.png"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"isaacsim.gui.components" = {}
+"isaacsim.core.api" = {}
+
+[[python.module]]
+name = "hs.test.isaac_extension_test"
+
+[settings]
+exts."hs.test.isaac_extension_test".timeout = 5
