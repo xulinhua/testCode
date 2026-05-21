@@ -103,6 +103,7 @@ class UIBuilder:
         # UI 控件索引表：后续通过 key 读取用户输入值或控制按钮状态。
         self._buttons = {}
         self._line_edit = {}
+        self._output_toggles = {}
         # 场景对象句柄。load_world() 创建，collect_data() 使用。
         self.camera = None
         self.render_product = None
@@ -393,6 +394,53 @@ class UIBuilder:
                     tooltip = label
                 self._add_string_field(ui_style, key, label, default, tooltip)
 
+    def _build_output_options(self, ui_style):
+        """Build data_log output toggles."""
+        self._output_toggles = {}
+        options = [
+            ("write_info_json", "info.json", True),
+            ("write_camera_params_json", "camera_params.json", True),
+            ("write_rgb", "RGB images", True),
+            ("write_depth", "Depth", True),
+            ("write_semantic", "Semantic segmentation", True),
+            (
+                "write_instance_id",
+                "Instance ID segmentation (+ mapping JSON)",
+                True,
+            ),
+            ("write_pointcloud", "Pointcloud / PCD", True),
+        ]
+
+        with ui.VStack(style=ui_style, spacing=4, height=0):
+            for key, label, default in options:
+                with ui.HStack(height=24):
+                    cb = ui.CheckBox(width=24)
+                    cb.model.set_value(default)
+                    ui.Label(label, height=0)
+                    self._output_toggles[key] = cb
+
+    def _read_output_toggle(self, key: str, default: bool = True) -> bool:
+        toggle = self._output_toggles.get(key)
+        if toggle is None:
+            return default
+        try:
+            return toggle.model.get_value_as_bool()
+        except Exception:
+            return default
+
+    def get_output_settings_from_ui(self):
+        return {
+            "info_json": self._read_output_toggle("write_info_json", True),
+            "camera_params_json": self._read_output_toggle("write_camera_params_json", True),
+            "rgb": self._read_output_toggle("write_rgb", True),
+            "distance_to_camera": self._read_output_toggle("write_depth", True),
+            "semantic_segmentation": self._read_output_toggle("write_semantic", True),
+            "instance_id_segmentation": self._read_output_toggle(
+                "write_instance_id", True
+            ),
+            "pointcloud": self._read_output_toggle("write_pointcloud", True),
+        }
+
     def _read_spawn_plans_from_ui(self):
         """
         读取表格中已勾选类别的生成计划。
@@ -481,6 +529,10 @@ class UIBuilder:
                 ],
             )
 
+        output_frame = CollapsableFrame("Output Parameters", collapsed=False)
+        with output_frame:
+            self._build_output_options(ui_style)
+
         actions_frame = CollapsableFrame("Actions", collapsed=False)
         with actions_frame:
             with ui.VStack(style=ui_style, spacing=5, height=0):
@@ -506,7 +558,7 @@ class UIBuilder:
                     on_clicked_fn=self._clear_data_log_impl,
                 )
 
-        self.frames = [scene_frame, camera_frame, capture_frame, actions_frame]
+        self.frames = [scene_frame, camera_frame, capture_frame, output_frame, actions_frame]
 
         # run_scenario_frame = CollapsableFrame("Run Scenario")
 
@@ -1380,6 +1432,7 @@ class UIBuilder:
             rgb_*.png: RGB 图像
             distance_to_camera_*.npy: 深度
             semantic_segmentation_*.png/json: 语义分割及标签映射
+            instance_id_segmentation_*.png / mapping_*.json: 实例 ID 分割（可选）
             pointcloud_*.npy / lx_data_*.pcd: 点云及 PCD 文件
         """
 
@@ -1409,6 +1462,7 @@ class UIBuilder:
             print("Replicator camera not ready. Please Load scene first.")
             return 1
 
+        output_settings = self.get_output_settings_from_ui()
         cylinder = self._get_sampling_params_from_ui()
 
         current_info = self.get_current_item_info()
@@ -1429,29 +1483,47 @@ class UIBuilder:
             "camera_info": camera_settings["intrinsics_K"],
             "objects": current_info,
         }
-        with open(os.path.join(abs_folder_path, "info.json"), "w", encoding="utf-8") as fp:
-            json.dump(info, fp, indent=4)
+        if output_settings["info_json"]:
+            with open(os.path.join(abs_folder_path, "info.json"), "w", encoding="utf-8") as fp:
+                json.dump(info, fp, indent=4)
 
         if self.writter:
             self.writter.detach()
 
-        self.writter = rep.WriterRegistry.get("LxWriter")
-        self.writter.initialize(
-            output_dir=abs_folder_path,
-            pointcloud=True,
-            rgb=True,
-            distance_to_camera=True,
-            semantic_segmentation=True,
-            semantic_types=["select_classes"],
+        writer_outputs_enabled = any(
+            output_settings[key]
+            for key in (
+                "rgb",
+                "distance_to_camera",
+                "semantic_segmentation",
+                "instance_id_segmentation",
+                "pointcloud",
+            )
         )
-        self.writter.attach([self.render_product])
+        if writer_outputs_enabled:
+            self.writter = rep.WriterRegistry.get("LxWriter")
+            self.writter.initialize(
+                output_dir=abs_folder_path,
+                pointcloud=output_settings["pointcloud"],
+                rgb=output_settings["rgb"],
+                distance_to_camera=output_settings["distance_to_camera"],
+                semantic_segmentation=output_settings["semantic_segmentation"],
+                instance_id_segmentation=output_settings["instance_id_segmentation"],
+                semantic_types=["select_classes"],
+            )
+            self.writter.attach([self.render_product])
+        else:
+            self.writter = None
 
         await self.generate_frames(shots_count, cylinder, camera_settings)
 
-        cam_path = write_camera_params_json(abs_folder_path, camera_params_doc, self._capture_frame_poses)
-        print(f"Camera params saved: {cam_path}")
+        if output_settings["camera_params_json"]:
+            cam_path = write_camera_params_json(abs_folder_path, camera_params_doc, self._capture_frame_poses)
+            print(f"Camera params saved: {cam_path}")
 
-        self.writter.detach()
+        if self.writter:
+            self.writter.detach()
+            self.writter = None
 
         elapsed_s = time.time() - t_start
         end_ts = _timestamp_ms()
