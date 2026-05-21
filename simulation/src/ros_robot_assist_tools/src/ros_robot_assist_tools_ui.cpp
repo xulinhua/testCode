@@ -151,24 +151,31 @@ void SetupAssistToolMenuBar(QMainWindow * window, QStackedWidget * stack, const 
   a_full->setCheckable(true);
   a_full->setShortcut(QKeySequence(Qt::Key_F11));
   auto * was_max_before_full = new bool(window->isMaximized());
-  QObject::connect(a_full, &QAction::toggled, [window, was_max_before_full](bool on) {
-    if (on) {
+  auto toggle_fullscreen = [window, a_full, was_max_before_full]() {
+    if (!window->isFullScreen()) {
       *was_max_before_full = window->isMaximized();
+      window->setWindowState(window->windowState() | Qt::WindowFullScreen);
       window->showFullScreen();
+      a_full->setChecked(true);
       return;
     }
+    window->setWindowState(window->windowState() & ~Qt::WindowFullScreen);
     if (*was_max_before_full) {
       window->showMaximized();
     } else {
       window->showNormal();
     }
+    a_full->setChecked(false);
+  };
+  QObject::connect(a_full, &QAction::triggered, [toggle_fullscreen]() {
+    toggle_fullscreen();
   });
   QAction * esc_exit = new QAction(window);
   esc_exit->setShortcut(QKeySequence(Qt::Key_Escape));
   window->addAction(esc_exit);
-  QObject::connect(esc_exit, &QAction::triggered, [a_full, window]() {
+  QObject::connect(esc_exit, &QAction::triggered, [toggle_fullscreen, window]() {
     if (window->isFullScreen()) {
-      a_full->setChecked(false);
+      toggle_fullscreen();
     }
   });
   QAction * a_status = m_view->addAction(QStringLiteral("显示状态栏(&S)"));

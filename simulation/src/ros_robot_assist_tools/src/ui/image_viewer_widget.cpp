@@ -114,10 +114,6 @@ ImageViewerWidget::ImageViewerWidget(QWidget * parent)
   auto * viewers_grid = new QGridLayout(viewers_container);
   viewers_grid->setSpacing(6);
   viewers_grid->setContentsMargins(0, 0, 0, 0);
-  viewers_grid->setRowStretch(0, 1);
-  viewers_grid->setRowStretch(1, 1);
-  viewers_grid->setColumnStretch(0, 1);
-  viewers_grid->setColumnStretch(1, 1);
   root->addWidget(viewers_container, 1);
 
   auto * log_box = new QTextEdit();
@@ -348,6 +344,41 @@ ImageViewerWidget::ImageViewerWidget(QWidget * parent)
 
   auto apply_visibility = [=]() {
     const int active = viewer_count_spin->value();
+
+    // 先从网格中移除旧布局项，再按当前窗口数量重排
+    while (viewers_grid->count() > 0) {
+      viewers_grid->takeAt(0);
+    }
+
+    // 重置网格行列拉伸，避免 1/2 视图时被固定 2x2 占比稀释
+    for (int r = 0; r < 3; ++r) {
+      viewers_grid->setRowStretch(r, 0);
+    }
+    for (int c = 0; c < 3; ++c) {
+      viewers_grid->setColumnStretch(c, 0);
+    }
+
+    if (active == 1) {
+      viewers_grid->addWidget(cards[0], 0, 0);
+      viewers_grid->setRowStretch(0, 1);
+      viewers_grid->setColumnStretch(0, 1);
+    } else if (active == 2) {
+      viewers_grid->addWidget(cards[0], 0, 0);
+      viewers_grid->addWidget(cards[1], 0, 1);
+      viewers_grid->setRowStretch(0, 1);
+      viewers_grid->setColumnStretch(0, 1);
+      viewers_grid->setColumnStretch(1, 1);
+    } else {
+      // 3/4 个时采用 2x2，保证整体拉伸比例稳定
+      for (int i = 0; i < active; ++i) {
+        viewers_grid->addWidget(cards[i], i / 2, i % 2);
+      }
+      viewers_grid->setRowStretch(0, 1);
+      viewers_grid->setRowStretch(1, 1);
+      viewers_grid->setColumnStretch(0, 1);
+      viewers_grid->setColumnStretch(1, 1);
+    }
+
     for (int i = 0; i < kMaxViewers; ++i) {
       cards[i]->setVisible(i < active);
       if (i >= active) {
