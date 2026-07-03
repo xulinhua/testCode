@@ -1,0 +1,35 @@
+[core]
+# reloadable=true 表示扩展支持热重载：在 Isaac Sim 扩展管理器中禁用/启用时，
+# Python 模块会重新加载。开发阶段很方便，但仍要注意清理 UI、Writer、事件订阅等资源。
+reloadable = true
+# 扩展加载顺序。数值越小越早加载；本插件不依赖其它自定义扩展，保持 0 即可。
+order = 0
+
+[package]
+# 扩展包信息会显示在 Isaac Sim Extension Manager 中。
+version = "1.0.1"
+category = "Simulation"
+title = "Ext_Grasing_Scene"
+description = "Grasping Scene Data Capture"
+authors = ["NVIDIA"]
+repository = ""
+keywords = []
+changelog = "docs/CHANGELOG.md"
+readme = "docs/README.md"
+preview_image = "data/preview.png"
+icon = "data/icon.png"
+
+
+[dependencies]
+# Isaac Sim/Omniverse 运行时依赖。
+# omni.kit.uiapp: 提供窗口、菜单、基础 UI 应用能力。
+"omni.kit.uiapp" = {}
+# isaacsim.gui.components: 使用 ScrollingWindow、按钮/输入框构建工具等 Isaac UI 封装。
+"isaacsim.gui.components" = {}
+# isaacsim.core.api: World、Prim、物理对象等 Isaac Core API。
+"isaacsim.core.api" = {}
+
+[[python.module]]
+# 扩展启用时会导入这个 Python 包；对应目录为 Ext_Grasing_Scene_python/。
+# __init__.py 会继续导入 extension.py，最终实例化 Extension 生命周期类。
+name = "Ext_Grasing_Scene_python"

@@ -1,0 +1,5 @@
+# sim_time_monitor
+module: sim_time_monitor
+enabled: true
+clock_topic: /clock
+refresh_hz: 2

@@ -1,0 +1,18 @@
+# 机械手 TCP（Tool Center Point）标定
+# 在同一物理接触点、不同姿态下采集法兰位姿，求解末端 TCP 在法兰坐标系下的平移偏移。
+pose_endpoint: /robot_pose
+control_endpoint: /robot_control
+mode: offline
+pose_csv: /tmp/tcp_poses.csv
+flange_frame: tool0
+min_poses: 4
+unit: m
+pose_format: quaternion
+pose_columns:
+  - tx
+  - ty
+  - tz
+  - qx
+  - qy
+  - qz
+  - qw

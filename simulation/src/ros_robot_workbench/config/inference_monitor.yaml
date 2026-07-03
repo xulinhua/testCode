@@ -1,0 +1,5 @@
+# inference_monitor
+module: inference_monitor
+enabled: true
+result_topic: /detections
+latency_warn_ms: 100.0

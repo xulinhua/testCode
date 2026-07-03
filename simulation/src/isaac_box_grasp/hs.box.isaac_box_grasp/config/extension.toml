@@ -1,0 +1,26 @@
+[core]
+reloadable = true
+order = 0
+
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "Hs Box Isaac Box Grasp"
+description = "Material box recognition and grasping: ROS camera stream, pose-driven grasp, calibration"
+authors = ["xlh"]
+keywords = ["grasp", "box", "ros2", "calibration"]
+readme = "docs/README.md"
+preview_image = "data/preview.png"
+icon = "data/icon.png"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"isaacsim.gui.components" = {}
+"isaacsim.core.api" = {}
+"isaacsim.ros2.bridge" = {}
+
+[[python.module]]
+name = "hs.box.isaac_box_grasp"
+
+[settings]
+exts."hs.box.isaac_box_grasp".timeout = 5

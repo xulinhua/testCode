@@ -1,0 +1,19 @@
+image_topic: /camera/image_raw
+# 手眼方式：eye_in_hand（眼在手上）或 eye_to_hand（眼在手外）
+handeye_setup: eye_in_hand
+# 离线：采集列表 CSV（首列为图像文件名，其余为位姿，图像与 CSV 同目录；可选，用于打开界面时预填路径）
+pose_csv: /tmp/poses.csv
+pose_endpoint: /robot_pose
+control_endpoint: /robot_control
+mode: offline
+board_type: aruco_gridboard
+algorithm: Tsai
+pose_format: quaternion
+pose_columns:
+  - tx
+  - ty
+  - tz
+  - qx
+  - qy
+  - qz
+  - qw

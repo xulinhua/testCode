@@ -1,0 +1,5 @@
+# lidar_cam_projection
+module: lidar_cam_projection
+enabled: true
+cloud_topic: /points
+image_topic: /camera/image_raw

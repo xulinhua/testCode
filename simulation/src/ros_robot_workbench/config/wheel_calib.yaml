@@ -1,0 +1,5 @@
+# wheel_calib
+module: wheel_calib
+enabled: true
+cmd_vel_topic: /cmd_vel
+track_width_m: 0.3

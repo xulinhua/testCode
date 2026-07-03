@@ -39,6 +39,9 @@ Thumbs.db
 # *.stl
 # *.dae
 
+# Redundant archive (source tree is tracked)
+simulation/src/data_collect_isaac/IsaacsimExtGrasping.zip
+
 # Files exceeding GitHub 100MB limit
 *.a
 project/src/perception/vision_alg/foundationpose_alg/ppl.cv/lib/

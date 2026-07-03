@@ -1,0 +1,5 @@
+# rl_policy_monitor
+module: rl_policy_monitor
+enabled: true
+obs_topic: /rl/observation
+action_topic: /rl/action

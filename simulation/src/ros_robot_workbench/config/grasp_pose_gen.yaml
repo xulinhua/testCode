@@ -1,0 +1,5 @@
+# grasp_pose_gen
+module: grasp_pose_gen
+enabled: true
+object_frame: object
+ee_frame: tool0

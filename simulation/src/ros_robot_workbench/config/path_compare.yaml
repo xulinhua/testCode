@@ -1,0 +1,5 @@
+# path_compare
+module: path_compare
+enabled: true
+path_topic_a: /plan_a
+path_topic_b: /plan_b

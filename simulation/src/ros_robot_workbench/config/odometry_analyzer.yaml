@@ -1,0 +1,5 @@
+# odometry_analyzer
+module: odometry_analyzer
+enabled: true
+odom_topic: /odom
+base_frame: base_link

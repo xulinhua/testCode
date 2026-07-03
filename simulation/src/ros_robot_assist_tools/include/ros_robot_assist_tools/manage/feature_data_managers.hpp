@@ -12,6 +12,7 @@
 #include "ros_robot_assist_tools/manage/pose_transform_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/stereo_calibration_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/system_status_data_manager.hpp"
+#include "ros_robot_assist_tools/manage/tcp_calibration_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/tf_viewer_data_manager.hpp"
 
 #endif  // ROS_ROBOT_ASSIST_TOOLS__MANAGE__FEATURE_DATA_MANAGERS_HPP_

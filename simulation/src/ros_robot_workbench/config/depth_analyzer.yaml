@@ -1,0 +1,4 @@
+# depth_analyzer
+module: depth_analyzer
+enabled: true
+depth_topic: /camera/depth/image_raw

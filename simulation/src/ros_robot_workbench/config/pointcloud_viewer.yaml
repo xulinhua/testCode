@@ -1,0 +1,5 @@
+# pointcloud_viewer
+module: pointcloud_viewer
+enabled: true
+cloud_topic: /points
+max_points_display: 50000

@@ -1,0 +1,1445 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>IsaacsimExtGrasping 抓取场景数据采集插件说明文档</title>
+<style>
+@page { size: A4; margin: 2.2cm 2.0cm 2.0cm 2.0cm; }
+body {
+  font-family: "Noto Serif CJK SC", "SimSun", "Microsoft YaHei", serif;
+  color: #111;
+  font-size: 11pt;
+  line-height: 1.65;
+  margin: 0;
+}
+h1 {
+  text-align: center;
+  font-size: 22pt;
+  font-weight: 700;
+  margin: 0 0 18pt 0;
+  line-height: 1.25;
+}
+h2 {
+  font-size: 15pt;
+  font-weight: 700;
+  margin: 22pt 0 10pt 0;
+  padding-bottom: 3pt;
+  border-bottom: 1px solid #999;
+  line-height: 1.35;
+}
+h3 {
+  font-size: 12.5pt;
+  font-weight: 700;
+  margin: 14pt 0 6pt 0;
+  line-height: 1.35;
+}
+p {
+  margin: 0 0 7pt 0;
+  text-indent: 2em;
+}
+h1 + p,
+h2 + p,
+h3 + p,
+table + p,
+pre + p {
+  text-indent: 0;
+}
+ul, ol {
+  margin: 4pt 0 9pt 2.2em;
+  padding: 0;
+}
+li {
+  margin: 0 0 4pt 0;
+  line-height: 1.55;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8pt 0 12pt 0;
+  font-size: 10.5pt;
+}
+th, td {
+  border: 1px solid #999;
+  padding: 5pt 6pt;
+  vertical-align: top;
+  line-height: 1.45;
+}
+th {
+  background: #eeeeee;
+  font-weight: 700;
+  text-align: center;
+}
+pre {
+  margin: 6pt 0 10pt 0;
+  padding: 7pt 9pt;
+  background: #f5f5f5;
+  border: 1px solid #d0d0d0;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-indent: 0;
+}
+code {
+  font-family: "Droid Sans Mono", "Consolas", "Courier New", monospace;
+  font-size: 9.5pt;
+  background: #f3f3f3;
+  padding: 1pt 2pt;
+}
+pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 9.5pt;
+}
+blockquote {
+  margin: 8pt 0 10pt 0;
+  padding: 6pt 10pt;
+  border-left: 4px solid #888;
+  background: #f7f7f7;
+}
+hr {
+  border: 0;
+  border-top: 1px solid #aaa;
+  margin: 16pt 0;
+}
+</style>
+</head>
+<body>
+<h1 id="isaacsimextgrasping">IsaacsimExtGrasping 抓取场景数据采集插件说明文档</h1>
+<p>适用项目：<code>/home/hs/testCode/simulation/src/data_collect_isaac/IsaacsimExtGrasping</code></p>
+<p>适用环境：Isaac Sim 5.0.0，Python 3.11，conda 环境 <code>isaac_env</code></p>
+<h2 id="1">1. 项目概述</h2>
+<h3 id="11">1.1 插件用途</h3>
+<p><code>IsaacsimExtGrasping</code> 是一个 Isaac Sim UI 扩展，用于在仿真环境中搭建桌面抓取数据采集场景。插件可以自动加载桌子、地面、灯光、相机和随机物体，并通过 Isaac Sim Replicator 采集多视角数据。</p>
+<p>本插件主要用于生成抓取、识别、分割、点云处理等任务所需的仿真数据。</p>
+<h3 id="12">1.2 适用场景</h3>
+<p>适合以下任务：</p>
+<ul>
+<li>桌面物体抓取场景构建。</li>
+<li>多类别物体随机摆放。</li>
+<li>RGB 图像采集。</li>
+<li>深度图采集。</li>
+<li>语义分割和实例分割采集。</li>
+<li>点云 NPY 和 PCD 文件导出。</li>
+<li>物体世界位姿记录。</li>
+</ul>
+<h3 id="13">1.3 整体工作流程</h3>
+<p>整体流程如下：</p>
+<pre><code class="language-text">启动 Isaac Sim
+  -&gt; 加载 IsaacsimExtGrasping 扩展
+  -&gt; 打开 Ext_Grasing_Scene UI
+  -&gt; 设置物体数量、类别、生成范围
+  -&gt; 点击 Load 创建场景
+  -&gt; 物体物理下落并稳定
+  -&gt; 设置相机采样和采集帧数
+  -&gt; 点击 Start 开始采集
+  -&gt; 写入 data_log/&lt;timestamp&gt;/ 输出目录
+</code></pre>
+<h2 id="2-isaac-sim">2. 从零搭建 Isaac Sim 扩展</h2>
+<h3 id="21-isaac-sim">2.1 Isaac Sim 扩展基本组成</h3>
+<p>一个 Isaac Sim 扩展通常包含以下部分：</p>
+<pre><code class="language-text">extension_root/
+  config/
+    extension.toml
+  python_module/
+    __init__.py
+    extension.py
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>config/extension.toml</code> 用于声明扩展的名称、版本、依赖、Python 模块入口。</li>
+<li><code>__init__.py</code> 用于让 Python 能识别当前目录为模块。</li>
+<li><code>extension.py</code> 通常定义一个继承 <code>omni.ext.IExt</code> 的类。</li>
+<li><code>on_startup()</code> 是扩展加载时执行的入口。</li>
+<li><code>on_shutdown()</code> 是扩展卸载时执行的清理入口。</li>
+</ul>
+<p>本项目是在 Isaac Sim 扩展模板基础上开发的，扩展名称为 <code>IsaacsimExtGrasping</code>，UI 标题为 <code>Ext_Grasing_Scene</code>。</p>
+<h3 id="22">2.2 扩展加载机制</h3>
+<p>Isaac Sim 启动时可以通过参数指定扩展目录和启用扩展：</p>
+<pre><code class="language-bash">--ext-folder &lt;扩展父目录&gt;
+--enable &lt;扩展目录名&gt;
+</code></pre>
+<p>本项目的扩展目录是：</p>
+<pre><code class="language-text">/home/hs/testCode/simulation/src/data_collect_isaac/IsaacsimExtGrasping
+</code></pre>
+<p>因此 <code>--ext-folder</code> 应该指向它的父目录：</p>
+<pre><code class="language-text">/home/hs/testCode/simulation/src/data_collect_isaac
+</code></pre>
+<p><code>--enable</code> 应该填写扩展目录名：</p>
+<pre><code class="language-text">IsaacsimExtGrasping
+</code></pre>
+<p>Isaac Sim 加载扩展后，会读取：</p>
+<pre><code class="language-text">IsaacsimExtGrasping/config/extension.toml
+</code></pre>
+<p>然后根据 <code>[[python.module]]</code> 中配置的模块名导入 Python 模块：</p>
+<pre><code class="language-toml">[[python.module]]
+name = &quot;Ext_Grasing_Scene_python&quot;
+</code></pre>
+<h3 id="23">2.3 本插件的搭建思路</h3>
+<p>本插件的开发思路可以拆成三层：</p>
+<p>第一层是 Isaac Sim 扩展层：</p>
+<ul>
+<li>注册扩展。</li>
+<li>创建菜单项。</li>
+<li>创建 UI 窗口。</li>
+<li>监听 Stage、Timeline、Physics 事件。</li>
+</ul>
+<p>第二层是场景构建层：</p>
+<ul>
+<li>创建地面。</li>
+<li>创建灯光。</li>
+<li>创建相机和 render product。</li>
+<li>加载桌子。</li>
+<li>随机加载物体。</li>
+<li>给物体添加语义标签、刚体、质量和碰撞。</li>
+</ul>
+<p>第三层是数据采集层：</p>
+<ul>
+<li>根据 UI 参数生成随机相机位姿。</li>
+<li>使用 Replicator 逐帧渲染。</li>
+<li>使用自定义 <code>LxWriter</code> 写出 RGB、深度、分割、点云和 PCD。</li>
+<li>保存当前物体位姿到 <code>info.json</code>。</li>
+</ul>
+<h2 id="3">3. 项目目录结构</h2>
+<h3 id="31">3.1 根目录说明</h3>
+<p>项目目录：</p>
+<pre><code class="language-text">IsaacsimExtGrasping/
+  config/
+  data/
+  data_log/
+  docs/
+  Ext_Grasing_Scene_python/
+</code></pre>
+<h3 id="32-config">3.2 <code>config/</code> 配置目录</h3>
+<pre><code class="language-text">config/
+  extension.toml
+</code></pre>
+<p><code>extension.toml</code> 是 Isaac Sim 扩展的核心配置文件。</p>
+<h3 id="33-ext_grasing_scene_python">3.3 <code>Ext_Grasing_Scene_python/</code> 代码目录</h3>
+<pre><code class="language-text">Ext_Grasing_Scene_python/
+  __init__.py
+  extension.py
+  ui_builder.py
+  lx_writer.py
+  util.py
+  global_variables.py
+  scenario.py
+  layouts.py
+</code></pre>
+<p>该目录是插件的 Python 主体代码目录。</p>
+<h3 id="34-data">3.4 <code>data/</code> 资源目录</h3>
+<pre><code class="language-text">data/
+  icon.png
+  preview.png
+  objects/
+  raw_data/
+</code></pre>
+<p><code>raw_data/</code> 下存放真实参与加载的模型资源。</p>
+<h3 id="35-data_log">3.5 <code>data_log/</code> 输出目录</h3>
+<p>采集结果会输出到：</p>
+<pre><code class="language-text">IsaacsimExtGrasping/data_log/
+</code></pre>
+<p>每次点击 <code>Start</code>，会自动创建一个时间戳目录。</p>
+<h3 id="36-docs">3.6 <code>docs/</code> 文档目录</h3>
+<pre><code class="language-text">docs/
+  README.md
+  CHANGELOG.md
+</code></pre>
+<p>这是扩展模板自带的文档目录。</p>
+<h2 id="4">4. 配置文件说明</h2>
+<h3 id="41-extensiontoml">4.1 <code>extension.toml</code> 文件作用</h3>
+<p>文件位置：</p>
+<pre><code class="language-text">IsaacsimExtGrasping/config/extension.toml
+</code></pre>
+<p>该文件告诉 Isaac Sim：</p>
+<ul>
+<li>这个扩展是否可热重载。</li>
+<li>扩展的标题、版本、描述。</li>
+<li>扩展需要哪些依赖。</li>
+<li>Python 模块入口在哪里。</li>
+</ul>
+<h3 id="42-core">4.2 <code>[core]</code> 配置说明</h3>
+<p>当前配置：</p>
+<pre><code class="language-toml">[core]
+reloadable = true
+order = 0
+</code></pre>
+<p>字段说明：</p>
+<ul>
+<li><code>reloadable = true</code>：表示扩展支持热重载。开发时修改代码后可以在 Extension Manager 中重载。</li>
+<li><code>order = 0</code>：表示扩展加载顺序。数值越小越早加载。</li>
+</ul>
+<h3 id="43-package">4.3 <code>[package]</code> 配置说明</h3>
+<p>当前配置中包含：</p>
+<pre><code class="language-toml">[package]
+version = &quot;1.0.1&quot;
+category = &quot;Simulation&quot;
+title = &quot;Ext_Grasing_Scene&quot;
+description = &quot;Grasping Scene Data Capture&quot;
+authors = [&quot;NVIDIA&quot;]
+changelog = &quot;docs/CHANGELOG.md&quot;
+readme = &quot;docs/README.md&quot;
+preview_image = &quot;data/preview.png&quot;
+icon = &quot;data/icon.png&quot;
+</code></pre>
+<p>主要字段：</p>
+<ul>
+<li><code>version</code>：扩展版本。</li>
+<li><code>category</code>：在 Extension Manager 中显示的分类。</li>
+<li><code>title</code>：扩展 UI 和菜单标题。</li>
+<li><code>description</code>：扩展说明。</li>
+<li><code>changelog</code>：更新日志路径。</li>
+<li><code>readme</code>：说明文档路径。</li>
+<li><code>preview_image</code> 和 <code>icon</code>：扩展显示图标。</li>
+</ul>
+<h3 id="44-dependencies">4.4 <code>[dependencies]</code> 依赖说明</h3>
+<p>当前依赖：</p>
+<pre><code class="language-toml">[dependencies]
+&quot;omni.kit.uiapp&quot; = {}
+&quot;isaacsim.gui.components&quot; = {}
+&quot;isaacsim.core.api&quot; = {}
+</code></pre>
+<p>含义：</p>
+<ul>
+<li><code>omni.kit.uiapp</code>：提供 Kit UI 应用基础能力。</li>
+<li><code>isaacsim.gui.components</code>：提供 Isaac Sim UI 组件，例如按钮、输入框、折叠面板等。</li>
+<li><code>isaacsim.core.api</code>：提供 World、Scene、Prim、物理世界等 Isaac Sim 核心 API。</li>
+</ul>
+<p>代码中还使用了 Replicator、USD、PhysX 等模块。这些模块由 Isaac Sim 环境提供。</p>
+<h3 id="45-pythonmodule">4.5 <code>[[python.module]]</code> 入口模块说明</h3>
+<p>当前配置：</p>
+<pre><code class="language-toml">[[python.module]]
+name = &quot;Ext_Grasing_Scene_python&quot;
+</code></pre>
+<p>Isaac Sim 会导入：</p>
+<pre><code class="language-python">import Ext_Grasing_Scene_python
+</code></pre>
+<p>因此该目录必须包含：</p>
+<pre><code class="language-text">Ext_Grasing_Scene_python/__init__.py
+</code></pre>
+<h2 id="5-python">5. Python 代码结构说明</h2>
+<h3 id="51-__init__py">5.1 <code>__init__.py</code> 模块入口</h3>
+<p>文件位置：</p>
+<pre><code class="language-text">Ext_Grasing_Scene_python/__init__.py
+</code></pre>
+<p>作用：</p>
+<ul>
+<li>声明当前目录是 Python 包。</li>
+<li>导入扩展类。</li>
+</ul>
+<p>典型逻辑：</p>
+<pre><code class="language-python">from .extension import *
+</code></pre>
+<p>Isaac Sim 加载 <code>Ext_Grasing_Scene_python</code> 模块后，会通过这里进一步导入 <code>extension.py</code>。</p>
+<h3 id="52-extensionpy">5.2 <code>extension.py</code> 扩展生命周期逻辑</h3>
+<p><code>extension.py</code> 是 Isaac Sim 扩展生命周期入口，核心类是：</p>
+<pre><code class="language-python">class Extension(omni.ext.IExt):
+</code></pre>
+<p>主要函数：</p>
+<ul>
+<li><code>on_startup(self, ext_id)</code>：扩展启动时执行。</li>
+<li><code>on_shutdown(self)</code>：扩展关闭或卸载时执行。</li>
+<li><code>_menu_callback(self)</code>：点击菜单时打开或关闭窗口。</li>
+<li><code>_build_ui(self)</code>：构建窗口内容。</li>
+<li><code>_on_timeline_event(self, event)</code>：监听播放、暂停、停止事件。</li>
+<li><code>_on_physics_step(self, step)</code>：监听物理步进。</li>
+<li><code>_on_stage_event(self, event)</code>：监听 Stage 打开、关闭事件。</li>
+</ul>
+<p>核心逻辑：</p>
+<pre><code class="language-text">on_startup()
+  -&gt; 创建 ScrollingWindow
+  -&gt; 注册菜单项
+  -&gt; 实例化 UIBuilder
+  -&gt; 准备 timeline、stage、physics 事件接口
+</code></pre>
+<h3 id="53-ui_builderpy-ui">5.3 <code>ui_builder.py</code> UI 和主业务逻辑</h3>
+<p><code>ui_builder.py</code> 是本插件最重要的文件，主要负责：</p>
+<ul>
+<li>创建 UI 控件。</li>
+<li>读取 UI 参数。</li>
+<li>加载和清理场景。</li>
+<li>生成桌子和随机物体。</li>
+<li>添加物理属性。</li>
+<li>添加语义标签。</li>
+<li>创建相机和 render product。</li>
+<li>调用采集逻辑。</li>
+<li>写出 <code>info.json</code>。</li>
+</ul>
+<p>核心类：</p>
+<pre><code class="language-python">class UIBuilder:
+</code></pre>
+<p>核心函数：</p>
+<ul>
+<li><code>build_ui()</code>：创建 UI。</li>
+<li><code>load_world()</code>：加载场景。</li>
+<li><code>apply_collision_to_mesh_children()</code>：给 mesh 子节点添加碰撞。</li>
+<li><code>set_obj_position()</code>：设置 Prim 位置。</li>
+<li><code>get_current_item_info()</code>：读取当前物体位姿。</li>
+<li><code>collect_data()</code>：执行采集。</li>
+<li><code>generate_frames()</code>：逐帧移动相机并触发采集。</li>
+<li><code>collection_on_button_click()</code>：Start 按钮回调。</li>
+</ul>
+<h3 id="54-lx_writerpy">5.4 <code>lx_writer.py</code> 数据写入逻辑</h3>
+<p><code>lx_writer.py</code> 定义自定义 Replicator Writer：</p>
+<pre><code class="language-python">class LxWriter(Writer):
+</code></pre>
+<p>作用：</p>
+<ul>
+<li>启用需要的 annotator。</li>
+<li>处理 Replicator 每帧输出的数据。</li>
+<li>写出 RGB、深度、分割、点云等文件。</li>
+<li>使用 Open3D 将点云保存为 PCD。</li>
+</ul>
+<p>文件末尾通过：</p>
+<pre><code class="language-python">WriterRegistry.register(LxWriter)
+</code></pre>
+<p>注册 writer，因此在采集时可以通过：</p>
+<pre><code class="language-python">rep.WriterRegistry.get(&quot;LxWriter&quot;)
+</code></pre>
+<p>获取并使用。</p>
+<h3 id="55-utilpy">5.5 <code>util.py</code> 相机位姿生成工具</h3>
+<p><code>util.py</code> 中主要函数：</p>
+<pre><code class="language-python">generate_camera_pose(cylinder_radius, cylinder_height, upper_cylinder_height, obj_xy, obj_radius)
+</code></pre>
+<p>作用：</p>
+<ul>
+<li>在圆柱区域内随机生成相机位置。</li>
+<li>在物体附近随机生成目标点。</li>
+<li>计算相机朝向目标点的旋转矩阵。</li>
+<li>输出相机位置、目标点、四元数和欧拉角。</li>
+</ul>
+<h3 id="56-global_variablespy">5.6 <code>global_variables.py</code> 全局配置变量</h3>
+<p>该文件定义全局变量：</p>
+<pre><code class="language-python">EXTENSION_TITLE = &quot;Ext_Grasing_Scene&quot;
+EXTENSION_DESCRIPTION = &quot;Grasping Scene Data Capture&quot;
+num_classes = 4
+class_names = ['bwb', 'sqm', 'yida', 'dingshuji']
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>class_names</code> 决定 UI 中显示哪些类别。</li>
+<li><code>num_classes</code> 决定类别数量。</li>
+<li>类别名称需要和 <code>data/raw_data/</code> 下的目录名对应。</li>
+</ul>
+<h3 id="57-scenariopy">5.7 <code>scenario.py</code> 模板场景逻辑</h3>
+<p><code>scenario.py</code> 是模板生成时自带的示例场景逻辑，当前项目主要业务并不依赖它。</p>
+<p>它展示了如何用 Isaac Sim API 控制 articulation 和物体运动。</p>
+<h3 id="58-layoutspy-ui">5.8 <code>layouts.py</code> UI 辅助布局</h3>
+<p><code>layouts.py</code> 是 UI 布局辅助文件，目前不是核心业务逻辑。</p>
+<h2 id="6">6. 插件启动逻辑</h2>
+<h3 id="61-isaac-sim">6.1 Isaac Sim 加载扩展</h3>
+<p>启动命令中包含：</p>
+<pre><code class="language-bash">--ext-folder /home/hs/testCode/simulation/src/data_collect_isaac
+--enable IsaacsimExtGrasping
+</code></pre>
+<p>Isaac Sim 会在 <code>--ext-folder</code> 中查找 <code>IsaacsimExtGrasping/config/extension.toml</code>。</p>
+<h3 id="62-python">6.2 Python 模块导入流程</h3>
+<p>导入链路：</p>
+<pre><code class="language-text">Ext_Grasing_Scene_python
+  -&gt; __init__.py
+  -&gt; extension.py
+  -&gt; ui_builder.py
+  -&gt; lx_writer.py
+  -&gt; util.py / global_variables.py
+</code></pre>
+<p>如果其中任何一个 import 失败，扩展都会启动失败。</p>
+<p>例如之前出现过：</p>
+<pre><code class="language-text">ModuleNotFoundError: No module named 'open3d'
+</code></pre>
+<p>原因是 <code>ui_builder.py</code> 导入 <code>lx_writer.py</code>，而 <code>lx_writer.py</code> 中导入了 <code>open3d</code>。</p>
+<h3 id="63-extensionon_startup">6.3 <code>Extension.on_startup()</code> 执行流程</h3>
+<p><code>on_startup()</code> 主要完成：</p>
+<pre><code class="language-text">保存 ext_id
+获取 USD context
+创建 ScrollingWindow
+注册菜单 action
+添加菜单项
+实例化 UIBuilder
+获取 PhysX、timeline 接口
+</code></pre>
+<h3 id="64">6.4 菜单项和窗口创建</h3>
+<p>扩展会创建一个标题为：</p>
+<pre><code class="language-text">Ext_Grasing_Scene
+</code></pre>
+<p>的窗口，并注册到 Isaac Sim 菜单中。</p>
+<p>点击菜单后执行 <code>_menu_callback()</code>：</p>
+<pre><code class="language-python">self._window.visible = not self._window.visible
+self.ui_builder.on_menu_callback()
+</code></pre>
+<h3 id="65-uibuilder">6.5 <code>UIBuilder</code> 初始化</h3>
+<p><code>UIBuilder.__init__()</code> 中初始化：</p>
+<ul>
+<li>UI frame 列表。</li>
+<li>timeline 接口。</li>
+<li>stage。</li>
+<li>按钮和输入框字典。</li>
+<li>相机、render product、地面、灯光、物体列表。</li>
+<li>类别列表。</li>
+<li><code>World(physics_dt=1.0 / 60.0)</code>。</li>
+<li>writer。</li>
+</ul>
+<h2 id="7-ui">7. UI 构建逻辑</h2>
+<h3 id="71-ui">7.1 UI 总体结构</h3>
+<p>UI 由 <code>build_ui()</code> 创建，主要包含一个折叠面板：</p>
+<pre><code class="language-python">selection_controls_frame = CollapsableFrame(&quot;Select Plane&quot;, collapsed=False)
+</code></pre>
+<p>面板中放置：</p>
+<ul>
+<li>物体数量输入框。</li>
+<li>类别复选框。</li>
+<li>物体生成范围输入框。</li>
+<li>Load 按钮。</li>
+<li>采集帧数输入框。</li>
+<li>相机采样参数输入框。</li>
+<li>Start 按钮。</li>
+</ul>
+<h3 id="72">7.2 物体数量配置</h3>
+<p>UI 字段：</p>
+<pre><code class="language-text">Number of objects
+</code></pre>
+<p>默认值：</p>
+<pre><code class="language-text">10
+</code></pre>
+<p>代码读取：</p>
+<pre><code class="language-python">item_count = self._line_edit['num_obj'].get_value_as_int()
+</code></pre>
+<p>它决定生成几个随机物体：</p>
+<pre><code class="language-text">/World/obj_0
+/World/obj_1
+...
+</code></pre>
+<h3 id="73">7.3 类别复选框配置</h3>
+<p>类别来自：</p>
+<pre><code class="language-python">class_names = ['bwb', 'sqm', 'yida', 'dingshuji']
+</code></pre>
+<p>UI 中每个类别对应一个 checkbox。勾选状态会更新：</p>
+<pre><code class="language-python">self._classes_select
+</code></pre>
+<p>物体随机生成时，只会从 <code>self._classes_select</code> 对应的目录中选择 USD 文件。</p>
+<h3 id="74">7.4 物体生成范围配置</h3>
+<p>UI 字段：</p>
+<pre><code class="language-text">Spawn x min
+Spawn x max
+Spawn y min
+Spawn y max
+</code></pre>
+<p>这些参数决定物体初始生成位置的 XY 随机范围。</p>
+<p>代码逻辑：</p>
+<pre><code class="language-python">x = random.uniform(x_min, x_max)
+y = random.uniform(y_min, y_max)
+z = 2
+self.set_obj_position(prim_path, (x, y, z))
+</code></pre>
+<p>物体初始放在 <code>z=2</code>，后续依靠物理下落。</p>
+<h3 id="75-load">7.5 <code>Load</code> 按钮逻辑</h3>
+<p>Load 按钮绑定：</p>
+<pre><code class="language-python">on_clicked_fn = self.load_world
+</code></pre>
+<p>点击后执行：</p>
+<pre><code class="language-text">load_world()
+  -&gt; 创建地面
+  -&gt; 创建灯光
+  -&gt; 创建相机
+  -&gt; 创建桌子
+  -&gt; 随机创建物体
+  -&gt; 添加语义和物理属性
+  -&gt; world.reset()
+</code></pre>
+<h3 id="76">7.6 采集帧数配置</h3>
+<p>UI 字段：</p>
+<pre><code class="language-text">Number of shots
+</code></pre>
+<p>默认值：</p>
+<pre><code class="language-text">20
+</code></pre>
+<p>代码读取：</p>
+<pre><code class="language-python">shots_count = self._line_edit['num_of_shots'].get_value_as_int()
+</code></pre>
+<p>该值决定采集多少帧。</p>
+<h3 id="77">7.7 相机采样参数配置</h3>
+<p>UI 字段：</p>
+<pre><code class="language-text">cylinder_radius
+cylinder_height
+upper_cylinder_height
+obj_x
+obj_y
+obj_radius
+</code></pre>
+<p>这些参数传给：</p>
+<pre><code class="language-python">generate_camera_pose()
+</code></pre>
+<p>用于随机生成每一帧的相机位姿。</p>
+<h3 id="78-start">7.8 <code>Start</code> 按钮逻辑</h3>
+<p>Start 按钮绑定：</p>
+<pre><code class="language-python">on_clicked_fn = self.collection_on_button_click
+</code></pre>
+<p>点击后会异步执行：</p>
+<pre><code class="language-text">collection_on_button_click()
+  -&gt; _run_collection()
+  -&gt; collect_data()
+</code></pre>
+<p>代码中使用 <code>_is_collecting</code> 防止重复点击。</p>
+<h2 id="8">8. 场景加载逻辑</h2>
+<h3 id="81-load_world">8.1 <code>load_world()</code> 总体流程</h3>
+<p><code>load_world()</code> 是创建场景的核心函数。</p>
+<p>总体流程：</p>
+<pre><code class="language-text">清理 UI 包装元素
+创建默认地面
+给地面添加语义标签
+获取当前 stage
+创建灯光
+创建相机和 render product
+加载桌子
+读取 UI 物体数量和生成范围
+清理旧物体
+收集类别 USD 路径
+随机生成物体
+添加语义、刚体、质量、碰撞
+world.reset()
+</code></pre>
+<h3 id="82">8.2 创建地面</h3>
+<p>地面创建代码：</p>
+<pre><code class="language-python">self.ground = self.world.scene.add_default_ground_plane()
+</code></pre>
+<p>然后添加语义标签：</p>
+<pre><code class="language-python">add_update_semantics(self.ground.prim, &quot;ground&quot;, &quot;select_classes&quot;)
+</code></pre>
+<p>这里的语义类型是：</p>
+<pre><code class="language-text">select_classes
+</code></pre>
+<h3 id="83">8.3 创建灯光</h3>
+<p>灯光路径：</p>
+<pre><code class="language-text">/World/DefaultLight
+</code></pre>
+<p>灯光类型：</p>
+<pre><code class="language-python">UsdLux.DistantLight
+</code></pre>
+<p>设置内容：</p>
+<ul>
+<li>intensity：3000</li>
+<li>color：略偏暖色</li>
+<li>angle：0.53</li>
+<li>rotation：由代码计算欧拉角后写入</li>
+</ul>
+<h3 id="84-render-product">8.4 创建相机和 Render Product</h3>
+<p>相机创建：</p>
+<pre><code class="language-python">self.camera = rep.create.camera(position=(0, 0, 1))
+</code></pre>
+<p>Render Product 创建：</p>
+<pre><code class="language-python">self.render_product = rep.create.render_product(self.camera, (640, 480))
+</code></pre>
+<p>当前采集分辨率是：</p>
+<pre><code class="language-text">640 x 480
+</code></pre>
+<p>如需修改分辨率，可改这里。</p>
+<h3 id="85-obj_mz">8.5 加载桌子模型 <code>obj_mz</code></h3>
+<p>桌子 Prim 路径：</p>
+<pre><code class="language-text">/World/obj_mz
+</code></pre>
+<p>当前加载资源：</p>
+<pre><code class="language-text">data/raw_data/mz/mz.usd
+</code></pre>
+<p>代码使用相对插件目录计算绝对路径：</p>
+<pre><code class="language-python">parent_folder = os.path.split(__file__)[0]
+table_usd_path = os.path.abspath(os.path.join(parent_folder, &quot;..&quot;, &quot;data&quot;, &quot;raw_data&quot;, &quot;mz&quot;, &quot;mz.usd&quot;))
+</code></pre>
+<p>桌子加载后添加语义：</p>
+<pre><code class="language-python">add_update_semantics(added_obj, &quot;mz&quot;, &quot;select_classes&quot;)
+</code></pre>
+<p>桌子缩放：</p>
+<pre><code class="language-python">xform.AddScaleOp().Set(Gf.Vec3d(2.5, 2.5, 2.5))
+</code></pre>
+<h3 id="86-obj_0-obj_n">8.6 随机加载物体 <code>obj_0 ~ obj_N</code></h3>
+<p>物体资源从以下目录中选择：</p>
+<pre><code class="language-text">data/raw_data/bwb/
+data/raw_data/sqm/
+data/raw_data/yida/
+data/raw_data/dingshuji/
+</code></pre>
+<p>代码会遍历所选类别目录，收集 <code>.usd</code>、<code>.usda</code>、<code>.usdc</code> 文件。</p>
+<p>生成物体 Prim 路径：</p>
+<pre><code class="language-python">prim_path = f&quot;/World/obj_{i}&quot;
+</code></pre>
+<p>加载资源：</p>
+<pre><code class="language-python">added_obj = add_reference_to_stage(usd_path=obj_path, prim_path=prim_path)
+</code></pre>
+<h3 id="87">8.7 添加语义标签</h3>
+<p>物体的语义标签来自 USD 文件名：</p>
+<pre><code class="language-python">semantic_label = obj_path.split(&quot;/&quot;)[-1].rsplit('.', 1)[0]
+</code></pre>
+<p>例如：</p>
+<pre><code class="language-text">data/raw_data/sqm/sqm.usd -&gt; semantic_label = &quot;sqm&quot;
+</code></pre>
+<p>如果该标签在当前选择类别中，则添加：</p>
+<pre><code class="language-python">add_update_semantics(added_obj, semantic_label, &quot;select_classes&quot;)
+</code></pre>
+<h3 id="88">8.8 添加刚体和质量属性</h3>
+<p>对每个物体应用刚体：</p>
+<pre><code class="language-python">UsdPhysics.RigidBodyAPI.Apply(obj_prim)
+</code></pre>
+<p>应用质量：</p>
+<pre><code class="language-python">mass_api = UsdPhysics.MassAPI.Apply(obj_prim)
+mass_attr.Set(0.1)
+</code></pre>
+<p>桌子的质量设置为：</p>
+<pre><code class="language-python">mass_attr.Set(10)
+</code></pre>
+<h3 id="89">8.9 添加碰撞属性</h3>
+<p>碰撞添加函数：</p>
+<pre><code class="language-python">apply_collision_to_mesh_children(parent_prim)
+</code></pre>
+<p>该函数递归遍历 parent prim 下所有 mesh/cube/sphere/cylinder/capsule 子节点，并应用：</p>
+<pre><code class="language-python">UsdPhysics.CollisionAPI.Apply(child_prim)
+UsdPhysics.MeshCollisionAPI.Apply(child_prim)
+meshcollsion_api.GetApproximationAttr().Set(meshOptions[2])
+</code></pre>
+<p><code>meshOptions[2]</code> 对应：</p>
+<pre><code class="language-text">convexHull
+</code></pre>
+<h3 id="810">8.10 重置物理世界</h3>
+<p>场景构建完成后执行：</p>
+<pre><code class="language-python">self.world.reset()
+</code></pre>
+<p>这会让 Isaac Sim 初始化刚体和碰撞状态。</p>
+<h2 id="9">9. 资源组织与类别管理</h2>
+<h3 id="91-dataraw_data">9.1 <code>data/raw_data/</code> 目录结构</h3>
+<p>当前目录：</p>
+<pre><code class="language-text">data/raw_data/
+  bwb/
+  sqm/
+  yida/
+  dingshuji/
+  mz/
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>bwb</code>、<code>sqm</code>、<code>yida</code>、<code>dingshuji</code> 是随机物体类别。</li>
+<li><code>mz</code> 是桌子资源。</li>
+</ul>
+<h3 id="92">9.2 物体类别目录说明</h3>
+<p>每个类别目录中通常包含：</p>
+<pre><code class="language-text">&lt;class_name&gt;.usd
+&lt;class_name&gt;.obj
+material.mtl
+textures/
+</code></pre>
+<p>插件目前主要加载 <code>.usd</code> 文件。</p>
+<h3 id="93-usdobj">9.3 USD、OBJ、贴图文件关系</h3>
+<p>USD 文件可能引用 OBJ、材质和贴图。为了项目可迁移，USD 中应尽量使用相对路径，不要使用旧机器的绝对路径。</p>
+<p>正确示例：</p>
+<pre><code class="language-text">textures/material_0.jpeg
+</code></pre>
+<p>不推荐：</p>
+<pre><code class="language-text">/home/yz/ycl/exts/IsaacsimExtGrasping/...
+</code></pre>
+<h3 id="94-class_names">9.4 <code>class_names</code> 和类别目录对应关系</h3>
+<p><code>global_variables.py</code> 中：</p>
+<pre><code class="language-python">class_names = ['bwb', 'sqm', 'yida', 'dingshuji']
+</code></pre>
+<p>应与目录名对应：</p>
+<pre><code class="language-text">data/raw_data/bwb
+data/raw_data/sqm
+data/raw_data/yida
+data/raw_data/dingshuji
+</code></pre>
+<h3 id="95">9.5 新增类别的文件要求</h3>
+<p>新增类别时，建议满足：</p>
+<ul>
+<li>目录名等于类别名。</li>
+<li>USD 文件名等于类别名。</li>
+<li>USD 内部子 Prim 名称包含类别名。</li>
+<li>贴图路径使用相对路径。</li>
+</ul>
+<h2 id="10">10. 物理与碰撞逻辑</h2>
+<h3 id="101-isaac-sim">10.1 Isaac Sim 物理世界</h3>
+<p>插件创建 World：</p>
+<pre><code class="language-python">self.world = World(physics_dt=1.0 / 60.0)
+</code></pre>
+<p>物理步长为：</p>
+<pre><code class="language-text">1 / 60 秒
+</code></pre>
+<h3 id="102-rigidbodyapi">10.2 <code>RigidBodyAPI</code> 作用</h3>
+<p><code>RigidBodyAPI</code> 让一个 Prim 参与刚体物理仿真。</p>
+<p>如果物体没有刚体属性，它不会正常受重力和碰撞影响。</p>
+<h3 id="103-massapi">10.3 <code>MassAPI</code> 作用</h3>
+<p><code>MassAPI</code> 用于设置质量。</p>
+<p>质量影响物理仿真的运动、碰撞响应和稳定性。</p>
+<h3 id="104-collisionapi">10.4 <code>CollisionAPI</code> 作用</h3>
+<p><code>CollisionAPI</code> 让几何体具备碰撞能力。</p>
+<p>只给外层 Prim 添加碰撞通常不够，因为真实 mesh 可能在子 Prim 下，所以代码递归处理所有子节点。</p>
+<h3 id="105-meshcollisionapi-convexhull">10.5 <code>MeshCollisionAPI</code> 和 <code>convexHull</code></h3>
+<p><code>MeshCollisionAPI</code> 用于给 mesh 指定碰撞近似方式。</p>
+<p>当前设置为：</p>
+<pre><code class="language-text">convexHull
+</code></pre>
+<p>这会用凸包近似 mesh 形状，通常比完整三角网格碰撞更稳定、更快。</p>
+<h3 id="106">10.6 物体下落与稳定过程</h3>
+<p>随机物体初始设置：</p>
+<pre><code class="language-python">z = 2
+</code></pre>
+<p>也就是说物体会从高处掉落到桌面上。</p>
+<p>建议操作：</p>
+<pre><code class="language-text">Load 后点击 Play
+等待物体稳定
+停止或保持仿真
+再点击 Start 采集
+</code></pre>
+<h2 id="11_1">11. 相机位姿生成逻辑</h2>
+<h3 id="111">11.1 相机采样区域定义</h3>
+<p>相机位置在一个圆柱体区域中随机生成。</p>
+<p>圆柱体参数：</p>
+<ul>
+<li>半径：<code>cylinder_radius</code></li>
+<li>基础高度：<code>cylinder_height</code></li>
+<li>额外高度：<code>upper_cylinder_height</code></li>
+</ul>
+<h3 id="112">11.2 圆柱体随机采样参数</h3>
+<p>相机 XY 坐标由：</p>
+<pre><code class="language-python">random_point_in_circle(cylinder_radius)
+</code></pre>
+<p>随机生成。</p>
+<p>相机 Z 坐标由：</p>
+<pre><code class="language-python">np.random.uniform(cylinder_height, cylinder_height + upper_cylinder_height)
+</code></pre>
+<p>随机生成。</p>
+<h3 id="113">11.3 目标点随机生成</h3>
+<p>目标点在物体附近圆形区域中随机生成：</p>
+<pre><code class="language-python">target_xy = random_point_in_circle(obj_radius)
+target_xy = target_xy + obj_xy
+target_point = np.array([target_xy[0], target_xy[1], 0.0])
+</code></pre>
+<h3 id="114">11.4 相机朝向计算</h3>
+<p>相机方向向量：</p>
+<pre><code class="language-python">direction = target_point - camera_position
+direction_normalized = direction / np.linalg.norm(direction)
+</code></pre>
+<p>代码构造旋转矩阵，使相机朝向目标点。</p>
+<h3 id="115">11.5 四元数和欧拉角输出</h3>
+<p><code>generate_camera_pose()</code> 返回：</p>
+<pre><code class="language-python">{
+    &quot;camera_position&quot;: camera_position,
+    &quot;target_point&quot;: target_point,
+    &quot;quaternion&quot;: quaternion,
+    &quot;euler_angles&quot;: euler_angles
+}
+</code></pre>
+<p>采集时实际使用欧拉角，并做了一个偏移：</p>
+<pre><code class="language-python">rot = pose['euler_angles'].copy()
+rot[1] -= 90
+rep.modify.pose(position=pose['camera_position'], rotation=rot)
+</code></pre>
+<h2 id="12_1">12. 数据采集逻辑</h2>
+<h3 id="121-start">12.1 点击 <code>Start</code> 后的执行链路</h3>
+<p>执行链路：</p>
+<pre><code class="language-text">Start 按钮
+  -&gt; collection_on_button_click()
+  -&gt; asyncio.ensure_future(self._run_collection())
+  -&gt; _run_collection()
+  -&gt; collect_data()
+  -&gt; generate_frames()
+</code></pre>
+<h3 id="122-collection_on_button_click">12.2 <code>collection_on_button_click()</code></h3>
+<p>该函数用于防止重复采集：</p>
+<pre><code class="language-python">if getattr(self, &quot;_is_collecting&quot;, False):
+    print(&quot;正在采集中，请勿重复点击&quot;)
+    return
+</code></pre>
+<p>如果当前没有采集，则设置：</p>
+<pre><code class="language-python">self._is_collecting = True
+</code></pre>
+<p>然后异步执行 <code>_run_collection()</code>。</p>
+<h3 id="123-_run_collection">12.3 <code>_run_collection()</code></h3>
+<p>该函数保证采集结束后恢复状态：</p>
+<pre><code class="language-python">try:
+    await self.collect_data()
+finally:
+    self._is_collecting = False
+</code></pre>
+<h3 id="124-collect_data">12.4 <code>collect_data()</code></h3>
+<p><code>collect_data()</code> 是采集主函数。</p>
+<p>主要步骤：</p>
+<pre><code class="language-text">检查是否有物体
+检查 work_dir
+读取采集帧数
+读取当前物体位姿
+创建时间戳输出目录
+写 info.json
+初始化 LxWriter
+绑定 render product
+读取相机采样参数
+调用 generate_frames()
+detach writer
+</code></pre>
+<h3 id="125">12.5 输出目录创建</h3>
+<p>输出目录由时间戳生成：</p>
+<pre><code class="language-python">folder_name = time.strftime(&quot;%Y_%m_%d_%H_%M_%S&quot;)
+abs_folder_path = self.collector_folder_prep(folder_name)
+</code></pre>
+<p>最终路径示例：</p>
+<pre><code class="language-text">IsaacsimExtGrasping/data_log/2026_05_14_09_44_05/
+</code></pre>
+<h3 id="126-infojson">12.6 <code>info.json</code> 写入</h3>
+<p>写入内容包括：</p>
+<pre><code class="language-python">info['camera_info'] = camera_info
+info['objects'] = current_info
+</code></pre>
+<p><code>objects</code> 中记录每个随机物体的：</p>
+<ul>
+<li>名称。</li>
+<li>世界坐标 translation。</li>
+<li>四元数 quat。</li>
+</ul>
+<p>注意：该列表不包含桌子 <code>obj_mz</code>。</p>
+<h3 id="127-writer">12.7 Writer 初始化和绑定</h3>
+<p>代码：</p>
+<pre><code class="language-python">self.writter = rep.WriterRegistry.get(&quot;LxWriter&quot;)
+self.writter.initialize(
+    output_dir=abs_folder_path,
+    pointcloud=True,
+    rgb=True,
+    distance_to_camera=True,
+    semantic_segmentation=True,
+    semantic_types=[&quot;select_classes&quot;]
+)
+self.writter.attach([self.render_product])
+</code></pre>
+<p>其中 <code>semantic_types=["select_classes"]</code> 必须和前面添加语义标签时的类型一致。</p>
+<h3 id="128-generate_frames">12.8 <code>generate_frames()</code> 逐帧采集</h3>
+<p>每一帧都会：</p>
+<pre><code class="language-text">生成随机相机位姿
+修改相机 pose
+调用 rep.orchestrator.step_async()
+Writer 写出当前帧数据
+</code></pre>
+<p>关键调用：</p>
+<pre><code class="language-python">await rep.orchestrator.step_async(
+    rt_subframes=8,
+    delta_time=None,
+    pause_timeline=False
+)
+</code></pre>
+<h2 id="13-writer">13. Writer 写数据逻辑</h2>
+<h3 id="131-lxwriter">13.1 <code>LxWriter</code> 注册机制</h3>
+<p><code>lx_writer.py</code> 继承 Isaac Replicator 的 <code>Writer</code>：</p>
+<pre><code class="language-python">class LxWriter(Writer):
+</code></pre>
+<p>文件末尾注册：</p>
+<pre><code class="language-python">WriterRegistry.register(LxWriter)
+</code></pre>
+<p>注册后才能通过：</p>
+<pre><code class="language-python">rep.WriterRegistry.get(&quot;LxWriter&quot;)
+</code></pre>
+<p>获取。</p>
+<h3 id="132-annotator">13.2 Annotator 配置</h3>
+<p><code>LxWriter.__init__()</code> 根据参数启用 annotator：</p>
+<ul>
+<li><code>rgb</code></li>
+<li><code>distance_to_camera</code></li>
+<li><code>semantic_segmentation</code></li>
+<li><code>instance_id_segmentation</code></li>
+<li><code>pointcloud</code></li>
+<li>其他可选 annotator</li>
+</ul>
+<p>每个 annotator 会在每一帧返回对应类型数据。</p>
+<h3 id="133-rgb">13.3 RGB 图像写入</h3>
+<p>函数：</p>
+<pre><code class="language-python">_write_rgb()
+</code></pre>
+<p>输出文件：</p>
+<pre><code class="language-text">rgb_0000.png
+rgb_0001.png
+...
+</code></pre>
+<h3 id="134">13.4 深度数据写入</h3>
+<p>函数：</p>
+<pre><code class="language-python">_write_distance_to_camera()
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">distance_to_camera_0000.npy
+</code></pre>
+<p>该文件保存的是 NumPy 数组。</p>
+<h3 id="135">13.5 语义分割写入</h3>
+<p>函数：</p>
+<pre><code class="language-python">_write_semantic_segmentation()
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">semantic_segmentation_0000.png
+semantic_segmentation_labels_0000.json
+</code></pre>
+<p>JSON 文件记录 ID 到标签的映射。</p>
+<h3 id="136">13.6 实例分割写入</h3>
+<p>函数：</p>
+<pre><code class="language-python">_write_instance_id_segmentation()
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">instance_id_segmentation_0000.png
+instance_id_segmentation_mapping_0000.json
+</code></pre>
+<h3 id="137-npy">13.7 点云 NPY 写入</h3>
+<p>函数：</p>
+<pre><code class="language-python">_write_pointcloud()
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">pointcloud_0000.npy
+pointcloud_rgb_0000.npy
+pointcloud_normals_0000.npy
+pointcloud_semantic_0000.npy
+pointcloud_instance_0000.npy
+</code></pre>
+<h3 id="138-pcd">13.8 PCD 文件写入</h3>
+<p>函数：</p>
+<pre><code class="language-python">lxSavePCD()
+</code></pre>
+<p>使用 Open3D：</p>
+<pre><code class="language-python">pc = o3d.geometry.PointCloud()
+pc.points = o3d.utility.Vector3dVector(...)
+pc.colors = o3d.utility.Vector3dVector(...)
+o3d.io.write_point_cloud(full_path, pc)
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">lx_data_0000.pcd
+</code></pre>
+<h2 id="14">14. 输出数据结构说明</h2>
+<h3 id="141">14.1 输出目录命名规则</h3>
+<p>每次采集一个目录：</p>
+<pre><code class="language-text">data_log/YYYY_MM_DD_HH_MM_SS/
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">data_log/2026_05_14_09_44_05/
+</code></pre>
+<h3 id="142-infojson">14.2 <code>info.json</code> 内容说明</h3>
+<p><code>info.json</code> 结构：</p>
+<pre><code class="language-json">{
+  &quot;camera_info&quot;: [[...], [...], [...]],
+  &quot;objects&quot;: [
+    {
+      &quot;name&quot;: &quot;sqm&quot;,
+      &quot;translation&quot;: [x, y, z],
+      &quot;quat&quot;: [w, x, y, z]
+    }
+  ]
+}
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>translation</code> 是世界坐标。</li>
+<li><code>quat</code> 是世界旋转四元数。</li>
+<li>记录的是随机生成物体，不记录桌子。</li>
+</ul>
+<h3 id="143-rgb_png">14.3 <code>rgb_*.png</code></h3>
+<p>RGB 彩色图像。</p>
+<p>命名：</p>
+<pre><code class="language-text">rgb_0000.png
+rgb_0001.png
+...
+</code></pre>
+<h3 id="144-distance_to_camera_npy">14.4 <code>distance_to_camera_*.npy</code></h3>
+<p>相机深度数据，NumPy 格式。</p>
+<h3 id="145-semantic_segmentation_png">14.5 <code>semantic_segmentation_*.png</code></h3>
+<p>语义分割图像。</p>
+<h3 id="146-semantic_segmentation_labels_json">14.6 <code>semantic_segmentation_labels_*.json</code></h3>
+<p>语义 ID 和标签映射文件。</p>
+<h3 id="147-instance_id_segmentation_png">14.7 <code>instance_id_segmentation_*.png</code></h3>
+<p>实例 ID 分割图。</p>
+<h3 id="148-instance_id_segmentation_mapping_json">14.8 <code>instance_id_segmentation_mapping_*.json</code></h3>
+<p>实例 ID 映射文件。</p>
+<h3 id="149-pointcloud_npy">14.9 <code>pointcloud_*.npy</code></h3>
+<p>点云 XYZ 坐标。</p>
+<h3 id="1410-pointcloud_rgb_npy">14.10 <code>pointcloud_rgb_*.npy</code></h3>
+<p>点云每个点对应的 RGB 颜色。</p>
+<h3 id="1411-pointcloud_semantic_npy">14.11 <code>pointcloud_semantic_*.npy</code></h3>
+<p>点云每个点对应的语义类别。</p>
+<h3 id="1412-pointcloud_instance_npy">14.12 <code>pointcloud_instance_*.npy</code></h3>
+<p>点云每个点对应的实例 ID。</p>
+<h3 id="1413-lx_data_pcd">14.13 <code>lx_data_*.pcd</code></h3>
+<p>PCD 格式点云文件，可使用 Open3D、PCL、CloudCompare 等工具打开。</p>
+<h2 id="15-stage">15. Stage 结构说明</h2>
+<h3 id="151-world">15.1 <code>/World</code> 根节点</h3>
+<p>插件创建的主要对象都位于：</p>
+<pre><code class="language-text">/World
+</code></pre>
+<h3 id="152-worldobj_mz">15.2 <code>/World/obj_mz</code> 桌子模型</h3>
+<p><code>obj_mz</code> 是桌子。</p>
+<p>它不属于随机物体列表，不会写入 <code>info.json</code> 的 <code>objects</code>。</p>
+<h3 id="153-worldobj_0-obj_n">15.3 <code>/World/obj_0 ~ obj_N</code> 随机物体容器</h3>
+<p><code>obj_0</code> 到 <code>obj_N</code> 是随机生成物体的外层容器。</p>
+<p>例如设置 <code>Number of objects = 10</code> 时，会生成：</p>
+<pre><code class="language-text">/World/obj_0
+/World/obj_1
+...
+/World/obj_9
+</code></pre>
+<h3 id="154-prim-mesh">15.4 子 Prim 和真实 Mesh</h3>
+<p>真实模型通常在 <code>obj_i</code> 的子节点下。</p>
+<p>也就是说：</p>
+<pre><code class="language-text">/World/obj_0
+</code></pre>
+<p>可能只是外层引用容器，真实 mesh 可能在：</p>
+<pre><code class="language-text">/World/obj_0/sqm
+</code></pre>
+<p>或类似路径中。</p>
+<h3 id="155">15.5 语义标签所在位置</h3>
+<p>代码对加载返回的 prim 添加语义标签：</p>
+<pre><code class="language-python">add_update_semantics(added_obj, semantic_label, &quot;select_classes&quot;)
+</code></pre>
+<p>点云和分割数据会根据语义标签生成。</p>
+<h3 id="156-stage">15.6 Stage 面板中节点与采集数据的关系</h3>
+<p>Stage 面板中看到的外层 <code>obj_i</code> 不一定等于 <code>info.json</code> 中记录位姿的实际节点。</p>
+<p><code>get_current_item_info()</code> 会在 <code>obj_i</code> 的子节点中查找名称包含类别名的 Prim，然后计算该子 Prim 的 world transform。</p>
+<h2 id="16">16. 坐标系与位姿说明</h2>
+<h3 id="161-isaac-sim">16.1 Isaac Sim 世界坐标系</h3>
+<p>Isaac Sim 使用三维世界坐标系。</p>
+<p>本插件中的物体、桌子、相机都位于同一个世界坐标系中。</p>
+<h3 id="162-z-up">16.2 Z-up 和单位米</h3>
+<p>Isaac Sim 默认使用 Z-up：</p>
+<pre><code class="language-text">X/Y：水平平面
+Z：高度方向
+</code></pre>
+<p>单位是米。</p>
+<h3 id="163-prim">16.3 外层 Prim 坐标</h3>
+<p><code>/World/obj_0</code> 这类外层 Prim 的坐标通常是引用容器坐标。</p>
+<p>它不一定代表真实几何中心。</p>
+<h3 id="164-prim">16.4 子 Prim 世界坐标</h3>
+<p>真实 mesh 子节点可能有自己的局部 transform。</p>
+<p><code>info.json</code> 中更接近记录的是子 Prim 的世界坐标。</p>
+<h3 id="165">16.5 模型原点和几何中心差异</h3>
+<p>模型原点由建模或导出时决定，可能在：</p>
+<ul>
+<li>几何中心。</li>
+<li>底部中心。</li>
+<li>角落。</li>
+<li>扫描模型的任意参考位置。</li>
+</ul>
+<p>所以坐标和肉眼看到的“物体中心”可能不一致。</p>
+<h3 id="166">16.6 相机坐标与世界坐标差异</h3>
+<p>采集图像和点云由相机生成。</p>
+<p>相机坐标系和世界坐标系不同，需要通过相机外参转换。</p>
+<p>当前 <code>info.json</code> 保存了相机内参，但没有完整逐帧外参记录。</p>
+<h3 id="167">16.7 点云坐标解释</h3>
+<p>Replicator pointcloud annotator 输出的点云坐标需要结合 Isaac Sim annotator 的定义理解。使用时要确认它是相机坐标还是世界坐标输出。</p>
+<p>如果要和 <code>info.json</code> 中的物体世界坐标对齐，需要明确坐标系转换关系。</p>
+<h3 id="168-infojson">16.8 <code>info.json</code> 中物体位姿解释</h3>
+<p><code>info.json</code> 中每个物体：</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;...&quot;,
+  &quot;translation&quot;: [...],
+  &quot;quat&quot;: [...]
+}
+</code></pre>
+<p>表示插件找到的物体子 Prim 的世界位姿。</p>
+<p>如果和 Stage 面板中外层 <code>obj_i</code> 不一致，应展开 <code>obj_i</code> 查看子 Prim。</p>
+<h2 id="17">17. 插件启动和使用流程</h2>
+<h3 id="171-isaac-sim">17.1 启动 Isaac Sim</h3>
+<p>当前机器推荐命令：</p>
+<pre><code class="language-bash">/home/hs/anaconda3/envs/isaac_env/bin/isaacsim \
+  /home/hs/anaconda3/envs/isaac_env/lib/python3.11/site-packages/isaacsim/apps/isaacsim.exp.full.kit \
+  --ext-folder /home/hs/testCode/simulation/src/data_collect_isaac \
+  --enable IsaacsimExtGrasping
+</code></pre>
+<h3 id="172">17.2 加载扩展</h3>
+<p>启动命令中已经包含：</p>
+<pre><code class="language-text">--enable IsaacsimExtGrasping
+</code></pre>
+<p>因此 Isaac Sim 启动时会自动加载扩展。</p>
+<h3 id="173">17.3 打开插件窗口</h3>
+<p>在菜单中点击：</p>
+<pre><code class="language-text">Ext_Grasing_Scene
+</code></pre>
+<p>打开插件面板。</p>
+<h3 id="174">17.4 设置物体参数</h3>
+<p>设置：</p>
+<ul>
+<li><code>Number of objects</code></li>
+<li>类别复选框</li>
+<li><code>Spawn x min/max</code></li>
+<li><code>Spawn y min/max</code></li>
+</ul>
+<h3 id="175-load">17.5 点击 <code>Load</code> 加载场景</h3>
+<p>点击 <code>Load</code> 后，插件生成桌子和随机物体。</p>
+<h3 id="176">17.6 等待物理稳定</h3>
+<p>点击 Isaac Sim 的 Play，让物体落到桌面并稳定。</p>
+<h3 id="177">17.7 设置采集参数</h3>
+<p>设置：</p>
+<ul>
+<li><code>Number of shots</code></li>
+<li><code>cylinder_radius</code></li>
+<li><code>cylinder_height</code></li>
+<li><code>upper_cylinder_height</code></li>
+<li><code>obj_x</code></li>
+<li><code>obj_y</code></li>
+<li><code>obj_radius</code></li>
+</ul>
+<h3 id="178-start">17.8 点击 <code>Start</code> 开始采集</h3>
+<p>点击 <code>Start</code> 后，插件开始逐帧移动相机并采集数据。</p>
+<h3 id="179">17.9 查看采集结果</h3>
+<p>输出目录：</p>
+<pre><code class="language-text">/home/hs/testCode/simulation/src/data_collect_isaac/IsaacsimExtGrasping/data_log/
+</code></pre>
+<h2 id="18">18. 当前机器运行环境</h2>
+<p>本项目当前验证和日常使用的 Isaac Sim 是安装在 conda 环境中的 Isaac Sim 5.0，不是 <code>Downloads</code> 目录下的 Isaac Sim standalone 解压包。</p>
+<p>环境路径记录如下：</p>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>记录值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>实际 Isaac Sim 环境根目录</td>
+<td><code>/home/hs/anaconda3/envs/isaac_env</code></td>
+</tr>
+<tr>
+<td>Isaac Sim 启动入口</td>
+<td><code>/home/hs/anaconda3/envs/isaac_env/bin/isaacsim</code></td>
+</tr>
+<tr>
+<td>Python 解释器</td>
+<td><code>/home/hs/anaconda3/envs/isaac_env/bin/python</code></td>
+</tr>
+<tr>
+<td>Isaac Sim app 配置文件</td>
+<td><code>/home/hs/anaconda3/envs/isaac_env/lib/python3.11/site-packages/isaacsim/apps/isaacsim.exp.full.kit</code></td>
+</tr>
+<tr>
+<td>Isaac Sim Python 包目录</td>
+<td><code>/home/hs/anaconda3/envs/isaac_env/lib/python3.11/site-packages/isaacsim</code></td>
+</tr>
+<tr>
+<td>说明</td>
+<td><code>/home/hs/Downloads/isaac-sim-standalone-5.1.0-linux-x86_64</code> 是下载/解压包，不作为本项目实际安装和运行路径。</td>
+</tr>
+</tbody>
+</table>
+<h3 id="181-isaac-sim">18.1 Isaac Sim 版本</h3>
+<p>当前实际使用版本：</p>
+<pre><code class="language-text">Isaac Sim 5.0.0
+</code></pre>
+<h3 id="182-isaac-sim">18.2 Isaac Sim 安装位置</h3>
+<p>实际运行环境位于：</p>
+<pre><code class="language-text">/home/hs/anaconda3/envs/isaac_env
+</code></pre>
+<h3 id="183-conda">18.3 conda 环境路径</h3>
+<p>Python 环境：</p>
+<pre><code class="language-text">/home/hs/anaconda3/envs/isaac_env/bin/python
+</code></pre>
+<p>Isaac Sim 启动入口：</p>
+<pre><code class="language-text">/home/hs/anaconda3/envs/isaac_env/bin/isaacsim
+</code></pre>
+<h3 id="184">18.4 启动命令</h3>
+<p>见第 17.1 节。</p>
+<h3 id="185-python">18.5 Python 依赖版本</h3>
+<p>当前已验证：</p>
+<pre><code class="language-text">open3d 0.19.0
+scipy 1.15.3
+psutil 5.9.8
+</code></pre>
+<h3 id="186-open3d">18.6 <code>open3d</code> 安装说明</h3>
+<p>安装命令：</p>
+<pre><code class="language-bash">/home/hs/anaconda3/envs/isaac_env/bin/python -m pip install open3d
+</code></pre>
+<h3 id="187-psutil">18.7 <code>psutil</code> 版本注意事项</h3>
+<p>Isaac Sim 5.0 依赖：</p>
+<pre><code class="language-text">psutil==5.9.8
+</code></pre>
+<p>如果被 pip 升级，需要降回：</p>
+<pre><code class="language-bash">/home/hs/anaconda3/envs/isaac_env/bin/python -m pip install psutil==5.9.8
+</code></pre>
+<h2 id="19">19. 本地路径与资源修复说明</h2>
+<h3 id="191">19.1 旧绝对路径问题</h3>
+<p>项目曾存在旧机器路径：</p>
+<pre><code class="language-text">/home/yz/ycl/exts/IsaacsimExtGrasping/...
+/home/ubuntu/Desktop/cl/Proj/exts/IsaacsimExtGrasping/...
+</code></pre>
+<p>这些路径在当前机器上不存在，会导致 USD 或贴图加载失败。</p>
+<h3 id="192">19.2 桌子模型路径修复</h3>
+<p>代码中桌子路径已改为基于当前文件位置计算：</p>
+<pre><code class="language-python">parent_folder = os.path.split(__file__)[0]
+table_usd_path = os.path.abspath(os.path.join(parent_folder, &quot;..&quot;, &quot;data&quot;, &quot;raw_data&quot;, &quot;mz&quot;, &quot;mz.usd&quot;))
+</code></pre>
+<h3 id="193-mzusd">19.3 <code>mz.usd</code> 贴图路径修复</h3>
+<p><code>mz.usd</code> 中贴图路径已改为相对路径：</p>
+<pre><code class="language-text">textures/GenericClassicTable001_color.png
+textures/GenericClassicTable001_normal.png
+textures/GenericClassicTable001_roughness.png
+</code></pre>
+<p>这样项目移动到其他机器后，只要目录结构不变，贴图仍可解析。</p>
+<h3 id="194">19.4 相对路径组织原则</h3>
+<p>建议资源引用使用相对路径：</p>
+<pre><code class="language-text">textures/xxx.png
+../textures/xxx.png
+</code></pre>
+<p>避免使用：</p>
+<pre><code class="language-text">/home/用户名/...
+</code></pre>
+<h3 id="195">19.5 移植到其他机器的注意事项</h3>
+<p>迁移时确认：</p>
+<ul>
+<li>Isaac Sim 版本兼容。</li>
+<li>Python 依赖已安装。</li>
+<li><code>data/raw_data/</code> 资源完整。</li>
+<li>USD 内部引用是相对路径。</li>
+<li>启动命令中的 <code>--ext-folder</code> 路径正确。</li>
+</ul>
+<h2 id="20">20. 常见问题与排查</h2>
+<h3 id="201">20.1 扩展无法加载</h3>
+<p>检查 Isaac Sim 控制台错误。</p>
+<p>常见原因：</p>
+<ul>
+<li>Python import 报错。</li>
+<li>缺少依赖包。</li>
+<li><code>extension.toml</code> 配置错误。</li>
+<li>Isaac Sim 版本不匹配。</li>
+</ul>
+<h3 id="202-open3d">20.2 缺少 <code>open3d</code></h3>
+<p>错误：</p>
+<pre><code class="language-text">ModuleNotFoundError: No module named 'open3d'
+</code></pre>
+<p>解决：</p>
+<pre><code class="language-bash">/home/hs/anaconda3/envs/isaac_env/bin/python -m pip install open3d
+</code></pre>
+<h3 id="203-psutil">20.3 <code>psutil</code> 版本冲突</h3>
+<p>如果安装依赖后 Isaac Sim 报 <code>psutil</code> 版本问题，执行：</p>
+<pre><code class="language-bash">/home/hs/anaconda3/envs/isaac_env/bin/python -m pip install psutil==5.9.8
+</code></pre>
+<h3 id="204">20.4 桌子贴图找不到</h3>
+<p>检查日志中是否仍出现：</p>
+<pre><code class="language-text">/home/yz/ycl/exts/...
+</code></pre>
+<p>如果出现，说明 USD 内部仍有旧路径。</p>
+<h3 id="205-load">20.5 点击 <code>Load</code> 后没有物体</h3>
+<p>检查：</p>
+<ul>
+<li>是否勾选了类别。</li>
+<li><code>data/raw_data/&lt;class&gt;/</code> 下是否存在 USD 文件。</li>
+<li>控制台是否提示未找到 USD 模型。</li>
+</ul>
+<h3 id="206-start">20.6 点击 <code>Start</code> 后没有数据</h3>
+<p>检查：</p>
+<ul>
+<li>是否已经点击 <code>Load</code>。</li>
+<li><code>self.object</code> 是否为空。</li>
+<li><code>data_log/</code> 是否有新时间戳目录。</li>
+<li>控制台是否报错。</li>
+</ul>
+<h3 id="207">20.7 坐标和实物不对应</h3>
+<p>可能原因：</p>
+<ul>
+<li>查看的是外层 <code>obj_i</code>，不是子 Prim。</li>
+<li>模型原点不在几何中心。</li>
+<li>物理仿真后位姿发生变化。</li>
+<li>世界坐标和相机坐标混用。</li>
+</ul>
+<h3 id="208">20.8 分割标签不正确</h3>
+<p>检查：</p>
+<ul>
+<li>语义类型是否为 <code>select_classes</code>。</li>
+<li>类别名是否和目录名、USD 文件名一致。</li>
+<li>是否在 <code>class_names</code> 中添加了对应类别。</li>
+</ul>
+<h3 id="209">20.9 点云为空或异常</h3>
+<p>检查：</p>
+<ul>
+<li>相机是否对准物体。</li>
+<li>render product 是否创建成功。</li>
+<li>pointcloud annotator 是否启用。</li>
+<li>物体是否有语义标签。</li>
+</ul>
+<h2 id="21">21. 新增物体类别</h2>
+<h3 id="211">21.1 新建类别目录</h3>
+<p>例如新增类别 <code>apple</code>：</p>
+<pre><code class="language-text">data/raw_data/apple/
+</code></pre>
+<h3 id="212-usd">21.2 放置 USD 和贴图资源</h3>
+<p>建议：</p>
+<pre><code class="language-text">data/raw_data/apple/apple.usd
+data/raw_data/apple/textures/
+</code></pre>
+<h3 id="213-global_variablespy">21.3 修改 <code>global_variables.py</code></h3>
+<p>修改：</p>
+<pre><code class="language-python">num_classes = 5
+class_names = ['bwb', 'sqm', 'yida', 'dingshuji', 'apple']
+</code></pre>
+<h3 id="214">21.4 检查文件名和语义标签</h3>
+<p>当前语义标签来自 USD 文件名。</p>
+<p>如果文件名是：</p>
+<pre><code class="language-text">apple.usd
+</code></pre>
+<p>则语义标签为：</p>
+<pre><code class="language-text">apple
+</code></pre>
+<h3 id="215-ui">21.5 在 UI 中显示新类别</h3>
+<p>UI 类别复选框由 <code>class_names</code> 自动生成。</p>
+<p>修改后重载扩展，新类别会出现在 UI 中。</p>
+<h3 id="216">21.6 验证采集输出</h3>
+<p>采集后检查：</p>
+<ul>
+<li><code>semantic_segmentation_labels_*.json</code></li>
+<li><code>pointcloud_semantic_*.npy</code></li>
+<li><code>info.json</code></li>
+</ul>
+<p>确认新类别出现。</p>
+<h2 id="22_1">22. 修改采集内容</h2>
+<h3 id="221">22.1 修改相机分辨率</h3>
+<p>位置：</p>
+<pre><code class="language-python">self.render_product = rep.create.render_product(self.camera, (640, 480))
+</code></pre>
+<p>修改为：</p>
+<pre><code class="language-python">self.render_product = rep.create.render_product(self.camera, (1024, 1024))
+</code></pre>
+<h3 id="222-ui">22.2 修改默认 UI 参数</h3>
+<p>默认值在 <code>build_ui()</code> 中设置，例如：</p>
+<pre><code class="language-python">&quot;default_val&quot;: &quot;10&quot;
+</code></pre>
+<h3 id="223">22.3 修改采集帧数</h3>
+<p>UI 默认采集帧数：</p>
+<pre><code class="language-python">&quot;label&quot;: &quot;Number of shots&quot;,
+&quot;default_val&quot;: &quot;20&quot;
+</code></pre>
+<h3 id="224-writer">22.4 修改 Writer 输出内容</h3>
+<p>位置：</p>
+<pre><code class="language-python">self.writter.initialize(...)
+</code></pre>
+<p>可以控制是否启用：</p>
+<ul>
+<li><code>rgb</code></li>
+<li><code>pointcloud</code></li>
+<li><code>distance_to_camera</code></li>
+<li><code>semantic_segmentation</code></li>
+<li><code>instance_id_segmentation</code></li>
+</ul>
+<h3 id="225-annotator">22.5 添加新的 Annotator</h3>
+<p>在 <code>LxWriter.__init__()</code> 中增加 annotator，并在 <code>write()</code> 中处理对应输出。</p>
+<h3 id="226-pcd">22.6 修改 PCD 输出逻辑</h3>
+<p>PCD 写入函数：</p>
+<pre><code class="language-python">lxSavePCD()
+</code></pre>
+<p>如果需要改变点云颜色、过滤无效点、改坐标系，可以在这里处理。</p>
+<h2 id="23_1">23. 修改记录</h2>
+<h3 id="231">23.1 路径修复记录</h3>
+<p>已将桌子模型加载路径改为项目内相对计算路径。</p>
+<h3 id="232">23.2 依赖安装记录</h3>
+<p>已在 <code>isaac_env</code> 中安装：</p>
+<pre><code class="language-text">open3d 0.19.0
+</code></pre>
+<p>并保持：</p>
+<pre><code class="language-text">psutil 5.9.8
+</code></pre>
+<h3 id="233">23.3 数据采集验证记录</h3>
+<p>已验证采集数据输出到：</p>
+<pre><code class="language-text">IsaacsimExtGrasping/data_log/&lt;timestamp&gt;/
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">2026_05_14_09_44_05
+</code></pre>
+<h3 id="234">23.4 后续维护建议</h3>
+<p>建议后续重点维护：</p>
+<ul>
+<li>统一资源相对路径。</li>
+<li>给每帧记录相机外参。</li>
+<li>明确点云坐标系。</li>
+<li>清理未使用模板代码。</li>
+<li>将 UI 参数和采集参数配置化。</li>
+</ul>
+</body>
+</html>

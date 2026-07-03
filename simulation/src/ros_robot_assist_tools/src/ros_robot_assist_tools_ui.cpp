@@ -52,6 +52,7 @@
 #include "ros_robot_assist_tools/ui/pose_transform_widget.h"
 #include "ros_robot_assist_tools/ui/stereo_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/system_status_widget.h"
+#include "ros_robot_assist_tools/ui/tcp_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/tf_viewer_widget.h"
 #include "ros_robot_assist_tools/ui/shared_ui_executor.hpp"
 #include "ros_robot_assist_tools/ui/preferences_dialog.h"
@@ -617,6 +618,7 @@ QMainWindow* createMainWindow() {
   auto * lazy_stereo = new ui::LazyFeaturePage([](QWidget * p) { return new ui::StereoCalibrationWidget(p); });
   auto * lazy_multi = new ui::LazyFeaturePage([](QWidget * p) { return new ui::MultiSensorCalibrationWidget(p); });
   auto * lazy_handeye = new ui::LazyFeaturePage([](QWidget * p) { return new ui::HandeyeCalibrationWidget(p); });
+  auto * lazy_tcp = new ui::LazyFeaturePage([](QWidget * p) { return new ui::TcpCalibrationWidget(p); });
 
   stackedWidget->addWidget(systemStatusWidget);
   stackedWidget->addWidget(lazy_image);
@@ -628,11 +630,12 @@ QMainWindow* createMainWindow() {
   stackedWidget->addWidget(lazy_stereo);
   stackedWidget->addWidget(lazy_multi);
   stackedWidget->addWidget(lazy_handeye);
+  stackedWidget->addWidget(lazy_tcp);
   
   // 创建导航按钮
   QStringList buttonNames = {
     "系统状态", "图像查看", "标定板生成", "姿态转换", "运动学计算", "TF查看",
-    "内参标定", "双目标定", "多传感器标定", "手眼标定"
+    "内参标定", "双目标定", "多传感器标定", "手眼标定", "TCP标定"
   };
   for (int i = 0; i < buttonNames.size(); ++i) {
     QPushButton* btn = new QPushButton(buttonNames[i], navPanel);

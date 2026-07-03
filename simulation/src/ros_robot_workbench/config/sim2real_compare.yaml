@@ -1,0 +1,7 @@
+# sim2real_compare
+module: sim2real_compare
+enabled: true
+sim_topic: /sim/joint_states
+real_topic: /joint_states
+compare_field: position
+refresh_hz: 2

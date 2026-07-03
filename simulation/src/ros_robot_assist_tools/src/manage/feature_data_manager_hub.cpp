@@ -17,6 +17,7 @@ void FeatureDataManagerHub::SetConfigRoot(const std::string & config_root)
   stereo_calibration.SetConfigPath(JoinConfigPath(config_root, "stereo_calibration.yaml"));
   multi_sensor_calibration.SetConfigPath(JoinConfigPath(config_root, "multi_sensor_calibration.yaml"));
   handeye_calibration.SetConfigPath(JoinConfigPath(config_root, "handeye_calibration.yaml"));
+  tcp_calibration.SetConfigPath(JoinConfigPath(config_root, "tcp_calibration.yaml"));
 }
 
 bool FeatureDataManagerHub::EnsureAllConfigFiles() const
@@ -30,7 +31,8 @@ bool FeatureDataManagerHub::EnsureAllConfigFiles() const
          intrinsic_calibration.EnsureFileExists() &&
          stereo_calibration.EnsureFileExists() &&
          multi_sensor_calibration.EnsureFileExists() &&
-         handeye_calibration.EnsureFileExists();
+         handeye_calibration.EnsureFileExists() &&
+         tcp_calibration.EnsureFileExists();
 }
 
 bool FeatureDataManagerHub::LoadAll()
@@ -44,7 +46,8 @@ bool FeatureDataManagerHub::LoadAll()
          intrinsic_calibration.Load() &&
          stereo_calibration.Load() &&
          multi_sensor_calibration.Load() &&
-         handeye_calibration.Load();
+         handeye_calibration.Load() &&
+         tcp_calibration.Load();
 }
 
 bool FeatureDataManagerHub::SaveAll() const
@@ -58,7 +61,8 @@ bool FeatureDataManagerHub::SaveAll() const
          intrinsic_calibration.Save() &&
          stereo_calibration.Save() &&
          multi_sensor_calibration.Save() &&
-         handeye_calibration.Save();
+         handeye_calibration.Save() &&
+         tcp_calibration.Save();
 }
 
 }  // namespace ros_robot_assist_tools::manage

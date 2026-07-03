@@ -1,0 +1,10 @@
+# Rosbag 工作台
+module: rosbag_workbench
+output_dir: ~/.ros_robot_workbench/bags
+default_prefix: run
+play_rate: 1.0
+play_loop: false
+use_sim_time: true
+record_topics:
+  - /camera/image_raw
+  - /joint_states

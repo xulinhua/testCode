@@ -1,0 +1,25 @@
+[core]
+reloadable = true
+order = 0
+
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "Hs Table Isaac Table Scene"
+description = "Table + cuboid scene with table-edge camera; ROS2 color/depth/pointcloud; runtime 6D pose UI"
+authors = ["xlh"]
+keywords = ["table", "camera", "ros2", "pointcloud", "pose"]
+readme = "docs/README.md"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"isaacsim.gui.components" = {}
+"isaacsim.core.api" = {}
+"isaacsim.core.nodes" = {}
+"isaacsim.ros2.bridge" = {}
+
+[[python.module]]
+name = "hs.table.isaac_table_scene"
+
+[settings]
+exts."hs.table.isaac_table_scene".timeout = 5

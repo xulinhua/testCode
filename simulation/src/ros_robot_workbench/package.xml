@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypen="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros_robot_workbench</name>
+  <version>1.0.0</version>
+  <description>ROS2 Humble C++17 Qt 机器人综合工作台（标定、机械臂、移动、四足、人形、规划、3D、仿真、DL/RL）</description>
+  
+  <maintainer email="developer@example.com">Nova Robot Team</maintainer>
+  <license>MIT</license>
+  
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>example_interfaces</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>geometry_msgs</depend>
+  <!-- moveit_msgs / OpenCV：全量构建需要；可用 -DWORKBENCH_WITH_MOVEIT=OFF 等跳过 -->
+  <depend>moveit_msgs</depend>
+  <depend>urdf</depend>
+  <depend>urdfdom</depend>
+  <depend>urdfdom_headers</depend>
+  <depend>kdl_parser</depend>
+  <depend>orocos_kdl</depend>
+  <depend>eigen3_cmake_module</depend>
+  <depend>libeigen3-dev</depend>
+  
+  <depend>nav_msgs</depend>
+  <depend>rosgraph_msgs</depend>
+  
+  <depend>qtbase5-dev</depend>
+  <depend>libqt5-core</depend>
+  <depend>libqt5-widgets</depend>
+  <depend>libopencv-dev</depend>
+  <depend>libyaml-cpp-dev</depend>
+  
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

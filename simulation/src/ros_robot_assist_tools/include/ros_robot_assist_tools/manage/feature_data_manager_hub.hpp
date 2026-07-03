@@ -12,6 +12,7 @@
 #include "ros_robot_assist_tools/manage/pose_transform_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/stereo_calibration_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/system_status_data_manager.hpp"
+#include "ros_robot_assist_tools/manage/tcp_calibration_data_manager.hpp"
 #include "ros_robot_assist_tools/manage/tf_viewer_data_manager.hpp"
 
 namespace ros_robot_assist_tools::manage
@@ -35,6 +36,7 @@ public:
   StereoCalibrationDataManager stereo_calibration;
   MultiSensorCalibrationDataManager multi_sensor_calibration;
   HandeyeCalibrationDataManager handeye_calibration;
+  TcpCalibrationDataManager tcp_calibration;
 };
 
 }  // namespace ros_robot_assist_tools::manage

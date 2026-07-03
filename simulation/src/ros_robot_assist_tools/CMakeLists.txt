@@ -54,10 +54,12 @@ add_library(ros_robot_assist_tools_core STATIC
   src/module/stereo_calibration_module.cpp
   src/module/multi_sensor_calibration_module.cpp
   src/module/handeye_calibration_module.cpp
+  src/module/tcp_calibration_module.cpp
   src/ui/intrinsic_calibration_widget.cpp
   src/ui/stereo_calibration_widget.cpp
   src/ui/multi_sensor_calibration_widget.cpp
   src/ui/handeye_calibration_widget.cpp
+  src/ui/tcp_calibration_widget.cpp
   src/module/calibration_module.cpp
   src/ui/board_generator_widget.cpp
   src/module/board_generator_module.cpp
@@ -82,6 +84,7 @@ add_library(ros_robot_assist_tools_core STATIC
   src/manage/stereo_calibration_data_manager.cpp
   src/manage/multi_sensor_calibration_data_manager.cpp
   src/manage/handeye_calibration_data_manager.cpp
+  src/manage/tcp_calibration_data_manager.cpp
   src/manage/feature_data_manager_hub.cpp
 )
 
