@@ -1,0 +1,23 @@
+[core]
+reloadable = true
+order = 0
+
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "Hs Robot Nova Robot GraspNet"
+description = "Nova dual-arm + table + box scene for GraspNet; 3x RSD455 ROS2 streams"
+authors = ["xlh"]
+keywords = ["nova", "graspnet", "camera", "ros2", "depth"]
+readme = "docs/README.md"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"isaacsim.gui.components" = {}
+# core.api / core.nodes / ros2.bridge 在 Load / 出流时按需启用，缩短扩展出现时间
+
+[[python.module]]
+name = "hs.robot.nova_robot_graspnet"
+
+[settings]
+exts."hs.robot.nova_robot_graspnet".timeout = 5
