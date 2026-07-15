@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="HAD2503-D-DEX1">
+  <!-- xacro 会扁平化嵌套的 <robot> include -->
+  <xacro:include filename="$(find gazebo_robot_had2503_demo)/urdf/had2503_links.urdf.xacro"/>
+
+  <gazebo reference="left_wheel_link">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+    <kp>1e5</kp>
+    <kd>1.0</kd>
+  </gazebo>
+  <gazebo reference="right_wheel_link">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+    <kp>1e5</kp>
+    <kd>1.0</kd>
+  </gazebo>
+
+  <ros2_control name="GazeboSystem" type="system">
+    <hardware>
+      <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+    </hardware>
+
+    <joint name="left_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="right_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <xacro:macro name="pos_joint" params="name">
+      <joint name="${name}">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>
+    </xacro:macro>
+
+    <xacro:pos_joint name="ankle_pitch_joint"/>
+    <xacro:pos_joint name="knee_pitch_joint"/>
+    <xacro:pos_joint name="hip_pitch_joint"/>
+    <xacro:pos_joint name="waist_yaw_joint"/>
+    <xacro:pos_joint name="waist_pitch_joint"/>
+    <xacro:pos_joint name="waist_roll_joint"/>
+    <xacro:pos_joint name="head_yaw_joint"/>
+    <xacro:pos_joint name="head_pitch_joint"/>
+
+    <xacro:pos_joint name="right_shoulder_pitch_joint"/>
+    <xacro:pos_joint name="right_shoulder_roll_joint"/>
+    <xacro:pos_joint name="right_shoulder_yaw_joint"/>
+    <xacro:pos_joint name="right_elbow_joint"/>
+    <xacro:pos_joint name="right_wrist_yaw_joint"/>
+    <xacro:pos_joint name="right_wrist_pitch_joint"/>
+    <xacro:pos_joint name="right_wrist_roll_joint"/>
+    <xacro:pos_joint name="right_dex1_finger_joint_1"/>
+    <xacro:pos_joint name="right_dex1_finger_joint_2"/>
+
+    <xacro:pos_joint name="left_shoulder_pitch_joint"/>
+    <xacro:pos_joint name="left_shoulder_roll_joint"/>
+    <xacro:pos_joint name="left_shoulder_yaw_joint"/>
+    <xacro:pos_joint name="left_elbow_joint"/>
+    <xacro:pos_joint name="left_wrist_yaw_joint"/>
+    <xacro:pos_joint name="left_wrist_pitch_joint"/>
+    <xacro:pos_joint name="left_wrist_roll_joint"/>
+    <xacro:pos_joint name="left_dex1_finger_joint_1"/>
+    <xacro:pos_joint name="left_dex1_finger_joint_2"/>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+      <parameters>$(find gazebo_robot_had2503_demo)/config/controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+</robot>

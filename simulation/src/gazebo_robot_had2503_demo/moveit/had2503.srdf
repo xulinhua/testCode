@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="HAD2503-D-DEX1">
+  <group name="left_arm">
+    <joint name="left_shoulder_pitch_joint"/>
+    <joint name="left_shoulder_roll_joint"/>
+    <joint name="left_shoulder_yaw_joint"/>
+    <joint name="left_elbow_joint"/>
+    <joint name="left_wrist_yaw_joint"/>
+    <joint name="left_wrist_pitch_joint"/>
+    <joint name="left_wrist_roll_joint"/>
+  </group>
+
+  <group name="right_arm">
+    <joint name="right_shoulder_pitch_joint"/>
+    <joint name="right_shoulder_roll_joint"/>
+    <joint name="right_shoulder_yaw_joint"/>
+    <joint name="right_elbow_joint"/>
+    <joint name="right_wrist_yaw_joint"/>
+    <joint name="right_wrist_pitch_joint"/>
+    <joint name="right_wrist_roll_joint"/>
+  </group>
+
+  <group name="left_gripper">
+    <joint name="left_dex1_finger_joint_1"/>
+    <joint name="left_dex1_finger_joint_2"/>
+  </group>
+
+  <group name="right_gripper">
+    <joint name="right_dex1_finger_joint_1"/>
+    <joint name="right_dex1_finger_joint_2"/>
+  </group>
+
+  <group name="torso">
+    <joint name="ankle_pitch_joint"/>
+    <joint name="knee_pitch_joint"/>
+    <joint name="hip_pitch_joint"/>
+    <joint name="waist_yaw_joint"/>
+    <joint name="waist_pitch_joint"/>
+    <joint name="waist_roll_joint"/>
+    <joint name="head_yaw_joint"/>
+    <joint name="head_pitch_joint"/>
+  </group>
+
+  <group_state name="home" group="left_arm">
+    <joint name="left_shoulder_pitch_joint" value="0"/>
+    <joint name="left_shoulder_roll_joint" value="0"/>
+    <joint name="left_shoulder_yaw_joint" value="0"/>
+    <joint name="left_elbow_joint" value="0"/>
+    <joint name="left_wrist_yaw_joint" value="0"/>
+    <joint name="left_wrist_pitch_joint" value="0"/>
+    <joint name="left_wrist_roll_joint" value="0"/>
+  </group_state>
+
+  <group_state name="home" group="right_arm">
+    <joint name="right_shoulder_pitch_joint" value="0"/>
+    <joint name="right_shoulder_roll_joint" value="0"/>
+    <joint name="right_shoulder_yaw_joint" value="0"/>
+    <joint name="right_elbow_joint" value="0"/>
+    <joint name="right_wrist_yaw_joint" value="0"/>
+    <joint name="right_wrist_pitch_joint" value="0"/>
+    <joint name="right_wrist_roll_joint" value="0"/>
+  </group_state>
+
+  <end_effector name="left_ee" parent_link="left_wrist_roll_link" group="left_gripper"/>
+  <end_effector name="right_ee" parent_link="right_wrist_roll_link" group="right_gripper"/>
+
+  <virtual_joint name="world_joint" type="fixed" parent_frame="world" child_link="base_link"/>
+
+  <disable_collisions link1="left_wrist_roll_link" link2="left_dex1_finger_link_1" reason="Adjacent"/>
+  <disable_collisions link1="left_wrist_roll_link" link2="left_dex1_finger_link_2" reason="Adjacent"/>
+  <disable_collisions link1="right_wrist_roll_link" link2="right_dex1_finger_link_1" reason="Adjacent"/>
+  <disable_collisions link1="right_wrist_roll_link" link2="right_dex1_finger_link_2" reason="Adjacent"/>
+</robot>
