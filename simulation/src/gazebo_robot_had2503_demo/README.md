@@ -4,7 +4,7 @@ ROS2 Humble：HAD2503-D-DEX1 在 **Gazebo Classic** 中仿真。
 
 - **底盘**：差速驱动（`/diff_drive_controller/cmd_vel_unstamped`）
 - **双臂**：MoveIt2（`left_arm` / `right_arm`，末端 `left_wrist_roll_link` / `right_wrist_roll_link`）
-- 原始 SolidWorks 导出保留在 `HAD2503-D-DEX1/`（**mesh 保持原样，不简化**）
+- 原始 SolidWorks 导出保留在 `HAD2503-D-DEX1/`（**视觉 mesh 原样**；Gazebo/MoveIt **碰撞** 用 AABB 盒 / 驱动轮圆柱，避免高面数 STL 碰撞导致飞车与 OOM）
 
 ## 编译
 

@@ -1,19 +1,82 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="HAD2503-D-DEX1">
-  <!-- xacro 会扁平化嵌套的 <robot> include -->
+  <!-- 视觉仍为 STL；碰撞已在 had2503_links 中改为 AABB，避免 ODE 飞车/OOM -->
   <xacro:include filename="$(find gazebo_robot_had2503_demo)/urdf/had2503_links.urdf.xacro"/>
 
+  <!-- 关闭自碰；驱动轮摩擦 -->
+  <xacro:macro name="link_gazebo" params="link">
+    <gazebo reference="${link}">
+      <selfCollide>false</selfCollide>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:link_gazebo link="base_link"/>
+  <xacro:link_gazebo link="ankle_pitch_link"/>
+  <xacro:link_gazebo link="knee_pitch_link"/>
+  <xacro:link_gazebo link="hip_pitch_link"/>
+  <xacro:link_gazebo link="waist_yaw_link"/>
+  <xacro:link_gazebo link="waist_pitch_link"/>
+  <xacro:link_gazebo link="waist_roll_link"/>
+  <xacro:link_gazebo link="head_yaw_link"/>
+  <xacro:link_gazebo link="head_pitch_link"/>
+  <xacro:link_gazebo link="left_shoulder_pitch_link"/>
+  <xacro:link_gazebo link="left_shoulder_roll_link"/>
+  <xacro:link_gazebo link="left_shoulder_yaw_link"/>
+  <xacro:link_gazebo link="left_elbow_link"/>
+  <xacro:link_gazebo link="left_wrist_yaw_link"/>
+  <xacro:link_gazebo link="left_wrist_pitch_link"/>
+  <xacro:link_gazebo link="left_wrist_roll_link"/>
+  <xacro:link_gazebo link="right_shoulder_pitch_link"/>
+  <xacro:link_gazebo link="right_shoulder_roll_link"/>
+  <xacro:link_gazebo link="right_shoulder_yaw_link"/>
+  <xacro:link_gazebo link="right_elbow_link"/>
+  <xacro:link_gazebo link="right_wrist_yaw_link"/>
+  <xacro:link_gazebo link="right_wrist_pitch_link"/>
+  <xacro:link_gazebo link="right_wrist_roll_link"/>
+
   <gazebo reference="left_wheel_link">
-    <mu1>1.0</mu1>
-    <mu2>1.0</mu2>
-    <kp>1e5</kp>
-    <kd>1.0</kd>
+    <selfCollide>false</selfCollide>
+    <mu1>1.2</mu1>
+    <mu2>1.2</mu2>
+    <kp>1e4</kp>
+    <kd>100.0</kd>
+    <minDepth>0.001</minDepth>
   </gazebo>
   <gazebo reference="right_wheel_link">
-    <mu1>1.0</mu1>
-    <mu2>1.0</mu2>
-    <kp>1e5</kp>
-    <kd>1.0</kd>
+    <selfCollide>false</selfCollide>
+    <mu1>1.2</mu1>
+    <mu2>1.2</mu2>
+    <kp>1e4</kp>
+    <kd>100.0</kd>
+    <minDepth>0.001</minDepth>
+  </gazebo>
+  <gazebo reference="front_left_fixed_wheel_link">
+    <selfCollide>false</selfCollide>
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+    <kp>1e4</kp>
+    <kd>50.0</kd>
+  </gazebo>
+  <gazebo reference="front_right_fixed_wheel_link">
+    <selfCollide>false</selfCollide>
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+    <kp>1e4</kp>
+    <kd>50.0</kd>
+  </gazebo>
+  <gazebo reference="back_left_fixed_wheel_link">
+    <selfCollide>false</selfCollide>
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+    <kp>1e4</kp>
+    <kd>50.0</kd>
+  </gazebo>
+  <gazebo reference="back_right_fixed_wheel_link">
+    <selfCollide>false</selfCollide>
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+    <kp>1e4</kp>
+    <kd>50.0</kd>
   </gazebo>
 
   <ros2_control name="GazeboSystem" type="system">

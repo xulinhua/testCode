@@ -28,7 +28,7 @@ diff_drive_controller:
     left_wheel_names: ["left_wheel_joint"]
     right_wheel_names: ["right_wheel_joint"]
     wheel_separation: 0.393
-    wheel_radius: 0.05
+    wheel_radius: 0.077
     wheels_per_side: 1
     publish_rate: 50.0
     odom_frame_id: odom
@@ -40,6 +40,17 @@ diff_drive_controller:
     cmd_vel_timeout: 0.5
     open_loop: false
     position_feedback: true
+    # 放开 cmd_vel 钳制（与调试 UI 上限一致）
+    linear.x.has_velocity_limits: true
+    linear.x.max_velocity: 5.0
+    linear.x.min_velocity: -5.0
+    linear.x.has_acceleration_limits: true
+    linear.x.max_acceleration: 5.0
+    angular.z.has_velocity_limits: true
+    angular.z.max_velocity: 6.0
+    angular.z.min_velocity: -6.0
+    angular.z.has_acceleration_limits: true
+    angular.z.max_acceleration: 8.0
 
 left_arm_controller:
   ros__parameters:
@@ -54,7 +65,7 @@ left_arm_controller:
     command_interfaces: [position]
     state_interfaces: [position, velocity]
     allow_partial_joints_goal: false
-    open_loop_control: false
+    open_loop_control: true
 
 right_arm_controller:
   ros__parameters:
@@ -69,7 +80,7 @@ right_arm_controller:
     command_interfaces: [position]
     state_interfaces: [position, velocity]
     allow_partial_joints_goal: false
-    open_loop_control: false
+    open_loop_control: true
 
 torso_controller:
   ros__parameters:
@@ -85,6 +96,7 @@ torso_controller:
     command_interfaces: [position]
     state_interfaces: [position, velocity]
     allow_partial_joints_goal: true
+    open_loop_control: true
 
 left_gripper_controller:
   ros__parameters:
@@ -94,6 +106,7 @@ left_gripper_controller:
     command_interfaces: [position]
     state_interfaces: [position, velocity]
     allow_partial_joints_goal: true
+    open_loop_control: true
 
 right_gripper_controller:
   ros__parameters:
@@ -103,3 +116,4 @@ right_gripper_controller:
     command_interfaces: [position]
     state_interfaces: [position, velocity]
     allow_partial_joints_goal: true
+    open_loop_control: true

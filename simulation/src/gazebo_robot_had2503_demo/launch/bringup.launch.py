@@ -60,7 +60,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        DeclareLaunchArgument("spawn_z", default_value="0.06"),
+        DeclareLaunchArgument("spawn_z", default_value="0.10"),
         gazebo,
         move_group,
         rviz,

@@ -47,7 +47,7 @@ def generate_launch_description():
     )
     spawn_z_arg = DeclareLaunchArgument(
         "spawn_z",
-        default_value="0.06",
+        default_value="0.10",
         description="Spawn Z so drive wheels touch ground (tune with wheel_radius)",
     )
 
@@ -104,9 +104,14 @@ if [ "$READY" != "1" ]; then
   echo "    .../install/gazebo_robot_had2503_demo/share"
   exit 1
 fi
+echo "[had2503] loading joint_state_broadcaster"
+ros2 control load_controller --set-state active joint_state_broadcaster
+# 先让物理稳定再上臂控制器（Hold 位置），避免刚 spawn 就炸飞
+sleep 3
+echo "[had2503] loading diff_drive_controller"
+ros2 control load_controller --set-state active diff_drive_controller
+sleep 2
 for c in \
-  joint_state_broadcaster \
-  diff_drive_controller \
   left_arm_controller \
   right_arm_controller \
   torso_controller \

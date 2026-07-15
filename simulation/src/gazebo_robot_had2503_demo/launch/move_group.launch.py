@@ -1,4 +1,8 @@
-"""本包 MoveIt2 move_group：左右臂 IK / 规划。"""
+"""本包 MoveIt2 move_group：左右臂 IK / 规划。
+
+Octomap / “vertices in collision” 警告与 Gazebo 飞车无关；
+飞车来自高面数 mesh 碰撞，URDF 里视觉保留 STL、碰撞已改为盒/柱。
+"""
 
 import os
 
