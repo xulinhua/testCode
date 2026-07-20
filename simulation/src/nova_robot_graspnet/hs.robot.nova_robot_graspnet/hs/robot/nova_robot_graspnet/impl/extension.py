@@ -32,8 +32,8 @@ class Extension(omni.ext.IExt):
 
         self._window = ScrollingWindow(
             title=EXTENSION_TITLE,
-            width=680,
-            height=900,
+            width=480,
+            height=680,
             visible=False,
             dockPreference=ui.DockPreference.LEFT_BOTTOM,
         )

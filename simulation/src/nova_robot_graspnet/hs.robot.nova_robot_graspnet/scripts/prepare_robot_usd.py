@@ -73,6 +73,46 @@ def _strip_aruco_calibration(text: str) -> str:
     return text
 
 
+def _strip_aruco_collider_proxies(text: str) -> str:
+    """删除标定板遗留的薄盒碰撞体（colliders 内 10cm×10cm×1mm mesh_1/mesh_2）。"""
+    aruco_scale = "0.10000000149011612, 0.10000000149011612, 0.0010000000474974513"
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    removed = 0
+    while i < n:
+        line = lines[i]
+        if 'def Xform "mesh_' in line and ('"mesh_1"' in line or '"mesh_2"' in line):
+            block: list[str] = []
+            depth = 0
+            started = False
+            j = i
+            while j < n:
+                chunk = lines[j]
+                block.append(chunk)
+                if "{" in chunk:
+                    depth += chunk.count("{")
+                    started = True
+                if "}" in chunk:
+                    depth -= chunk.count("}")
+                j += 1
+                if started and depth <= 0:
+                    break
+            if aruco_scale in "".join(block):
+                removed += 1
+                i = j
+                continue
+            out.extend(block)
+            i = j
+            continue
+        out.append(line)
+        i += 1
+    if removed:
+        print(f"Stripped {removed} aruco collider proxy block(s)")
+    return "".join(out)
+
+
 def _patch_camera_mounts(text: str) -> str:
     """在 cam0/1/2 的 RSD455 over 块内关闭 collision / rigidBody（勿加 resetXformStack）。"""
 
@@ -91,6 +131,32 @@ def _patch_camera_mounts(text: str) -> str:
         re.MULTILINE,
     )
     return pattern.sub(patch_cam_block, text)
+
+
+def _patch_cam0_gantry_align(text: str) -> str:
+    """cam0 对齐龙门横梁连接件中心（原 translate 偏约 2cm）。"""
+    old = "double3 xformOp:translate = (0.511, -0.511, 1.009)"
+    new = "double3 xformOp:translate = (0.53, -0.499, 1.009)"
+    if old in text:
+        text = text.replace(old, new)
+        print("Patched cam0 translate -> gantry beam center")
+    return text
+
+
+def _patch_rsd455_local(text: str, sensors_usd: Path) -> str:
+    """将 RSD455 在线 payload 改为 ``data/robot/sensors/rsd455.usd`` 相对引用。"""
+    if not sensors_usd.is_file():
+        print(f"WARN: missing {sensors_usd} — run scripts/download_rsd455.py once")
+        return text
+    pattern = re.compile(
+        r"prepend payload = @https://omniverse-content-production\.s3-us-west-2\.amazonaws\.com/"
+        r"Assets/Isaac/[^@]+/Intel/RealSense/rsd455\.usd@"
+    )
+    replacement = "prepend payload = @./sensors/rsd455.usd@"
+    new_text, count = pattern.subn(replacement, text)
+    if count:
+        print(f"Patched {count} RSD455 payload(s) -> ./sensors/rsd455.usd")
+    return new_text
 
 
 def main() -> int:
@@ -112,7 +178,11 @@ def main() -> int:
     text = src.read_text(encoding="utf-8")
     text = _strip_action_graph(text)
     text = _strip_aruco_calibration(text)
+    text = _strip_aruco_collider_proxies(text)
     text = _patch_camera_mounts(text)
+    text = _patch_cam0_gantry_align(text)
+    sensors_usd = root / "data" / "robot" / "sensors" / "rsd455.usd"
+    text = _patch_rsd455_local(text, sensors_usd)
     out.write_text(text, encoding="utf-8")
     print(f"Wrote {out} ({out.stat().st_size // (1024*1024)} MB)")
     return 0

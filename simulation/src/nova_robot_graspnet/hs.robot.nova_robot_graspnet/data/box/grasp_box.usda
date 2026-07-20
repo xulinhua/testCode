@@ -12,7 +12,7 @@ def Xform "visual" (
     }
 )
 {
-    double3 xformOp:translate = (0.001842430, 0.007934570, -0.013133949)
+    double3 xformOp:translate = (0.001842430, -0.000331902, 0.000022675)
     double3 xformOp:scale = (0.001, 0.001, 0.001)
     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
 }

@@ -41,43 +41,75 @@ def resolve_box_usd(box_dir: str) -> Optional[str]:
 
 
 def resolve_box_texture_path(box_dir: str) -> Optional[str]:
-    """从 ``model/*.mtl`` 的 ``map_Kd`` 解析贴图 PNG 绝对路径。
+    """解析抓取盒漫反射贴图 PNG 绝对路径。
 
-    Args:
-        box_dir: ``data/box`` 目录。
-
-    Returns:
-        存在的贴图文件绝对路径；缺失时 ``None``。
+    优先读 ``model/*.mtl`` 的 ``map_Kd``；若 MTL 无贴图行（常见于 trimesh 导出），
+    则回退到 ``model/*.png`` / ``textures/*.png``。
     """
     model_dir = os.path.join(box_dir, "model")
-    if not os.path.isdir(model_dir):
-        return None
+    tex_dir = os.path.join(box_dir, "textures")
 
-    for mtl_name in sorted(os.listdir(model_dir)):
-        if not mtl_name.endswith(".mtl"):
-            continue
-        mtl_path = os.path.join(model_dir, mtl_name)
-        try:
-            with open(mtl_path, encoding="utf-8", errors="ignore") as handle:
-                for line in handle:
-                    stripped = line.strip()
-                    if not stripped.startswith("map_Kd"):
-                        continue
-                    parts = stripped.split()
-                    if len(parts) < 2:
-                        continue
-                    tex_name = parts[-1]
-                    tex_path = os.path.join(model_dir, os.path.basename(tex_name))
-                    if os.path.isfile(tex_path):
-                        return os.path.abspath(tex_path)
-                    print(
-                        f"resolve_box_texture: missing {tex_path} "
-                        f"(referenced in {mtl_name})"
-                    )
-                    return None
-        except OSError:
-            continue
+    if os.path.isdir(model_dir):
+        for mtl_name in sorted(os.listdir(model_dir)):
+            if not mtl_name.endswith(".mtl"):
+                continue
+            mtl_path = os.path.join(model_dir, mtl_name)
+            try:
+                with open(mtl_path, encoding="utf-8", errors="ignore") as handle:
+                    for line in handle:
+                        stripped = line.strip()
+                        if not stripped.startswith("map_Kd"):
+                            continue
+                        parts = stripped.split()
+                        if len(parts) < 2:
+                            continue
+                        tex_name = os.path.basename(parts[-1])
+                        for folder in (model_dir, tex_dir):
+                            tex_path = os.path.join(folder, tex_name)
+                            if os.path.isfile(tex_path):
+                                return os.path.abspath(tex_path)
+                        print(
+                            f"resolve_box_texture: missing {tex_name} "
+                            f"(referenced in {mtl_name})"
+                        )
+                        break
+            except OSError:
+                continue
+
+        pngs = sorted(
+            n for n in os.listdir(model_dir) if n.lower().endswith(".png")
+        )
+        if pngs:
+            return os.path.abspath(os.path.join(model_dir, pngs[0]))
+
+    if os.path.isdir(tex_dir):
+        pngs = sorted(n for n in os.listdir(tex_dir) if n.lower().endswith(".png"))
+        if pngs:
+            return os.path.abspath(os.path.join(tex_dir, pngs[0]))
     return None
+
+
+def ensure_box_texture_sidecar(box_dir: str) -> Optional[str]:
+    """确保 ``data/box/textures/<png>`` 存在，供烘焙 USD 用相对路径引用。
+
+    Returns:
+        相对 ``box_dir`` 的资产路径（如 ``./textures/foo.png``）；无贴图时 ``None``。
+    """
+    src = resolve_box_texture_path(box_dir)
+    if not src:
+        return None
+    name = os.path.basename(src)
+    tex_dir = os.path.join(box_dir, "textures")
+    os.makedirs(tex_dir, exist_ok=True)
+    dst = os.path.join(tex_dir, name)
+    if not os.path.isfile(dst) and not os.path.islink(dst):
+        try:
+            os.symlink(os.path.relpath(src, tex_dir), dst)
+        except OSError:
+            import shutil
+
+            shutil.copy2(src, dst)
+    return f"./textures/{name}"
 
 
 def load_box_meta(box_dir: str) -> Optional[dict]:
@@ -97,6 +129,64 @@ def load_box_meta(box_dir: str) -> Optional[dict]:
             return json.load(handle)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def resolve_env_usd(data_dir: str) -> Optional[str]:
+    """Isaac Grid 地面环境（``download_environment.py`` 缓存到 ``data/env/``）。
+
+    Args:
+        data_dir: ``data`` 目录。
+
+    Returns:
+        ``default_environment.usd`` 绝对路径；未下载时 ``None``。
+    """
+    path = os.path.join(data_dir, "env", "default_environment.usd")
+    return path if os.path.isfile(path) else None
+
+
+def resolve_scene_usd(data_dir: str) -> Optional[str]:
+    """采集对齐的总场景（``scripts/bake_graspnet_scene.py`` 生成）。
+
+    Args:
+        data_dir: ``data`` 目录。
+
+    Returns:
+        ``scenes/nova_graspnet_scene.usda`` 绝对路径；未烘焙时 ``None``。
+    """
+    for name in ("nova_graspnet_scene.usda", "nova_graspnet_scene.usd"):
+        path = os.path.join(data_dir, "scenes", name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def default_robot_dir() -> str:
+    """扩展内 ``data/robot`` 目录。
+
+    ``paths.py`` 位于 ``<ext>/hs/robot/nova_robot_graspnet/``，需上溯 4 级到扩展根。
+    """
+    cur = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(8):
+        candidate = os.path.join(cur, "data", "robot")
+        if os.path.isdir(candidate):
+            return candidate
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    # 回退：固定 4 级上溯（与 get_extension_paths(ext_path) 布局一致）
+    ext_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    return os.path.join(ext_root, "data", "robot")
+
+
+def resolve_robot_urdf(robot_dir: Optional[str] = None) -> Optional[str]:
+    """Nova 机器人 URDF（优先 position 版）。"""
+    robot_dir = robot_dir or default_robot_dir()
+    for name in ("nova_robot_position.urdf", "nova_robot.urdf"):
+        path = os.path.join(robot_dir, name)
+        if os.path.isfile(path):
+            return path
+    return None
 
 
 def resolve_robot_usd(robot_dir: str) -> Optional[str]:

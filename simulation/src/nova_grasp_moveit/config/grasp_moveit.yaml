@@ -1,0 +1,28 @@
+/**:
+  ros__parameters:
+    box_topic: "/box_pose"
+    pose_frame: "base_link"
+    target_arm_pose_topic: "/nova_target_arm_pose"
+    gripper_topic: "/nova_gripper_goal"
+    status_topic: "/nova_grasp/status"
+    pose_log_topic: "/nova_pose_log"
+    arm_split_x: 0.40
+    pregrasp_z_offset: 0.15
+    lift_z_offset: 0.15
+    box_grasp_z_offset: 0.0
+    ee_tcp_z_offset: 0.20
+    approach_raise_clearance: 0.08
+    min_approach_clearance: 0.15
+    grasp_yaw_offset_deg: 90.0
+    step_settle_sec: 2.0
+    gripper_settle_sec: 0.8
+    gripper_open_m: 0.08
+    gripper_close_m: 0.02
+    use_top_down_if_identity: true
+    use_box_yaw_only: false
+    ee_frame_arm0: "J1_6"
+    ee_frame_arm1: "J2_6"
+    ref_frame: "base_link"
+    joint_command_topic: "/joint_command"
+    joint_command_burst_count: 5
+    publish_mujoco_joint_array: true

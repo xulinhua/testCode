@@ -12,7 +12,17 @@ _run_prepare() {
 # 仅在源文件更新时跑预处理，避免每次启动多等几十秒
 ROBOT_SRC="$ROOT/data/robot/nova_robot.usda"
 ROBOT_PREP="$ROOT/data/robot/nova_robot_prepared.usda"
-if [[ ! -f "$ROBOT_PREP" ]] || [[ "$ROBOT_SRC" -nt "$ROBOT_PREP" ]]; then
+RSD455_LOCAL="$ROOT/data/robot/sensors/rsd455.usd"
+ENV_LOCAL="$ROOT/data/env/default_environment.usd"
+if [[ ! -f "$RSD455_LOCAL" ]]; then
+  echo "RSD455 not cached — downloading to data/robot/sensors/ (one-time) ..."
+  _run_prepare "$ROOT/scripts/download_rsd455.py"
+fi
+if [[ ! -f "$ENV_LOCAL" ]]; then
+  echo "Grid environment not cached — downloading to data/env/ (one-time) ..."
+  _run_prepare "$ROOT/scripts/download_environment.py"
+fi
+if [[ ! -f "$ROBOT_PREP" ]] || [[ "$ROBOT_SRC" -nt "$ROBOT_PREP" ]] || [[ "$RSD455_LOCAL" -nt "$ROBOT_PREP" ]]; then
   _run_prepare "$ROOT/scripts/prepare_urdf.py"
   _run_prepare "$ROOT/scripts/prepare_robot_usd.py"
 else
@@ -49,8 +59,10 @@ _ensure_box_baked() {
     echo "skip box bake (grasp_box_baked.usdc up to date)"
     return 0
   fi
-  if [[ "${NOVA_SKIP_BOX_BAKE:-1}" == "1" ]]; then
-    echo "skip box bake (Load scene builds mesh in Isaac; set NOVA_SKIP_BOX_BAKE=0 to pre-bake)"
+  if [[ ! -f "$baked" ]]; then
+    echo "grasp_box_baked.usdc missing — first-time bake required (~30-60s) ..."
+  elif [[ "${NOVA_SKIP_BOX_BAKE:-1}" == "1" ]]; then
+    echo "skip box bake (set NOVA_SKIP_BOX_BAKE=0 to pre-bake; Load will build mesh in Isaac)"
     return 0
   fi
   echo "Pre-baking box mesh + texture -> grasp_box_baked.usdc (~30-60s, only when OBJ/PNG changes) ..."

@@ -1,0 +1,362 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def Xform "defaultGroundPlane"
+    {
+        def Mesh "geom" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)]
+            float3 xformOp:scale = (50, 50, 1)
+            uniform token[] xformOpOrder = ["xformOp:scale"]
+        }
+    }
+
+    def Xform "graspnet_table" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI"]
+    )
+    {
+        bool physics:kinematicEnabled = 1
+        bool physics:rigidBodyEnabled = 1
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+
+        def Material "StainlessSteel"
+        {
+            token outputs:surface.connect = </World/graspnet_table/StainlessSteel/Shader.outputs:surface>
+
+            def Shader "Shader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.78, 0.78, 0.8)
+                float inputs:metallic = 0.92
+                float inputs:roughness = 0.28
+                token outputs:surface
+            }
+        }
+
+        def Cube "top" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/graspnet_table/StainlessSteel>
+            double size = 1
+            float3 xformOp:scale = (2, 1, 0.05)
+            double3 xformOp:translate = (0, 0, 0.575)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "leg_0" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/graspnet_table/StainlessSteel>
+            double size = 1
+            float3 xformOp:scale = (0.08, 0.08, 0.55)
+            double3 xformOp:translate = (0.88, 0.38, 0.275)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "leg_1" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/graspnet_table/StainlessSteel>
+            double size = 1
+            float3 xformOp:scale = (0.08, 0.08, 0.55)
+            double3 xformOp:translate = (0.88, -0.38, 0.275)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "leg_2" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/graspnet_table/StainlessSteel>
+            double size = 1
+            float3 xformOp:scale = (0.08, 0.08, 0.55)
+            double3 xformOp:translate = (-0.88, 0.38, 0.275)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "leg_3" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/graspnet_table/StainlessSteel>
+            double size = 1
+            float3 xformOp:scale = (0.08, 0.08, 0.55)
+            double3 xformOp:translate = (-0.88, -0.38, 0.275)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "leg_4" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/graspnet_table/StainlessSteel>
+            double size = 1
+            float3 xformOp:scale = (0.08, 0.08, 0.55)
+            double3 xformOp:translate = (0, 0.38, 0.275)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Cube "leg_5" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            rel material:binding = </World/graspnet_table/StainlessSteel>
+            double size = 1
+            float3 xformOp:scale = (0.08, 0.08, 0.55)
+            double3 xformOp:translate = (0, -0.38, 0.275)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+    }
+
+    def Xform "nova_robot" (
+        prepend references = @../robot/nova_robot_prepared.usda@
+    )
+    {
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (-0.5299997329711914, 0.18000000715255737, 0.6400001108646393)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        over "joints"
+        {
+            over "J1_1_joint"
+            {
+                float drive:angular:physics:targetPosition = -90
+                float state:angular:physics:position = -90
+            }
+
+            over "J2_1_joint"
+            {
+                float drive:angular:physics:targetPosition = -90
+                float state:angular:physics:position = -90
+            }
+        }
+
+        over "base_link"
+        {
+            over "cam0"
+            {
+                over "RSD455"
+                {
+                    bool physics:rigidBodyEnabled = 0
+                    token visibility = "invisible"
+
+                    over "Visual"
+                    {
+                        over "Case_front"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+
+                        over "Glass"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+
+                        over "Case_back"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+
+                        over "USB_C"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+
+                        over "Mount"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+
+                        over "Camera_module"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+
+                        over "Front_mask"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+
+                        over "camera_mask"
+                        {
+                            bool physics:collisionEnabled = 0
+                        }
+                    }
+                }
+            }
+        }
+
+        over "J1_6"
+        {
+            over "cam1"
+            {
+                over "RSD455"
+                {
+                    bool physics:rigidBodyEnabled = 0
+                }
+            }
+        }
+
+        over "J2_6"
+        {
+            over "cam2"
+            {
+                over "RSD455"
+                {
+                    bool physics:rigidBodyEnabled = 0
+                }
+            }
+        }
+    }
+
+    def Xform "grasp_box" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        bool physics:kinematicEnabled = 0
+        float physics:mass = 0.1
+        bool physics:rigidBodyEnabled = 1
+        float3 xformOp:rotateXYZ = (0, 90, 0)
+        double3 xformOp:translate = (-0.18, 0.18, 0.9)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+
+        def Xform "visual"
+        {
+            def Mesh "mesh" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+                prepend references = @../box/grasp_box_baked.usdc@
+            )
+            {
+            }
+        }
+
+        def Xform "collision_geo"
+        {
+            def Cube "mesh" (
+                prepend apiSchemas = ["PhysicsCollisionAPI"]
+            )
+            {
+                uniform token purpose = "guide"
+                double size = 1
+                float3 xformOp:scale = (0.17184706, 0.06992718, 0.21847042)
+                uniform token[] xformOpOrder = ["xformOp:scale"]
+            }
+        }
+    }
+
+    def Xform "Gemini335" (
+        prepend references = @../sensors/orbbec_gemini_335.usd@
+    )
+    {
+        quatd xformOp:orient = (-1.6081226496766364e-16, 1.0460184128151074e-16, 0.9659258262890684, 0.2588190451025208)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, -0.31703293039677527, 1.6606134042644396)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}
+
+def Xform "FlatGrid" (
+    prepend references = @../env/default_environment.usd@
+)
+{
+    over "SphereLight"
+    {
+        float inputs:intensity = 0
+        token visibility = "invisible"
+    }
+}
+
+def Xform "Environment"
+{
+    def DistantLight "defaultLight"
+    {
+        float inputs:angle = 1
+        color3f inputs:color = (1, 1, 1)
+        float inputs:intensity = 3000
+        token visibility = "invisible"
+        quatd xformOp:orient = (0.6532814824381883, 0.2705980500730985, 0.27059805007309845, 0.6532814824381882)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}
+
+def Xform "CaptureLights"
+{
+    def SphereLight "SphereLight"
+    {
+        color3f inputs:color = (1, 1, 1)
+        float inputs:colorTemperature = 5500
+        float inputs:intensity = 10000
+        float inputs:radius = 0.25
+        quatd xformOp:orient = (0.5000000000000001, 0.5, 0.49999999999999994, 0.5)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 2)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def SphereLight "SphereLight_01"
+    {
+        color3f inputs:color = (1, 1, 1)
+        float inputs:colorTemperature = 5000
+        float inputs:intensity = 10000
+        float inputs:radius = 0.25
+        quatd xformOp:orient = (0.5000000000000001, 0.5, 0.49999999999999994, 0.5)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (-1.5, 0, 2)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def SphereLight "SphereLight_02"
+    {
+        color3f inputs:color = (1, 1, 1)
+        float inputs:colorTemperature = 5000
+        float inputs:intensity = 10000
+        float inputs:radius = 0.25
+        quatd xformOp:orient = (0.5000000000000001, 0.5, 0.49999999999999994, 0.5)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 1.5, 2)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def SphereLight "SphereLight_03"
+    {
+        color3f inputs:color = (1, 1, 1)
+        float inputs:colorTemperature = 5000
+        float inputs:intensity = 10000
+        float inputs:radius = 0.25
+        quatd xformOp:orient = (0.5000000000000001, 0.5, 0.49999999999999994, 0.5)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (1.5, 0, 2)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def SphereLight "SphereLight_04"
+    {
+        color3f inputs:color = (1, 1, 1)
+        float inputs:colorTemperature = 5000
+        float inputs:intensity = 10000
+        float inputs:radius = 0.25
+        quatd xformOp:orient = (0.5000000000000001, 0.5, 0.49999999999999994, 0.5)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, -1.5, 2)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}
+

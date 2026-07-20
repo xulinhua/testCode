@@ -27,3 +27,8 @@ def ensure_core_api_enabled() -> bool:
 def ensure_ros2_bridge_enabled() -> bool:
     """首次 ROS 出流前启用 OmniGraph 与 ROS2 bridge。"""
     return _enable("isaacsim.core.nodes", "isaacsim.ros2.bridge")
+
+
+def ensure_replicator_enabled() -> bool:
+    """数据采集前启用 Isaac Replicator。"""
+    return _enable("omni.replicator.core", "isaacsim.replicator.behavior")

@@ -11,12 +11,12 @@ from ..global_variables import CAMERA_DEFS, DEFAULT_CAMERA_HEIGHT, DEFAULT_CAMER
 
 @dataclass
 class CameraStreamConfig:
-    """单路 RSD455 相机的分辨率、话题名与发布开关。"""
+    """单路相机的分辨率、话题名与发布开关（cam0=Gemini335，cam1/2=RSD455）。"""
 
     key: str = "cam0"
     label: str = ""
     camera_prim_path: str = ""  # Load 后由 SceneLoader 填入
-    frame_id: str = "camera0_pseudo_depth"
+    frame_id: str = "gemini335"
     width: int = DEFAULT_CAMERA_WIDTH
     height: int = DEFAULT_CAMERA_HEIGHT
     pub_color: str = "/camera0_rgb_sensor/image_raw"
@@ -34,10 +34,12 @@ class RobotRosConfig:
     """机器人 joint_states、TF 树与抓取盒 TF 的 ROS 配置。"""
 
     pub_joint_states: str = "/joint_states"
+    sub_joint_command: str = "/joint_command"
     pub_tf: str = "/tf"
     pub_tf_static: str = "/tf_static"
     tf_world_frame: str = "world"
     enable_joint_states: bool = True
+    enable_joint_command: bool = True
     enable_robot_tf: bool = True
     enable_box_tf: bool = True
     tf_box_frame: str = "grasp_box"
@@ -71,37 +73,39 @@ class SessionTopicConfig:
 
 # UI 字段名 ↔ dataclass 属性（供 ui_builder 遍历）
 CAMERA_TOPIC_FIELD_SPECS = (
-    ("pub_color", "Color image topic"),
-    ("pub_depth", "Depth image topic"),
-    ("pub_points", "PointCloud2 topic"),
-    ("pub_camera_info", "CameraInfo topic"),
-    ("frame_id", "Camera frame_id"),
+    ("pub_color", "RGB"),
+    ("pub_depth", "Depth"),
+    ("pub_points", "Points"),
+    ("pub_camera_info", "CamInfo"),
+    ("frame_id", "frame_id"),
 )
 
 CAMERA_STREAM_TOGGLE_SPECS = (
-    ("enable_color", "Publish color"),
-    ("enable_depth", "Publish depth"),
-    ("enable_points", "Publish PointCloud2"),
-    ("enable_camera_info", "Publish CameraInfo"),
+    ("enable_color", "RGB"),
+    ("enable_depth", "Depth"),
+    ("enable_points", "Points"),
+    ("enable_camera_info", "CamInfo"),
 )
 
 CAMERA_RESOLUTION_KEYS = (
-    ("width", "Width (px)"),
-    ("height", "Height (px)"),
+    ("width", "W (px)"),
+    ("height", "H (px)"),
 )
 
 ROBOT_TOPIC_FIELD_SPECS = (
-    ("pub_joint_states", "JointState topic"),
-    ("pub_tf", "TF topic"),
-    ("pub_tf_static", "TF static topic"),
-    ("tf_world_frame", "World frame id"),
-    ("tf_box_frame", "Box frame id"),
+    ("pub_joint_states", "joint_states"),
+    ("sub_joint_command", "joint_command"),
+    ("pub_tf", "TF"),
+    ("pub_tf_static", "TF static"),
+    ("tf_world_frame", "world"),
+    ("tf_box_frame", "box"),
 )
 
 ROBOT_STREAM_TOGGLE_SPECS = (
-    ("enable_joint_states", "Publish /joint_states"),
-    ("enable_robot_tf", "Publish robot TF tree"),
-    ("enable_box_tf", "Publish box TF"),
+    ("enable_joint_states", "joint_states"),
+    ("enable_joint_command", "joint_command"),
+    ("enable_robot_tf", "robot TF"),
+    ("enable_box_tf", "box TF"),
 )
 
 

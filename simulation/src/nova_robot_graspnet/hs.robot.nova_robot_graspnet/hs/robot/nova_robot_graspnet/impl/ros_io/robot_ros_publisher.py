@@ -142,6 +142,42 @@ class RobotRosPublisher:
                 ]
             )
 
+        if cfg.enable_joint_command:
+            nodes.extend(
+                [
+                    ("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState"),
+                    ("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController"),
+                ]
+            )
+            values.extend(
+                [
+                    ("SubscribeJointState.inputs:topicName", cfg.sub_joint_command),
+                    ("SubscribeJointState.inputs:queueSize", 10),
+                    ("ArticulationController.inputs:robotPath", ROBOT_ROOT_JOINT_PATH),
+                    ("ArticulationController.inputs:targetPrim", usdrt.Sdf.Path(ROBOT_PRIM_PATH)),
+                ]
+            )
+            connections.extend(
+                [
+                    ("OnPlaybackTick.outputs:tick", "SubscribeJointState.inputs:execIn"),
+                    ("OnPlaybackTick.outputs:tick", "ArticulationController.inputs:execIn"),
+                    ("ROS2Context.outputs:context", "SubscribeJointState.inputs:context"),
+                    ("SubscribeJointState.outputs:jointNames", "ArticulationController.inputs:jointNames"),
+                    (
+                        "SubscribeJointState.outputs:positionCommand",
+                        "ArticulationController.inputs:positionCommand",
+                    ),
+                    (
+                        "SubscribeJointState.outputs:velocityCommand",
+                        "ArticulationController.inputs:velocityCommand",
+                    ),
+                    (
+                        "SubscribeJointState.outputs:effortCommand",
+                        "ArticulationController.inputs:effortCommand",
+                    ),
+                ]
+            )
+
         if cfg.enable_robot_tf:
             tf_targets = self._collect_robot_tf_targets()
             if tf_targets:
@@ -211,5 +247,8 @@ class RobotRosPublisher:
                 keys.CONNECT: connections,
             },
         )
-        print(f"RobotRosPublisher OK graph={GRAPH_PATH} joint_states={cfg.enable_joint_states}")
+        print(
+            f"RobotRosPublisher OK graph={GRAPH_PATH} "
+            f"joint_states={cfg.enable_joint_states} joint_command={cfg.enable_joint_command}"
+        )
         return True

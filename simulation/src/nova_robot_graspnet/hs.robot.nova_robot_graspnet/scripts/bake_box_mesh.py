@@ -32,12 +32,35 @@ def _bootstrap_pxr():
     return app
 
 
+def _import_box_helpers():
+    """导入 mesh builder，跳过包 ``__init__``（会依赖 omni.physx）。"""
+    import sys
+    import types
+
+    hs_root = ROOT / "hs"
+    if str(hs_root) not in sys.path:
+        sys.path.insert(0, str(hs_root))
+
+    pkg_name = "robot.nova_robot_graspnet"
+    pkg_dir = ROOT / "hs" / "robot" / "nova_robot_graspnet"
+    if pkg_name not in sys.modules:
+        robot_pkg = sys.modules.setdefault("robot", types.ModuleType("robot"))
+        robot_pkg.__path__ = [str(ROOT / "hs" / "robot")]  # type: ignore[attr-defined]
+        nova_pkg = types.ModuleType(pkg_name)
+        nova_pkg.__path__ = [str(pkg_dir)]  # type: ignore[attr-defined]
+        sys.modules[pkg_name] = nova_pkg
+
+    from robot.nova_robot_graspnet.impl.box_mesh_builder import build_box_mesh_on_stage
+    from robot.nova_robot_graspnet.paths import load_box_meta
+
+    return build_box_mesh_on_stage, load_box_meta
+
+
 def bake_box_mesh(root: Path | None = None) -> int:
     """解析 OBJ → 写入 ``data/box/grasp_box_baked.usdc``。"""
     from pxr import Usd, UsdGeom
 
-    from robot.nova_robot_graspnet.impl.box_mesh_builder import build_box_mesh_on_stage
-    from robot.nova_robot_graspnet.paths import load_box_meta
+    build_box_mesh_on_stage, load_box_meta = _import_box_helpers()
 
     root = root or ROOT
     box_dir = root / "data" / "box"
@@ -60,6 +83,7 @@ def bake_box_mesh(root: Path | None = None) -> int:
         obj_path,
         mesh_path="/mesh",
         looks_root="/mesh/Looks",
+        write_collision=False,  # 避免把 /World/grasp_box 写进烘焙文件
     ):
         print("bake_box_mesh: build failed")
         return 1

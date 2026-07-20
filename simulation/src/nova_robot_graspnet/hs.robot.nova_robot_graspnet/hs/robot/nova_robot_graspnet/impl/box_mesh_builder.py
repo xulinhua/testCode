@@ -8,10 +8,19 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from pxr import Gf, Sdf, UsdGeom, UsdShade
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
-from ..global_variables import BOX_LINK_PATH, BOX_VISUAL_PATH
-from ..paths import load_box_meta, resolve_box_texture_path
+from ..global_variables import (
+    BOX_COLLISION_GEO_MESH,
+    BOX_COLLISION_GEO_ROOT,
+    BOX_COLLISION_PATH,
+    BOX_LINK_PATH,
+    BOX_SIZE_X,
+    BOX_SIZE_Y,
+    BOX_SIZE_Z,
+    BOX_VISUAL_PATH,
+)
+from ..paths import ensure_box_texture_sidecar, load_box_meta, resolve_box_texture_path
 
 
 @dataclass
@@ -137,50 +146,295 @@ def _compute_vertex_normals(
     return normals
 
 
+def remove_legacy_box_collision_cube(stage) -> bool:
+    """删除旧的轴对齐立方体碰撞体（与视觉 mesh 尺寸/中心不一致）。"""
+    prim = stage.GetPrimAtPath(BOX_COLLISION_PATH)
+    if not prim or not prim.IsValid():
+        return False
+    stage.RemovePrim(BOX_COLLISION_PATH)
+    print(f"box_mesh_builder: removed legacy AABB collision @ {BOX_COLLISION_PATH}")
+    return True
+
+
+def _strip_collision_from_prim(prim) -> int:
+    """从 prim 剥离碰撞相关 API（视觉 mesh 仅渲染）。"""
+    from pxr import UsdPhysics
+
+    try:
+        from pxr import PhysxSchema
+    except ImportError:
+        PhysxSchema = None
+
+    count = 0
+    if prim.HasAPI(UsdPhysics.CollisionAPI):
+        prim.RemoveAPI(UsdPhysics.CollisionAPI)
+        count += 1
+    if prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+        prim.RemoveAPI(UsdPhysics.MeshCollisionAPI)
+        count += 1
+    if PhysxSchema is not None:
+        for api in (
+            PhysxSchema.PhysxCollisionAPI,
+            PhysxSchema.PhysxConvexHullCollisionAPI,
+            PhysxSchema.PhysxConvexDecompositionCollisionAPI,
+            PhysxSchema.PhysxTriangleMeshCollisionAPI,
+        ):
+            if prim.HasAPI(api):
+                prim.RemoveAPI(api)
+                count += 1
+    attr = prim.GetAttribute("physics:approximation")
+    if attr and attr.IsValid():
+        attr.Clear()
+    return count
+
+
+def strip_visual_collision(stage, visual_root: str = BOX_VISUAL_PATH) -> int:
+    """移除视觉子树上的碰撞 schema，避免与独立碰撞 mesh 重复。"""
+    root = stage.GetPrimAtPath(visual_root)
+    if not root or not root.IsValid():
+        return 0
+    count = 0
+    for prim in Usd.PrimRange(root):
+        count += _strip_collision_from_prim(prim)
+    if count:
+        print(f"box_mesh_builder: stripped collision API from {count} visual prim(s)")
+    return count
+
+
+def _extract_visual_mesh_data(stage, visual_root: str = BOX_VISUAL_PATH) -> Optional[BoxMeshData]:
+    """从已加载的视觉 mesh 读取三角面（烘焙 USD 路径）。"""
+    from pxr import Usd, UsdGeom
+
+    root = stage.GetPrimAtPath(visual_root)
+    if not root or not root.IsValid():
+        return None
+    for prim in Usd.PrimRange(root):
+        if prim.GetPath().pathString.endswith("/placeholder"):
+            continue
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        mesh = UsdGeom.Mesh(prim)
+        points = mesh.GetPointsAttr().Get()
+        counts = mesh.GetFaceVertexCountsAttr().Get()
+        indices = mesh.GetFaceVertexIndicesAttr().Get()
+        if not points or not counts or not indices:
+            continue
+        pts = [(float(p[0]), float(p[1]), float(p[2])) for p in points]
+        return BoxMeshData(
+            points=pts,
+            face_vertex_counts=[int(c) for c in counts],
+            face_vertex_indices=[int(i) for i in indices],
+            uv_points=[],
+            face_uv_indices=[],
+        )
+    return None
+
+
+def has_box_collision(stage) -> bool:
+    """抓取盒刚体下是否已有可用碰撞 prim。"""
+    root = stage.GetPrimAtPath(BOX_COLLISION_GEO_ROOT)
+    if not root or not root.IsValid():
+        return False
+    from pxr import UsdPhysics
+
+    for prim in Usd.PrimRange(root):
+        if prim.HasAPI(UsdPhysics.CollisionAPI):
+            return True
+    return False
+
+
+def _collision_size_from_meta(box_dir: Optional[str]) -> Tuple[float, float, float]:
+    meta = load_box_meta(box_dir) if box_dir else None
+    if meta and "size_m" in meta:
+        size = meta["size_m"]
+        return (
+            float(size.get("x", BOX_SIZE_X)),
+            float(size.get("y", BOX_SIZE_Y)),
+            float(size.get("z", BOX_SIZE_Z)),
+        )
+    return (float(BOX_SIZE_X), float(BOX_SIZE_Y), float(BOX_SIZE_Z))
+
+
+def _write_fallback_box_collision(stage, size_xyz: Tuple[float, float, float]) -> bool:
+    """meta 尺寸轴对齐盒碰撞（OBJ/烘焙未就绪时防止无碰撞穿桌）。"""
+    from pxr import UsdGeom, UsdPhysics
+
+    try:
+        from pxr import PhysxSchema
+    except ImportError:
+        PhysxSchema = None
+
+    sx, sy, sz = size_xyz
+    path = f"{BOX_COLLISION_GEO_ROOT}/fallback_box"
+    old = stage.GetPrimAtPath(path)
+    if old and old.IsValid():
+        stage.RemovePrim(path)
+
+    if not stage.GetPrimAtPath(BOX_COLLISION_GEO_ROOT).IsValid():
+        UsdGeom.Xform.Define(stage, Sdf.Path(BOX_COLLISION_GEO_ROOT))
+
+    cube = UsdGeom.Cube.Define(stage, Sdf.Path(path))
+    cube.CreateSizeAttr(1.0)
+    UsdGeom.Xformable(cube).AddScaleOp().Set(Gf.Vec3f(sx, sy, sz))
+    cube.CreatePurposeAttr(UsdGeom.Tokens.guide)
+    UsdGeom.Imageable(cube).CreateVisibilityAttr(UsdGeom.Tokens.invisible)
+
+    coll = UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    coll.CreateCollisionEnabledAttr(True)
+    if PhysxSchema is not None:
+        PhysxSchema.PhysxCollisionAPI.Apply(cube.GetPrim())
+    print(
+        f"box_mesh_builder: fallback box collision @ {path} "
+        f"({sx:.3f}×{sy:.3f}×{sz:.3f} m)"
+    )
+    return True
+
+
+def _write_collision_mesh(stage, mesh_data: BoxMeshData) -> bool:
+    """创建与视觉同拓扑的碰撞 mesh（动态刚体用 convexHull，源几何为真实三角面）。"""
+    from pxr import UsdGeom, UsdPhysics
+
+    try:
+        from pxr import PhysxSchema
+    except ImportError:
+        PhysxSchema = None
+
+    old = stage.GetPrimAtPath(BOX_COLLISION_GEO_ROOT)
+    if old and old.IsValid():
+        stage.RemovePrim(BOX_COLLISION_GEO_ROOT)
+
+    UsdGeom.Xform.Define(stage, Sdf.Path(BOX_COLLISION_GEO_ROOT))
+    mesh = UsdGeom.Mesh.Define(stage, Sdf.Path(BOX_COLLISION_GEO_MESH))
+    mesh.CreatePointsAttr([Gf.Vec3f(*p) for p in mesh_data.points])
+    mesh.CreateFaceVertexCountsAttr(mesh_data.face_vertex_counts)
+    mesh.CreateFaceVertexIndicesAttr(mesh_data.face_vertex_indices)
+    mesh.CreateSubdivisionSchemeAttr("none")
+    mesh.CreateDoubleSidedAttr(True)
+    mesh.CreatePurposeAttr(UsdGeom.Tokens.guide)
+    imageable = UsdGeom.Imageable(mesh)
+    imageable.CreateVisibilityAttr(UsdGeom.Tokens.invisible)
+
+    coll = UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    coll.CreateCollisionEnabledAttr(True)
+    mesh_col = UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim())
+    # convexHull 比 convexDecomposition 更快就绪，动态刚体更不易穿模
+    mesh_col.CreateApproximationAttr("convexHull")
+
+    if PhysxSchema is not None:
+        PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
+        PhysxSchema.PhysxConvexHullCollisionAPI.Apply(mesh.GetPrim())
+
+    print(
+        f"box_mesh_builder: mesh collision (convexHull) @ {BOX_COLLISION_GEO_MESH} "
+        f"({len(mesh_data.points)} verts, {len(mesh_data.face_vertex_counts)} tris)"
+    )
+    return True
+
+
+def setup_box_collision(
+    stage,
+    box_dir: Optional[str] = None,
+    visual_root: str = BOX_VISUAL_PATH,
+    mesh_data: Optional[BoxMeshData] = None,
+    *,
+    allow_fallback: bool = True,
+    prefer_aabb: bool = True,
+) -> int:
+    """视觉仅渲染；碰撞在独立 collision_geo 上。
+
+    默认用 meta AABB（纸箱扫描毛刺会撑大 convexHull，导致绿框不贴合）。
+    ``prefer_aabb=False`` 时才写 mesh convexHull。
+    """
+    remove_legacy_box_collision_cube(stage)
+    strip_visual_collision(stage, visual_root)
+
+    if prefer_aabb:
+        size = _collision_size_from_meta(box_dir)
+        if _write_fallback_box_collision(stage, size):
+            print(
+                f"box_mesh_builder: AABB collision from meta "
+                f"({size[0]:.3f}×{size[1]:.3f}×{size[2]:.3f} m)"
+            )
+            return 1
+
+    if mesh_data is None:
+        if box_dir:
+            model_dir = os.path.join(box_dir, "model")
+            if os.path.isdir(model_dir):
+                for name in sorted(os.listdir(model_dir)):
+                    if name.endswith(".obj"):
+                        try:
+                            mesh_data = parse_box_obj(os.path.join(model_dir, name), box_dir)
+                        except (OSError, ValueError) as exc:
+                            print(f"box_mesh_builder: OBJ parse for collision failed: {exc}")
+                        break
+        if mesh_data is None:
+            mesh_data = _extract_visual_mesh_data(stage, visual_root)
+    if mesh_data is not None and _write_collision_mesh(stage, mesh_data):
+        return 1
+
+    if allow_fallback:
+        size = _collision_size_from_meta(box_dir)
+        if _write_fallback_box_collision(stage, size):
+            print("box_mesh_builder: using meta-sized fallback until mesh collision is ready")
+            return 1
+
+    print("box_mesh_builder: WARN no collision_geo created")
+    return 0
+
+
+def ensure_box_collision(stage, box_dir: Optional[str] = None) -> bool:
+    """Play 前确保盒子有碰撞体；默认重写为 meta AABB（避免毛刺 convexHull）。"""
+    return setup_box_collision(
+        stage, box_dir=box_dir, allow_fallback=True, prefer_aabb=True
+    ) > 0
+
+
+def apply_box_mesh_collision(stage, visual_root: str = BOX_VISUAL_PATH) -> int:
+    """兼容旧调用：委托 ``setup_box_collision``（无 box_dir 时从 visual 提取拓扑）。"""
+    return setup_box_collision(stage, box_dir=None, visual_root=visual_root)
+
+
 def _apply_material(
     stage,
     mesh_path: str,
     texture_path: Optional[str],
     looks_root: str,
+    *,
+    texture_asset: Optional[str] = None,
 ) -> None:
+    """绑定 OmniPBR 材质（与采集 paper_box 一致；UsdPreviewSurface 在 RTX 上常不显示贴图）。"""
     mat_path = f"{looks_root}/box_material"
     material = UsdShade.Material.Define(stage, Sdf.Path(mat_path))
-    shader = UsdShade.Shader.Define(stage, Sdf.Path(f"{mat_path}/PreviewSurface"))
-    shader.CreateIdAttr("UsdPreviewSurface")
-    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.45)
+    shader = UsdShade.Shader.Define(stage, Sdf.Path(f"{mat_path}/Shader"))
+    shader.SetSourceAsset(Sdf.AssetPath("OmniPBR.mdl"), "mdl")
+    shader.SetSourceAssetSubIdentifier("OmniPBR", "mdl")
+    shader.CreateInput("diffuse_color_constant", Sdf.ValueTypeNames.Color3f).Set(
+        Gf.Vec3f(1.0, 1.0, 1.0)
+    )
 
-    if texture_path and os.path.isfile(texture_path):
-        tex_abs = os.path.abspath(texture_path).replace("\\", "/")
-        st_reader = UsdShade.Shader.Define(stage, Sdf.Path(f"{mat_path}/stReader"))
-        st_reader.CreateIdAttr("UsdPrimvarReader_float2")
-        st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
-        st_reader.CreateInput("fallback", Sdf.ValueTypeNames.Float2).Set(Gf.Vec2f(0.0, 0.0))
+    asset = texture_asset
+    if not asset and texture_path and os.path.isfile(texture_path):
+        asset = os.path.abspath(texture_path).replace("\\", "/")
+    if asset:
+        shader.CreateInput("diffuse_texture", Sdf.ValueTypeNames.Asset).Set(
+            Sdf.AssetPath(asset)
+        )
+    elif texture_path:
+        print(f"box_mesh_builder: texture missing {texture_path}, using white OmniPBR")
 
-        tex_shader = UsdShade.Shader.Define(stage, Sdf.Path(f"{mat_path}/DiffuseTexture"))
-        tex_shader.CreateIdAttr("UsdUVTexture")
-        tex_shader.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath(tex_abs))
-        tex_shader.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("sRGB")
-        tex_shader.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set("clamp")
-        tex_shader.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set("clamp")
-        tex_shader.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(
-            st_reader.ConnectableAPI(), "result"
-        )
-        tex_shader.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
-        shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
-            tex_shader.ConnectableAPI(), "rgb"
-        )
-    else:
-        shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
-            Gf.Vec3f(0.72, 0.72, 0.72)
-        )
-        if texture_path:
-            print(f"box_mesh_builder: texture missing {texture_path}, using gray fallback")
-
-    material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    shader.CreateOutput("out", Sdf.ValueTypeNames.Token)
+    material.CreateSurfaceOutput("mdl").ConnectToSource(shader.ConnectableAPI(), "out")
+    material.CreateDisplacementOutput("mdl").ConnectToSource(shader.ConnectableAPI(), "out")
+    material.CreateVolumeOutput("mdl").ConnectToSource(shader.ConnectableAPI(), "out")
 
     prim = stage.GetPrimAtPath(mesh_path)
     if prim and prim.IsValid():
-        UsdShade.MaterialBindingAPI(prim).Bind(material)
+        if not prim.HasAPI(UsdShade.MaterialBindingAPI):
+            UsdShade.MaterialBindingAPI.Apply(prim)
+        UsdShade.MaterialBindingAPI(prim).Bind(
+            material, UsdShade.Tokens.strongerThanDescendants
+        )
 
 
 def build_box_mesh_on_stage(
@@ -190,12 +444,15 @@ def build_box_mesh_on_stage(
     *,
     mesh_path: Optional[str] = None,
     looks_root: Optional[str] = None,
+    write_collision: bool = True,
 ) -> bool:
     """在 Stage 上创建 mesh 并绑定贴图。
 
     Args:
         mesh_path: mesh prim 路径，默认 ``BOX_VISUAL_PATH/mesh``。
         looks_root: 材质 Looks 根路径，默认 ``BOX_LINK_PATH/Looks``。
+        write_collision: 为 False 时不写 ``/World/grasp_box/collision_geo``
+            （离线烘焙 ``grasp_box_baked.usdc`` 必须关掉，否则会污染 defaultPrim）。
     """
     mesh_path = mesh_path or f"{BOX_VISUAL_PATH}/mesh"
     looks_root = looks_root or f"{BOX_LINK_PATH}/Looks"
@@ -238,7 +495,20 @@ def build_box_mesh_on_stage(
         st_attr.Set(st)
 
     texture_path = resolve_box_texture_path(box_dir)
-    _apply_material(stage, mesh_path, texture_path, looks_root)
+    # 烘焙到 grasp_box_baked.usdc 时用相对 ./textures/，与采集 paper_box 一致
+    tex_rel = ensure_box_texture_sidecar(box_dir)
+    _apply_material(
+        stage,
+        mesh_path,
+        texture_path,
+        looks_root,
+        texture_asset=tex_rel,
+    )
+    if write_collision:
+        try:
+            setup_box_collision(stage, box_dir=box_dir, mesh_data=mesh_data)
+        except Exception as exc:
+            print(f"box_mesh_builder: setup_box_collision failed (visual mesh kept): {exc}")
     if texture_path and os.path.isfile(texture_path):
         print(f"box_mesh_builder: mesh + texture at {mesh_path}")
     else:
