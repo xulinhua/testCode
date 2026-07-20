@@ -248,7 +248,20 @@ void GraspExecutor::prepare_transit_poses(GraspPlan & plan)
 {
   geometry_msgs::msg::Pose ee;
   const bool have_ee = current_ee_cb_ && current_ee_cb_(plan.arm_id, ee);
-  fill_plan_waypoints(plan, cfg_, have_ee ? &ee : nullptr);
+  if (plan.preserve_waypoints) {
+    // GraspNet 已给出方向相关的 pregrasp/grasp；这里只能补当前 XY 的安全抬高，
+    // 不能调用 fill_plan_waypoints，否则会被盒子固定顶抓姿态覆盖。
+    plan.has_raise = have_ee;
+    plan.need_vertical_raise = false;
+    if (have_ee) {
+      plan.raise = ee;
+      plan.raise.position.z = std::max(ee.position.z, plan.pregrasp.position.z);
+      plan.raise.orientation = plan.pregrasp.orientation;
+      plan.need_vertical_raise = ee.position.z < plan.raise.position.z - 0.015;
+    }
+  } else {
+    fill_plan_waypoints(plan, cfg_, have_ee ? &ee : nullptr);
+  }
   if (!have_ee) {
     publish_log("[executor] WARN no current EE; skip raise, keep plan orientation");
   } else {
@@ -259,6 +272,8 @@ void GraspExecutor::prepare_transit_poses(GraspPlan & plan)
 
 std::vector<GraspExecutor::StepItem> GraspExecutor::build_step_list(const GraspPlan & plan) const
 {
+  // 单步与连续模式共享这一顺序契约。Raise/Reorient 是条件步骤，
+  // 其余步骤始终存在，确保“先开爪、闭合后再抬升”。
   std::vector<StepItem> items;
   {
     StepItem s;
@@ -443,7 +458,9 @@ GraspStepResult GraspExecutor::step_once()
           if (item.kind == StepKind::Reorient) {
             // 用规划腕位（指尖固定盒心）；勿锁 ee_before 腕部，否则 yaw 一变 TCP 就偏
             stamped.pose = item.pose;
-          } else if (have_before) {
+          } else if (have_before && !plan.preserve_waypoints) {
+            // 盒子模式锁定实测 XY，抵消前一步到位误差；GraspNet 模式必须保留
+            // 倾斜接近轴计算出的完整 XYZ，不能套用 vertical_axis_pose。
             stamped.pose = vertical_axis_pose(item.pose, ee_before);
           }
         }
@@ -566,14 +583,17 @@ void GraspExecutor::run_sequence(GraspPlan plan)
 
     // 4) 旋转完成后再下降（顶抓姿态，只改 Z）
     stamped.pose = plan.grasp;
-    {
+    if (!plan.preserve_waypoints) {
       geometry_msgs::msg::Pose ee_now;
       if (current_ee_cb_ && current_ee_cb_(plan.arm_id, ee_now)) {
         stamped.pose = vertical_axis_pose(plan.grasp, ee_now);
       }
     }
     publish_status("step descend");
-    publish_log("[executor] descend AFTER reorient: only Z down");
+    publish_log(
+      plan.preserve_waypoints ?
+      "[executor] descend: use frozen GraspNet approach waypoint" :
+      "[executor] descend AFTER reorient: only Z down");
     if (!send_arm_pose_and_wait(plan.arm_id, stamped, "descend") || shutdown_.load()) {
       publish_status(shutdown_.load() ? "CANCELLED" : "ABORT descend");
       return;
@@ -590,14 +610,17 @@ void GraspExecutor::run_sequence(GraspPlan plan)
 
     // 6) 提起（顶抓姿态不变，只改 Z）
     stamped.pose = plan.lift;
-    {
+    if (!plan.preserve_waypoints) {
       geometry_msgs::msg::Pose ee_now;
       if (current_ee_cb_ && current_ee_cb_(plan.arm_id, ee_now)) {
         stamped.pose = vertical_axis_pose(plan.lift, ee_now);
       }
     }
     publish_status("step lift");
-    publish_log("[executor] lift: keep grasp top-down");
+    publish_log(
+      plan.preserve_waypoints ?
+      "[executor] lift: preserve GraspNet orientation, world +Z" :
+      "[executor] lift: keep grasp top-down");
     if (!send_arm_pose_and_wait(plan.arm_id, stamped, "lift") || shutdown_.load()) {
       publish_status(shutdown_.load() ? "CANCELLED" : "ABORT lift");
       return;

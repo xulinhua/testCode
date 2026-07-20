@@ -27,10 +27,14 @@ public:
   GraspArmExecutor();
 
 private:
+  /// 缓存 Isaac 实测关节，作为每次 IK 的最新种子。
   void on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg);
+  /// 更新 open/close 兼容命令所作用的机械臂。
   void on_arm_id(const std_msgs::msg::Int32::SharedPtr msg);
   void on_target_arm_pose(const nova_grasp_moveit::msg::ArmPose::SharedPtr msg);
+  /// 校验腕部 Pose、组装当前关节种子并异步请求 MoveIt IK。
   void process_pose_goal(int arm_id, const geometry_msgs::msg::PoseStamped & pose_in);
+  /// 提取指定单臂的 IK 解并发布严格单臂关节子集。
   void handle_ik_response(
     const rclcpp::Client<moveit_msgs::srv::GetPositionIK>::SharedFuture & future,
     int request_arm_id, const std::string & request_prefix);
@@ -39,8 +43,10 @@ private:
   /// command_map 内有哪些关节就只发哪些（Isaac 严格单臂）；MuJoCo 数组仍拼全量
   void publish_command(
     const std::unordered_map<std::string, double> & command_map, bool force = false);
+  /// 输出目标关节及角度，供 Qt“机械臂状态”日志页显示。
   void publish_pose_joint_debug_lines(
     const std::unordered_map<std::string, double> & command_map, int request_arm_id);
+  /// MuJoCo 全量数组按“本次命令→上次目标→当前实测→0”解析保持值。
   double resolve_command_value(
     const std::string & joint, const std::unordered_map<std::string, double> & command_map) const;
 
@@ -56,8 +62,10 @@ private:
   std::unordered_map<std::string, double> last_published_command_map_;
   bool has_last_command_{false};
   int joint_command_burst_count_{5};
+  bool publish_mujoco_joint_array_{true};
   mutable std::mutex joint_mu_;
 
+  /// 标记当前有效 IK 请求；新请求会使旧回调和旧超时定时器失效。
   struct IkRequestContext
   {
     std::atomic<bool> active{true};

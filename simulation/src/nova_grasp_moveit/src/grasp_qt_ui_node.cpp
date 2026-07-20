@@ -4,6 +4,10 @@
 #include "nova_grasp_moveit/grasp_ros_node.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+// 线程模型：
+// - 主线程进入 QApplication::exec()，所有 QWidget 只能在该线程访问；
+// - spin_thread 执行 ROS 订阅、TF 定时器和服务回调；
+// - GraspRosNode::snapshot() 是两线程之间的只读数据边界。
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);

@@ -37,6 +37,7 @@ rosidl_get_typesupport_target(
 
 include_directories(include)
 
+# Qt/ROS 后端共用静态库；grasp_qt_ui_node 只保留 QApplication 与 ROS spin 入口。
 add_library(nova_grasp_moveit_core STATIC
   src/grasp_planner.cpp
   src/grasp_executor.cpp
@@ -94,7 +95,7 @@ install(DIRECTORY include/
   DESTINATION include/
 )
 
-install(DIRECTORY config launch scripts
+install(DIRECTORY config launch
   DESTINATION share/${PROJECT_NAME}/
 )
 

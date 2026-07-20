@@ -933,7 +933,7 @@ class SessionController:
         if self._external_grasp:
             print(
                 "SessionController: external grasp ON — run nova_grasp_moveit "
-                "(ros2 launch nova_grasp_moveit grasp_moveit.launch.py)"
+                "(ros2 launch nova_grasp_moveit grasp_stack.launch.py)"
             )
             return False
         if not self._timeline.is_playing():

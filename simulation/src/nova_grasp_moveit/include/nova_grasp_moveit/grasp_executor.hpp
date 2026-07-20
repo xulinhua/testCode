@@ -16,6 +16,7 @@
 namespace nova_grasp_moveit
 {
 
+/// 单步状态机一次调用的结果。
 struct GraspStepResult
 {
   bool ok{false};
@@ -27,6 +28,10 @@ struct GraspStepResult
   std::string error_message;
 };
 
+/// 将 GraspPlan 编排为夹爪和腕部命令，支持连续线程和同步单步两种模式。
+///
+/// 本类不直接求 IK；腕部 Pose 通过 ArmPose 发布给独立的 GraspArmExecutor。
+/// current_ee 回调提供实时 TF，pose-step 回调用 /nova_pose_log 判断 IK 是否完成。
 class GraspExecutor
 {
 public:
@@ -45,10 +50,13 @@ public:
     double step_settle_sec = 2.0,
     double gripper_settle_sec = 0.8);
 
+  /// 更新后续规划/执行使用的参数；不会修改正在运行计划的副本。
   void set_config(const GraspPlannerConfig & cfg);
   void set_timing(double step_settle_sec, double gripper_settle_sec);
   bool is_busy() const;
+  /// 后台线程连续执行完整计划；busy 时返回 false。
   bool start_sequence(const GraspPlan & plan);
+  /// 兼容入口：从单个 Pose 创建基础计划后连续执行。
   bool start_from_grasp_pose(const geometry_msgs::msg::PoseStamped & grasp_pose);
 
   /// 计算后准备单步：刷新当前 EE、填路点、重置步进游标
@@ -59,14 +67,18 @@ public:
   int step_count() const;
   void reset_step_mode();
 
+  /// 注入 UI 状态、日志和硬件访问回调，避免执行器依赖 Qt/TF 实现。
   void set_callbacks(StatusCallback status_cb, LogCallback log_cb);
   void set_gripper_apply_callback(GripperApplyCallback cb);
   void set_current_ee_callback(CurrentEeCallback cb);
   void set_pose_step_callbacks(PoseStepResetCallback reset_cb, PoseStepWaitCallback wait_cb);
+  /// 发布 open/close 兼容命令；正常抓取使用精确 opening 回调。
   void send_gripper(const std::string & cmd);
+  /// 请求正在运行的序列在步骤边界退出。
   void request_shutdown();
 
 private:
+  /// 固定的执行步骤类型；是否包含 Raise/Reorient 由计划标志决定。
   enum class StepKind
   {
     GripperOpen,
@@ -78,6 +90,7 @@ private:
     Lift
   };
 
+  /// 单步状态机中的扁平步骤；夹爪步骤没有 pose。
   struct StepItem
   {
     StepKind kind;
@@ -86,6 +99,7 @@ private:
     bool has_pose{false};
   };
 
+  /// 连续模式线程函数，执行顺序必须与 build_step_list 保持一致。
   void run_sequence(GraspPlan plan);
   void publish_status(const std::string & text);
   void publish_log(const std::string & text);
@@ -95,7 +109,9 @@ private:
     bool do_settle = true);
   void apply_gripper_opening(int arm_id, double opening_m);
   void sleep_sec(double sec);
+  /// 执行前刷新 EE；盒子计划重算路点，preserve_waypoints 计划只更新安全 Raise。
   void prepare_transit_poses(GraspPlan & plan);
+  /// 将计划转换为 open→raise?→move→reorient?→descend→close→lift。
   std::vector<StepItem> build_step_list(const GraspPlan & plan) const;
 
   GraspPlannerConfig cfg_;
@@ -104,7 +120,6 @@ private:
   rclcpp::Publisher<nova_grasp_moveit::msg::ArmPose>::SharedPtr arm_pose_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr gripper_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
-  rclcpp::Clock::SharedPtr clock_;
   StatusCallback status_cb_;
   LogCallback log_cb_;
   GripperApplyCallback gripper_apply_cb_;
@@ -113,7 +128,6 @@ private:
   PoseStepWaitCallback pose_step_wait_cb_;
   std::atomic<bool> busy_{false};
   std::atomic<bool> shutdown_{false};
-  std::mutex thread_mu_;
 
   mutable std::mutex step_mu_;
   GraspPlan step_plan_;

@@ -157,7 +157,6 @@ void fill_plan_waypoints(
 
   plan.has_raise = false;
   plan.need_vertical_raise = false;
-  plan.need_descend = false;
   if (current_ee != nullptr) {
     const double wrist_pre_z = plan.pregrasp.position.z;
     plan.need_vertical_raise = current_ee->position.z < wrist_pre_z - 0.015;

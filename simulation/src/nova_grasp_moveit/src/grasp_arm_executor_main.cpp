@@ -3,6 +3,8 @@
 #include "nova_grasp_moveit/grasp_arm_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
 
+// 独立进程运行 IK executor，使 Qt 节点只负责规划编排；即使 UI 线程执行
+// 候选筛选，姿态命令的 /compute_ik 响应仍可由本节点持续处理。
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);

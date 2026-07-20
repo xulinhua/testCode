@@ -54,10 +54,13 @@ def generate_launch_description():
         parameters=[LaunchConfiguration("config_file")],
     )
 
+    # 独立 IK/关节执行器：订阅 UI 发出的 ArmPose，调用同一 move_group 的
+    # /compute_ik，再发布 Isaac /joint_command。它不创建 Qt 控件。
     executor_node = Node(
         package="nova_grasp_moveit",
         executable="grasp_arm_executor_node",
         output="screen",
+        parameters=[LaunchConfiguration("config_file")],
     )
 
     return LaunchDescription(

@@ -46,8 +46,6 @@ def generate_launch_description():
         "default_planning_pipeline": "ompl",
         "ompl": _load_yaml("config/moveit/ompl_planning.yaml"),
     }
-    trajectory_execution = _load_yaml("config/moveit/moveit_controllers.yaml")
-
     move_group_node = Node(
         package="moveit_ros_move_group",
         executable="move_group",
@@ -59,7 +57,6 @@ def generate_launch_description():
             robot_description_kinematics,
             joint_limits,
             planning_pipeline_config,
-            trajectory_execution,
             {"allow_trajectory_execution": False},
             {"publish_planning_scene": False},
             {"publish_geometry_updates": False},

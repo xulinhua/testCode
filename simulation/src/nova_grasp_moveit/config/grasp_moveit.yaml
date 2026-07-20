@@ -1,28 +1,48 @@
 /**:
   ros__parameters:
+    # 输入目标话题
     box_topic: "/box_pose"
+    graspnet_topic: "/yolo_graspnet/collision_free_grasps"
+    # GraspNet 局部 +X 与 base_link -Z 的最大夹角；UI 可覆盖
+    graspnet_top_max_angle_deg: 30.0
+    # 旧消息 frame 为空时的兼容默认值
     pose_frame: "base_link"
+
+    # UI 后端与独立 IK executor 之间的接口
     target_arm_pose_topic: "/nova_target_arm_pose"
+    arm_id_topic: "/nova_arm_id"
     gripper_topic: "/nova_gripper_goal"
     status_topic: "/nova_grasp/status"
     pose_log_topic: "/nova_pose_log"
+
+    # 路点几何，长度单位均为 m
+    # 盒子模式按 base_link X 分界选臂；GraspNet 模式会测试双臂 IK
     arm_split_x: 0.40
     pregrasp_z_offset: 0.15
     lift_z_offset: 0.15
     box_grasp_z_offset: 0.0
+    # J*_6 腕部到两指中心沿 TCP +Z 的距离
     ee_tcp_z_offset: 0.20
-    approach_raise_clearance: 0.08
+    # 预抓取最小净空
     min_approach_clearance: 0.15
+    # 盒子模式下降前的绝对顶抓 yaw，单位 deg
     grasp_yaw_offset_deg: 90.0
+
+    # 每个腕部/夹爪步骤的等待时间，单位 s
     step_settle_sec: 2.0
     gripper_settle_sec: 0.8
+
+    # 两指之间的目标开口
     gripper_open_m: 0.08
     gripper_close_m: 0.02
-    use_top_down_if_identity: true
-    use_box_yaw_only: false
+
+    # TF 腕部 frame 与公共参考系
     ee_frame_arm0: "J1_6"
     ee_frame_arm1: "J2_6"
     ref_frame: "base_link"
+
+    # Isaac 主命令通道；burst 用于降低仿真订阅漏采概率
     joint_command_topic: "/joint_command"
     joint_command_burst_count: 5
+    # 同时发布旧 /arm_controller/commands 全量数组
     publish_mujoco_joint_array: true

@@ -20,9 +20,9 @@ namespace nova_grasp_moveit
 GraspArmExecutor::GraspArmExecutor()
 : Node("grasp_arm_executor"), arm_id_(0)
 {
-  arm_groups_ = {{0, "l_arm"}, {1, "r_arm"}, {2, "j3_arm"}, {3, "j4_arm"}};
-  ee_links_ = {{0, "J1_6"}, {1, "J2_6"}, {2, "J3_6"}, {3, "J4_6"}};
-  arm_prefix_ = {{0, "J1_"}, {1, "J2_"}, {2, "J3_"}, {3, "J4_"}};
+  arm_groups_ = {{0, "l_arm"}, {1, "r_arm"}};
+  ee_links_ = {{0, "J1_6"}, {1, "J2_6"}};
+  arm_prefix_ = {{0, "J1_"}, {1, "J2_"}};
 
   // 仅双臂；Isaac ArticulationController 认 /joint_command
   control_joint_order_ = {
@@ -35,27 +35,38 @@ GraspArmExecutor::GraspArmExecutor()
   gripper_open_ = {{0, {0.02, -0.02}}, {1, {0.02, -0.02}}};
   gripper_close_ = {{0, {-0.04, 0.04}}, {1, {-0.04, 0.04}}};
 
+  declare_parameter<std::string>("target_arm_pose_topic", "/nova_target_arm_pose");
+  declare_parameter<std::string>("gripper_topic", "/nova_gripper_goal");
+  declare_parameter<std::string>("pose_log_topic", "/nova_pose_log");
+  declare_parameter<std::string>("arm_id_topic", "/nova_arm_id");
   declare_parameter<std::string>("joint_command_topic", "/joint_command");
   declare_parameter<int>("joint_command_burst_count", 5);
+  declare_parameter<bool>("publish_mujoco_joint_array", true);
   joint_command_burst_count_ = std::max(1, static_cast<int>(get_parameter("joint_command_burst_count").as_int()));
+  publish_mujoco_joint_array_ = get_parameter("publish_mujoco_joint_array").as_bool();
 
   ik_client_ = create_client<moveit_msgs::srv::GetPositionIK>("/compute_ik");
-  command_pub_ = create_publisher<std_msgs::msg::Float64MultiArray>("/arm_controller/commands", 10);
+  if (publish_mujoco_joint_array_) {
+    command_pub_ = create_publisher<std_msgs::msg::Float64MultiArray>("/arm_controller/commands", 10);
+  }
   auto joint_cmd_qos = rclcpp::QoS(rclcpp::KeepLast(10));
   joint_cmd_qos.reliable();
   joint_command_pub_ = create_publisher<sensor_msgs::msg::JointState>(
     get_parameter("joint_command_topic").as_string(), joint_cmd_qos);
-  pose_log_pub_ = create_publisher<std_msgs::msg::String>("/nova_pose_log", 20);
+  const auto pose_log_topic = get_parameter("pose_log_topic").as_string();
+  pose_log_pub_ = create_publisher<std_msgs::msg::String>(pose_log_topic, 20);
 
   joint_state_sub_ = create_subscription<sensor_msgs::msg::JointState>(
     "/joint_states", 50, std::bind(&GraspArmExecutor::on_joint_state, this, std::placeholders::_1));
   arm_id_sub_ = create_subscription<std_msgs::msg::Int32>(
-    "/nova_arm_id", 10, std::bind(&GraspArmExecutor::on_arm_id, this, std::placeholders::_1));
+    get_parameter("arm_id_topic").as_string(), 10,
+    std::bind(&GraspArmExecutor::on_arm_id, this, std::placeholders::_1));
   target_arm_pose_sub_ = create_subscription<nova_grasp_moveit::msg::ArmPose>(
-    "/nova_target_arm_pose", 10,
+    get_parameter("target_arm_pose_topic").as_string(), 10,
     std::bind(&GraspArmExecutor::on_target_arm_pose, this, std::placeholders::_1));
   gripper_sub_ = create_subscription<std_msgs::msg::String>(
-    "/nova_gripper_goal", 10, std::bind(&GraspArmExecutor::on_gripper_goal, this, std::placeholders::_1));
+    get_parameter("gripper_topic").as_string(), 10,
+    std::bind(&GraspArmExecutor::on_gripper_goal, this, std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(), "grasp_arm_executor ready.");
   if (!ik_client_->wait_for_service(200ms)) {
@@ -65,9 +76,11 @@ GraspArmExecutor::GraspArmExecutor()
   }
   RCLCPP_INFO(
     get_logger(),
-    "Sub: /nova_target_arm_pose, /nova_gripper_goal; "
-    "pub: %s + /arm_controller/commands",
-    get_parameter("joint_command_topic").as_string().c_str());
+    "Sub: %s, %s; pub: %s%s",
+    get_parameter("target_arm_pose_topic").as_string().c_str(),
+    get_parameter("gripper_topic").as_string().c_str(),
+    get_parameter("joint_command_topic").as_string().c_str(),
+    publish_mujoco_joint_array_ ? " + /arm_controller/commands" : "");
 }
 
 void GraspArmExecutor::on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg)
@@ -138,8 +151,7 @@ void GraspArmExecutor::process_pose_goal(
            << "[INFO] IK seed (current joints) arm=" << arm_id;
   for (const auto & kv : joint_snapshot) {
     std::string name = kv.first;
-    if (name.rfind("J1_", 0) != 0 && name.rfind("J2_", 0) != 0 &&
-      name.rfind("J3_", 0) != 0 && name.rfind("J4_", 0) != 0)
+    if (name.rfind("J1_", 0) != 0 && name.rfind("J2_", 0) != 0)
     {
       continue;
     }
@@ -273,6 +285,7 @@ void GraspArmExecutor::handle_ik_response(
   const auto & pos = result->solution.joint_state.position;
   for (size_t i = 0; i < names.size() && i < pos.size(); ++i) {
     std::string target_name = names[i];
+    // 兼容旧 SRDF/控制器返回的 R1-1、R2-1 命名；Isaac 使用 J1_1_joint 格式。
     if (target_name.rfind("R1-", 0) == 0 && target_name.size() > 3) {
       target_name = "J1_" + target_name.substr(3) + "_joint";
     } else if (target_name.rfind("R2-", 0) == 0 && target_name.size() > 3) {
@@ -322,6 +335,7 @@ void GraspArmExecutor::publish_command(
     return;
   }
 
+  // 实时 UI 可能高频发送相同目标；死区避免无意义消息持续刷新 PhysX drive。
   constexpr double kJointDeadband = 3e-4;
   bool has_meaningful_change = force || !has_last_command_;
   if (!has_meaningful_change) {
@@ -353,14 +367,17 @@ void GraspArmExecutor::publish_command(
   }
   has_last_command_ = true;
 
-  // MuJoCo 数组仍按 16 DOF 全量（缺省用上次指令/实测），与 Isaac 子集分离
-  std_msgs::msg::Float64MultiArray array_msg;
-  array_msg.data.reserve(control_joint_order_.size());
-  for (const auto & joint : control_joint_order_) {
-    array_msg.data.push_back(resolve_command_value(joint, command_map));
+  // 可选 MuJoCo 数组按 16 DOF 全量（缺省用上次指令/实测），与 Isaac 子集分离。
+  if (publish_mujoco_joint_array_ && command_pub_) {
+    std_msgs::msg::Float64MultiArray array_msg;
+    array_msg.data.reserve(control_joint_order_.size());
+    for (const auto & joint : control_joint_order_) {
+      array_msg.data.push_back(resolve_command_value(joint, command_map));
+    }
+    command_pub_->publish(array_msg);
   }
-  command_pub_->publish(array_msg);
 
+  // Isaac 图启动或仿真步较慢时可能漏掉单帧 ROS 输入，短 burst 提高命令采样可靠性。
   for (int i = 0; i < joint_command_burst_count_; ++i) {
     js_cmd.header.stamp = now();
     joint_command_pub_->publish(js_cmd);
@@ -370,7 +387,7 @@ void GraspArmExecutor::publish_command(
 void GraspArmExecutor::publish_pose_joint_debug_lines(
   const std::unordered_map<std::string, double> & command_map, int request_arm_id)
 {
-  const std::array<int, 4> arms{0, 1, 2, 3};
+  const std::array<int, 2> arms{0, 1};
   for (const int arm : arms) {
     std::ostringstream oss;
     oss << "[POSE_DEBUG] req_arm=" << request_arm_id << " arm" << arm << ":";
