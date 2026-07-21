@@ -187,23 +187,37 @@ std::string format_pose_xyz_q(const geometry_msgs::msg::Pose & pose)
 std::vector<std::string> format_plan_path_lines(const GraspPlan & plan)
 {
   std::vector<std::string> lines;
-  lines.push_back(
-    "[PATH] arm_id=" + std::to_string(plan.arm_id) +
-    " frame=" + plan.frame_id +
-    "  open -> raise(Z) -> move_xy -> reorient(yaw) -> descend(Z) -> close -> lift");
+  if (plan.preserve_waypoints) {
+    lines.push_back(
+      "[PATH] mode=GraspNet arm_id=" + std::to_string(plan.arm_id) +
+      " frame=" + plan.frame_id +
+      "  open -> raise?(Z) -> move_xy(pregrasp) -> descend(grasp) -> close -> lift");
+    lines.push_back(
+      "[PATH] note: poses below are WRIST J*_6 (MoveIt IK input), "
+      "NOT GraspNet/TCP finger-center. "
+      "finger_center was converted by: wrist = tcp - R*[0,0,tcp_offset]");
+  } else {
+    lines.push_back(
+      "[PATH] mode=box arm_id=" + std::to_string(plan.arm_id) +
+      " frame=" + plan.frame_id +
+      "  open -> raise(Z) -> move_xy -> reorient(yaw) -> descend(Z) -> close -> lift");
+    lines.push_back(
+      "[PATH] note: reorient wrist != pregrasp wrist (same finger XY, grasp yaw); "
+      "do NOT lock wrist XYZ during reorient");
+  }
   {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(4)
-        << "[PATH] note: finger_grasp_z=" << plan.finger_grasp_target.z
+        << "[PATH] note: finger_tcp_z=" << plan.finger_grasp_target.z
         << " tcp_offset=" << plan.path_tcp_z_offset
         << " | wrist_z pre=" << plan.pregrasp.position.z
         << " grasp=" << plan.grasp.position.z
         << " lift=" << plan.lift.position.z;
+    // Recover intended finger Z at grasp/lift from wrist + offset along TCP +Z
+    // (log-only; approach may be slightly tilted).
+    oss << " | (expect finger≈wrist+offset along TCP +Z when top-down)";
     lines.push_back(oss.str());
   }
-  lines.push_back(
-    "[PATH] note: reorient wrist != pregrasp wrist (same finger XY, grasp yaw); "
-    "do NOT lock wrist XYZ during reorient");
   if (plan.has_raise) {
     lines.push_back(
       "[PATH] 1.raise    " + format_pose_xyz_q(plan.raise) +

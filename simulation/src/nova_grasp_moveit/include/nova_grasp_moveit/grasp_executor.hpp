@@ -39,7 +39,8 @@ public:
   using LogCallback = std::function<void(const std::string &)>;
   using GripperApplyCallback = std::function<void(int arm_id, double opening_m)>;
   using CurrentEeCallback = std::function<bool(int arm_id, geometry_msgs::msg::Pose & out)>;
-  using PoseStepResetCallback = std::function<void()>;
+  using PoseStepResetCallback =
+    std::function<void(const geometry_msgs::msg::Pose & expected_pose)>;
   using PoseStepWaitCallback = std::function<bool(double timeout_sec, std::string * fail_reason)>;
 
   GraspExecutor(

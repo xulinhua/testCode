@@ -282,7 +282,10 @@ def _write_fallback_box_collision(stage, size_xyz: Tuple[float, float, float]) -
     coll = UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
     coll.CreateCollisionEnabledAttr(True)
     if PhysxSchema is not None:
-        PhysxSchema.PhysxCollisionAPI.Apply(cube.GetPrim())
+        px_col = PhysxSchema.PhysxCollisionAPI.Apply(cube.GetPrim())
+        # PhysX 要求 contactOffset > restOffset 且 contactOffset > 0
+        px_col.CreateContactOffsetAttr(0.002)
+        px_col.CreateRestOffsetAttr(0.0)
     print(
         f"box_mesh_builder: fallback box collision @ {path} "
         f"({sx:.3f}×{sy:.3f}×{sz:.3f} m)"
@@ -321,7 +324,9 @@ def _write_collision_mesh(stage, mesh_data: BoxMeshData) -> bool:
     mesh_col.CreateApproximationAttr("convexHull")
 
     if PhysxSchema is not None:
-        PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
+        px_col = PhysxSchema.PhysxCollisionAPI.Apply(mesh.GetPrim())
+        px_col.CreateContactOffsetAttr(0.002)
+        px_col.CreateRestOffsetAttr(0.0)
         PhysxSchema.PhysxConvexHullCollisionAPI.Apply(mesh.GetPrim())
 
     print(

@@ -45,21 +45,30 @@ struct GraspPlan
 };
 
 /// 路点几何、夹爪开口和选臂参数；由 YAML 和 UI 共同更新。
+/// 盒子「抓取测试」与 GraspNet 路径参数彼此独立，禁止混用。
 struct GraspPlannerConfig
 {
   /// 盒子路径按目标 X 选臂：x >= split 时使用 J2。
   double arm_split_x{0.40};
-  /// 相对抓取高度的预抓取抬高；执行时还会与最低通过高度取 max
+  /// —— 抓取测试（/box_pose 顶抓）——
   double pregrasp_z_offset{0.15};
   double lift_z_offset{0.15};      ///< 闭合后沿 base_link +Z 抬升距离。
   double box_grasp_z_offset{0.0};  ///< /box_pose 中心的额外 Z 修正。
-  /// 腕部 J*_6 → 指尖中点沿 EE +Z 的距离 (m)。夹爪约 20cm。
+  /// 腕部 J*_6 → 指尖中点沿 EE +Z (m)；盒子路径默认 0.20。
   double ee_tcp_z_offset{0.20};
   /// 水平移动阶段相对抓取点的最低净空 (m)
   double min_approach_clearance{0.15};
   /// 下降前在盒子上方绕竖直轴的绝对偏航 (deg)；approach 固定 yaw=0，再转到此角
   double grasp_yaw_offset_deg{90.0};
-  /// 夹爪开口量 (m)：0=完全闭合，约 0.08=完全张开（对指对称命令）
+
+  /// —— GraspNet 路径（与上方盒子参数独立）——
+  /// 沿 TCP 接近轴的预抓取后退距离 (m)
+  double graspnet_pregrasp_distance{0.08};
+  double graspnet_lift_z_offset{0.10};       ///< 闭合后沿世界 +Z 抬升
+  double graspnet_ee_tcp_z_offset{0.12};     ///< URDF 两指中点约 0.116
+  double graspnet_min_approach_clearance{0.08};
+
+  /// 夹爪开口量 (m)：两页共用执行器开口命令
   double gripper_open_m{0.08};
   double gripper_close_m{0.02};
 };

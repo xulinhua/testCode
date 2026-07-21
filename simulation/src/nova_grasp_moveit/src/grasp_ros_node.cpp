@@ -3,12 +3,17 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdint>
 #include <future>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 #include "moveit_msgs/msg/position_ik_request.hpp"
+#include "nlohmann/json.hpp"
 #include "tf2/exceptions.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
@@ -58,6 +63,112 @@ bool finite_pose(const geometry_msgs::msg::Pose & pose)
          (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) > 1e-12;
 }
 
+std::string format_pose_compact(const geometry_msgs::msg::Pose & pose)
+{
+  std::ostringstream text;
+  text << std::fixed << std::setprecision(4)
+       << "p=(" << pose.position.x << "," << pose.position.y << "," << pose.position.z << ") "
+       << "q=(" << pose.orientation.x << "," << pose.orientation.y << ","
+       << pose.orientation.z << "," << pose.orientation.w << ")";
+  return text.str();
+}
+
+bool parse_graspnet_json(
+  const std::string & payload,
+  geometry_msgs::msg::PoseArray & output,
+  std::vector<double> & scores,
+  std::string & error)
+{
+  try {
+    const auto root = nlohmann::json::parse(payload);
+    if (!root.is_object()) {
+      error = "root is not a JSON object";
+      return false;
+    }
+    if (!root.contains("frame_id") || !root["frame_id"].is_string()) {
+      error = "missing string field: frame_id";
+      return false;
+    }
+    if (!root.contains("candidates") || !root["candidates"].is_array()) {
+      error = "missing array field: candidates";
+      return false;
+    }
+
+    output = geometry_msgs::msg::PoseArray();
+    scores.clear();
+    output.header.frame_id = root["frame_id"].get<std::string>();
+    const auto stamp_it = root.find("rgb_stamp");
+    if (stamp_it != root.end() && stamp_it->is_object()) {
+      output.header.stamp.sec = stamp_it->value("sec", 0);
+      output.header.stamp.nanosec = stamp_it->value("nanosec", 0u);
+    }
+
+    size_t invalid_count = 0;
+    for (const auto & candidate : root["candidates"]) {
+      try {
+        const auto & translation = candidate.at("translation_m");
+        const auto & rotation = candidate.at("rotation_matrix");
+        if (!translation.is_array() || translation.size() != 3 ||
+          !rotation.is_array() || rotation.size() != 3)
+        {
+          ++invalid_count;
+          continue;
+        }
+        bool matrix_shape_ok = true;
+        for (const auto & row : rotation) {
+          matrix_shape_ok = matrix_shape_ok && row.is_array() && row.size() == 3;
+        }
+        if (!matrix_shape_ok) {
+          ++invalid_count;
+          continue;
+        }
+
+        geometry_msgs::msg::Pose pose;
+        pose.position.x = translation.at(0).get<double>();
+        pose.position.y = translation.at(1).get<double>();
+        pose.position.z = translation.at(2).get<double>();
+        tf2::Matrix3x3 matrix(
+          rotation.at(0).at(0).get<double>(),
+          rotation.at(0).at(1).get<double>(),
+          rotation.at(0).at(2).get<double>(),
+          rotation.at(1).at(0).get<double>(),
+          rotation.at(1).at(1).get<double>(),
+          rotation.at(1).at(2).get<double>(),
+          rotation.at(2).at(0).get<double>(),
+          rotation.at(2).at(1).get<double>(),
+          rotation.at(2).at(2).get<double>());
+        tf2::Quaternion q;
+        matrix.getRotation(q);
+        q.normalize();
+        pose.orientation = tf2::toMsg(q);
+        if (finite_pose(pose)) {
+          output.poses.push_back(pose);
+          scores.push_back(
+            candidate.value("score", std::numeric_limits<double>::quiet_NaN()));
+        } else {
+          ++invalid_count;
+        }
+      } catch (const nlohmann::json::exception &) {
+        ++invalid_count;
+      }
+    }
+    if (!root["candidates"].empty() && output.poses.empty()) {
+      error = "all candidates have invalid translation_m or rotation_matrix";
+      return false;
+    }
+    if (invalid_count > 0) {
+      error =
+        "skipped " + std::to_string(invalid_count) + " malformed candidate(s)";
+    } else {
+      error.clear();
+    }
+    return true;
+  } catch (const nlohmann::json::exception & ex) {
+    error = ex.what();
+    return false;
+  }
+}
+
 geometry_msgs::msg::Quaternion graspnet_orientation_to_tcp(
   const geometry_msgs::msg::Quaternion & grasp_q_msg)
 {
@@ -65,12 +176,14 @@ geometry_msgs::msg::Quaternion graspnet_orientation_to_tcp(
   tf2::fromMsg(grasp_q_msg, grasp_q);
   grasp_q.normalize();
 
-  // GraspNet: local +X is approach. Robot TCP: local +Z points from wrist to fingers.
-  // Map TCP axes into GraspNet axes as Xtcp=Yg, Ytcp=Zg, Ztcp=Xg.
+  // Empirically, this GraspNet JSON uses local -X as the approach direction
+  // (top-down grasps then align with base_link -Z within ~22°, while +X is ~158°).
+  // Robot TCP: local +Z points from wrist to fingers / into the object.
+  // Map TCP axes into GraspNet axes as Xtcp=Yg, Ytcp=-Zg, Ztcp=-Xg.
   tf2::Matrix3x3 grasp_from_tcp(
-    0.0, 0.0, 1.0,
+    0.0, 0.0, -1.0,
     1.0, 0.0, 0.0,
-    0.0, 1.0, 0.0);
+    0.0, -1.0, 0.0);
   tf2::Quaternion grasp_to_tcp;
   grasp_from_tcp.getRotation(grasp_to_tcp);
   tf2::Quaternion tcp_q = grasp_q * grasp_to_tcp;
@@ -78,23 +191,95 @@ geometry_msgs::msg::Quaternion graspnet_orientation_to_tcp(
   return tf2::toMsg(tcp_q);
 }
 
+/// 绕 TCP +Z（接近轴）转 180°。顶抓时约等于 J*_6 ±180°，开合平面不变、两指对调。
+geometry_msgs::msg::Quaternion tcp_quat_rz180(
+  const geometry_msgs::msg::Quaternion & tcp_q_msg)
+{
+  tf2::Quaternion q;
+  tf2::fromMsg(tcp_q_msg, q);
+  q.normalize();
+  tf2::Quaternion rz180(tf2::Vector3(0.0, 0.0, 1.0), M_PI);
+  tf2::Quaternion out = q * rz180;
+  out.normalize();
+  return tf2::toMsg(out);
+}
+
+/// 开合轴 = TCP +X（URDF 两指沿 J*_6 ±X 分开）。水平投影 yaw ∈ (-90°, 90°] 则保留，
+/// 否则翻 Rz180。因此只有部分候选会动 J6，不是每次都转 180°。
+geometry_msgs::msg::Quaternion disambiguate_tcp_opening_halfplane(
+  const geometry_msgs::msg::Quaternion & tcp_q_msg, bool * flipped_out,
+  double * open_yaw_deg_out)
+{
+  tf2::Quaternion q;
+  tf2::fromMsg(tcp_q_msg, q);
+  q.normalize();
+  const tf2::Vector3 open = tf2::Matrix3x3(q) * tf2::Vector3(1.0, 0.0, 0.0);
+  const double yaw = std::atan2(open.y(), open.x());
+  const bool keep = (yaw > -M_PI / 2.0 && yaw <= M_PI / 2.0);
+  if (flipped_out) {
+    *flipped_out = !keep;
+  }
+  if (open_yaw_deg_out) {
+    *open_yaw_deg_out = rad_to_deg(yaw);
+  }
+  if (keep) {
+    return tcp_q_msg;
+  }
+  return tcp_quat_rz180(tcp_q_msg);
+}
+
+geometry_msgs::msg::Pose graspnet_optical_to_camera_link(
+  const geometry_msgs::msg::Pose & optical_pose)
+{
+  // Publisher payload uses ROS optical axes (+X right, +Y down, +Z forward),
+  // while the Isaac TF frame "cam0" uses camera-link axes
+  // (+X forward, +Y left, +Z up). Therefore camera_link=(Z,-X,-Y).
+  const tf2::Matrix3x3 camera_link_from_optical(
+    0.0, 0.0, 1.0,
+    -1.0, 0.0, 0.0,
+    0.0, -1.0, 0.0);
+  const tf2::Vector3 p_optical(
+    optical_pose.position.x, optical_pose.position.y, optical_pose.position.z);
+  const tf2::Vector3 p_camera_link = camera_link_from_optical * p_optical;
+
+  tf2::Quaternion q_optical;
+  tf2::fromMsg(optical_pose.orientation, q_optical);
+  q_optical.normalize();
+  tf2::Quaternion q_camera_link_from_optical;
+  camera_link_from_optical.getRotation(q_camera_link_from_optical);
+  tf2::Quaternion q_camera_link = q_camera_link_from_optical * q_optical;
+  q_camera_link.normalize();
+
+  geometry_msgs::msg::Pose output;
+  output.position.x = p_camera_link.x();
+  output.position.y = p_camera_link.y();
+  output.position.z = p_camera_link.z();
+  output.orientation = tf2::toMsg(q_camera_link);
+  return output;
+}
+
 double graspnet_top_angle_deg(const geometry_msgs::msg::Quaternion & grasp_q_msg)
 {
   tf2::Quaternion q;
   tf2::fromMsg(grasp_q_msg, q);
   q.normalize();
-  const tf2::Vector3 approach = tf2::Matrix3x3(q) * tf2::Vector3(1.0, 0.0, 0.0);
+  // Same convention as graspnet_orientation_to_tcp: approach = GraspNet local -X.
+  const tf2::Vector3 approach = tf2::Matrix3x3(q) * tf2::Vector3(-1.0, 0.0, 0.0);
   const double cos_angle = std::clamp(-approach.z(), -1.0, 1.0);
   return rad_to_deg(std::acos(cos_angle));
 }
 
 /// 将一个已在 base_link 下的 GraspNet TCP 位姿展开为完整腕部计划。
 ///
-/// pregrasp 沿 TCP 接近轴反向退出，lift 固定沿世界 +Z；姿态在三段中保持。
-/// 最后统一执行 TCP→J*_6 腕部换算，因此返回 Pose 可直接送 MoveIt IK。
+/// pregrasp 沿 TCP 接近轴反向退出 ``pre_distance_m``，lift 固定沿世界 +Z；
+/// 姿态在三段中保持。最后统一执行 TCP→J*_6 腕部换算，Pose 可直接送 MoveIt IK。
+///
+/// 注意：本机双臂腕部 Z 工作空间大约到 ~0.59 m。默认后退 0.15 m 时，
+/// 若抓取 TCP 已在 ~0.31 m，预抓取腕部会到 ~0.66 m 导致 IK -31；
+/// 选臂时应从大到小尝试后退距离。
 GraspPlan make_graspnet_plan(
   const geometry_msgs::msg::Pose & tcp_pose, int arm_id,
-  const GraspPlannerConfig & cfg)
+  const GraspPlannerConfig & cfg, double pre_distance_m, double lift_distance_m)
 {
   GraspPlan plan;
   plan.arm_id = arm_id;
@@ -108,9 +293,8 @@ GraspPlan make_graspnet_plan(
   tf2::fromMsg(tcp_pose.orientation, q);
   q.normalize();
   const tf2::Vector3 approach = tf2::Matrix3x3(q) * tf2::Vector3(0.0, 0.0, 1.0);
-  const double pre_dz = std::clamp(
-    std::max(cfg.pregrasp_z_offset, cfg.min_approach_clearance), 0.10, 0.30);
-  const double lift_dz = std::clamp(std::max(cfg.lift_z_offset, 0.10), 0.10, 0.30);
+  const double pre_dz = std::clamp(pre_distance_m, 0.05, 0.30);
+  const double lift_dz = std::clamp(lift_distance_m, 0.05, 0.30);
 
   plan.grasp = tcp_pose;
   plan.pregrasp = tcp_pose;
@@ -120,7 +304,7 @@ GraspPlan make_graspnet_plan(
   plan.lift = tcp_pose;
   plan.lift.position.z += lift_dz;
   plan.reorient = plan.pregrasp;
-  plan.path_tcp_z_offset = std::clamp(cfg.ee_tcp_z_offset, 0.0, 0.30);
+  plan.path_tcp_z_offset = std::clamp(cfg.graspnet_ee_tcp_z_offset, 0.0, 0.30);
 
   apply_tcp_to_wrist(plan.pregrasp, plan.path_tcp_z_offset);
   apply_tcp_to_wrist(plan.reorient, plan.path_tcp_z_offset);
@@ -138,6 +322,8 @@ GraspRosNode::GraspRosNode(const rclcpp::NodeOptions & options)
   declare_parameter<std::string>(
     "graspnet_topic", "/yolo_graspnet/collision_free_grasps");
   declare_parameter<double>("graspnet_top_max_angle_deg", 30.0);
+  declare_parameter<double>("graspnet_comm_ok_timeout_sec", 10.0);
+  declare_parameter<double>("graspnet_comm_stale_timeout_sec", 30.0);
   declare_parameter<std::string>("pose_frame", "base_link");
   declare_parameter<std::string>("target_arm_pose_topic", "/nova_target_arm_pose");
   declare_parameter<std::string>("arm_id_topic", "/nova_arm_id");
@@ -151,6 +337,10 @@ GraspRosNode::GraspRosNode(const rclcpp::NodeOptions & options)
   declare_parameter<double>("ee_tcp_z_offset", 0.20);
   declare_parameter<double>("min_approach_clearance", 0.15);
   declare_parameter<double>("grasp_yaw_offset_deg", 90.0);
+  declare_parameter<double>("graspnet_pregrasp_distance", 0.08);
+  declare_parameter<double>("graspnet_lift_z_offset", 0.10);
+  declare_parameter<double>("graspnet_ee_tcp_z_offset", 0.12);
+  declare_parameter<double>("graspnet_min_approach_clearance", 0.08);
   declare_parameter<double>("step_settle_sec", 2.0);
   declare_parameter<double>("gripper_settle_sec", 0.8);
   declare_parameter<double>("gripper_open_m", 0.08);
@@ -169,10 +359,23 @@ GraspRosNode::GraspRosNode(const rclcpp::NodeOptions & options)
   planner_cfg_.ee_tcp_z_offset = get_parameter("ee_tcp_z_offset").as_double();
   planner_cfg_.min_approach_clearance = get_parameter("min_approach_clearance").as_double();
   planner_cfg_.grasp_yaw_offset_deg = get_parameter("grasp_yaw_offset_deg").as_double();
+  planner_cfg_.graspnet_pregrasp_distance =
+    get_parameter("graspnet_pregrasp_distance").as_double();
+  planner_cfg_.graspnet_lift_z_offset =
+    get_parameter("graspnet_lift_z_offset").as_double();
+  planner_cfg_.graspnet_ee_tcp_z_offset =
+    get_parameter("graspnet_ee_tcp_z_offset").as_double();
+  planner_cfg_.graspnet_min_approach_clearance =
+    get_parameter("graspnet_min_approach_clearance").as_double();
   planner_cfg_.gripper_open_m = get_parameter("gripper_open_m").as_double();
   planner_cfg_.gripper_close_m = get_parameter("gripper_close_m").as_double();
   step_settle_sec_ = get_parameter("step_settle_sec").as_double();
   gripper_settle_sec_ = get_parameter("gripper_settle_sec").as_double();
+  graspnet_comm_ok_timeout_sec_ = std::max(
+    0.1, get_parameter("graspnet_comm_ok_timeout_sec").as_double());
+  graspnet_comm_stale_timeout_sec_ = std::max(
+    graspnet_comm_ok_timeout_sec_,
+    get_parameter("graspnet_comm_stale_timeout_sec").as_double());
 
   const auto target_topic = get_parameter("target_arm_pose_topic").as_string();
   const auto gripper_topic = get_parameter("gripper_topic").as_string();
@@ -200,9 +403,9 @@ GraspRosNode::GraspRosNode(const rclcpp::NodeOptions & options)
   box_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
     box_topic, box_pose_qos(),
     [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { on_box_pose(msg); });
-  graspnet_sub_ = create_subscription<geometry_msgs::msg::PoseArray>(
+  graspnet_sub_ = create_subscription<std_msgs::msg::String>(
     graspnet_topic, 10,
-    [this](const geometry_msgs::msg::PoseArray::SharedPtr msg) { on_graspnet_candidates(msg); });
+    [this](const std_msgs::msg::String::SharedPtr msg) { on_graspnet_candidates(msg); });
   status_sub_ = create_subscription<std_msgs::msg::String>(
     status_topic, 20,
     [this](const std_msgs::msg::String::SharedPtr msg) { on_grasp_status(msg); });
@@ -244,7 +447,9 @@ GraspRosNode::GraspRosNode(const rclcpp::NodeOptions & options)
       return true;
     });
   executor_->set_pose_step_callbacks(
-    [this]() { reset_pose_step_wait(); },
+    [this](const geometry_msgs::msg::Pose & expected) {
+      reset_pose_step_wait(expected);
+    },
     [this](double timeout_sec, std::string * fail_reason) {
       return wait_pose_step(timeout_sec, fail_reason);
     });
@@ -339,14 +544,16 @@ GraspRosSnapshot GraspRosNode::snapshot()
     snap.arm_comm_summary += " · IK --";
   }
 
-  // GraspNet 是连续发布源，使用比机械臂更严格的 1s/3s 新鲜度阈值。
+  // GraspNet 推理可能需要数秒；状态阈值独立配置，避免低频正常发布被误报为延迟。
   if (last_graspnet_time.nanoseconds() > 0) {
     snap.graspnet_age_sec = std::max(0.0, (now() - last_graspnet_time).seconds());
   }
   const bool has_graspnet_messages = snap.graspnet_message_count > 0;
-  snap.graspnet_comm_ok = has_graspnet_messages && snap.graspnet_age_sec < 1.0;
+  snap.graspnet_comm_ok =
+    has_graspnet_messages && snap.graspnet_age_sec < graspnet_comm_ok_timeout_sec_;
   snap.graspnet_comm_stale =
-    has_graspnet_messages && !snap.graspnet_comm_ok && snap.graspnet_age_sec < 3.0;
+    has_graspnet_messages && !snap.graspnet_comm_ok &&
+    snap.graspnet_age_sec < graspnet_comm_stale_timeout_sec_;
   std::ostringstream graspnet_age;
   graspnet_age << std::fixed << std::setprecision(1) << snap.graspnet_age_sec;
   if (!has_graspnet_messages) {
@@ -539,11 +746,13 @@ bool GraspRosNode::check_candidate_ik(
   req->ik_request.ik_link_name = arm_id == 0 ? "J1_6" : "J2_6";
   req->ik_request.pose_stamped = wrist_pose;
   req->ik_request.robot_state.joint_state = seed;
-  req->ik_request.timeout.sec = 2;
+  // 候选筛选会连打多次 IK；与 kinematics_solver_timeout(0.2s) 对齐，避免每次空等 2–3s。
+  req->ik_request.timeout.sec = 0;
+  req->ik_request.timeout.nanosec = 150000000;  // 0.15 s
   req->ik_request.avoid_collisions = false;
 
   auto future = ik_client_->async_send_request(req);
-  if (future.wait_for(std::chrono::seconds(3)) != std::future_status::ready) {
+  if (future.wait_for(std::chrono::milliseconds(400)) != std::future_status::ready) {
     reason = "IK timeout";
     return false;
   }
@@ -594,7 +803,7 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
     if (!data_.has_graspnet_candidates || data_.graspnet_candidates.poses.empty()) {
       out.error_title = "缺少 GraspNet 位姿";
       out.error_message =
-        "尚未收到非空的 " + data_.graspnet_topic + " PoseArray。";
+        "尚未收到 " + data_.graspnet_topic + " 中的有效 GraspNet JSON 候选。";
       return out;
     }
     frozen = data_.graspnet_candidates;
@@ -606,7 +815,7 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
   }
   if (frozen.header.frame_id.empty()) {
     out.error_title = "相机坐标系为空";
-    out.error_message = "PoseArray.header.frame_id 为空，无法转换到 base_link。";
+    out.error_message = "GraspNet JSON 的 frame_id 为空，无法转换到 base_link。";
     return out;
   }
 
@@ -615,19 +824,38 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
     int index{-1};
     double approach_deg{180.0};
     bool top{false};
+    bool ik_reachable{false};
+    /// 半平面消歧是否已翻 Rz180；再与 IK 对偶选择异或后得到最终 a_corrected。
+    bool halfplane_flip{false};
+    bool a_corrected{false};
     geometry_msgs::msg::PoseStamped tcp_base;
   };
   std::vector<Candidate> candidates;
   std::vector<std::string> transform_errors;
+  int invalid_pose_count = 0;
+  int transform_failure_count = 0;
   const double top_limit = std::clamp(top_max_angle_deg, 1.0, 89.0);
+  {
+    std::ostringstream line;
+    line << "[graspnet][TF] frozen frame=" << frozen.header.frame_id
+         << " stamp=" << frozen.header.stamp.sec << "."
+         << std::setw(9) << std::setfill('0') << frozen.header.stamp.nanosec
+         << " candidates=" << frozen.poses.size()
+         << " target=base_link";
+    push_log(line.str());
+  }
 
   for (size_t i = 0; i < frozen.poses.size(); ++i) {
     if (!finite_pose(frozen.poses[i])) {
+      ++invalid_pose_count;
+      push_log(
+        "[graspnet][TF][INVALID] #" + std::to_string(i) + " " +
+        format_pose_compact(frozen.poses[i]));
       continue;
     }
     geometry_msgs::msg::PoseStamped camera_pose;
     camera_pose.header = frozen.header;
-    camera_pose.pose = frozen.poses[i];
+    camera_pose.pose = graspnet_optical_to_camera_link(frozen.poses[i]);
     geometry_msgs::msg::PoseStamped grasp_base;
     // 优先使用消息时间戳保证图像/外参同步；缓存时间窗外时回退到最新 TF。
     try {
@@ -640,11 +868,17 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
         grasp_base = tf_buffer_->transform(
           camera_pose, "base_link", tf2::durationFromSec(0.25));
       } catch (const tf2::TransformException & latest_error) {
-        if (transform_errors.size() < 3) {
-          transform_errors.push_back(
-            "#" + std::to_string(i) + " " + first_error.what() +
-            " / latest: " + latest_error.what());
+        ++transform_failure_count;
+        const std::string detail =
+          "#" + std::to_string(i) + " source=" + frozen.header.frame_id +
+          " optical{" + format_pose_compact(frozen.poses[i]) + "}" +
+          " camera_link{" + format_pose_compact(camera_pose.pose) + "}" +
+          " | stamped: " + first_error.what() +
+          " | latest: " + latest_error.what();
+        if (transform_errors.size() < 8) {
+          transform_errors.push_back(detail);
         }
+        push_log("[graspnet][TF][FAIL] " + detail);
         continue;
       }
     }
@@ -657,22 +891,66 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
     candidate.tcp_base.header.frame_id = "base_link";
     candidate.tcp_base.pose.orientation =
       graspnet_orientation_to_tcp(grasp_base.pose.orientation);
+    // A：按开合轴水平 yaw 半平面消歧（≈ 部分场景 J6±180°）。
+    double open_yaw_deg = 0.0;
+    candidate.tcp_base.pose.orientation = disambiguate_tcp_opening_halfplane(
+      candidate.tcp_base.pose.orientation, &candidate.halfplane_flip, &open_yaw_deg);
+    candidate.a_corrected = candidate.halfplane_flip;
+    {
+      std::ostringstream line;
+      line << std::fixed << std::setprecision(2)
+           << "[graspnet][TF][OK] #" << i
+           << " optical{" << format_pose_compact(frozen.poses[i]) << "}"
+           << " camera_link{" << format_pose_compact(camera_pose.pose) << "}"
+           << " -> base_grasp{" << format_pose_compact(grasp_base.pose) << "}"
+           << " -> base_tcp{" << format_pose_compact(candidate.tcp_base.pose) << "}"
+           << " approach=" << candidate.approach_deg << "deg"
+           << " open_yaw=" << open_yaw_deg << "deg"
+           << (candidate.halfplane_flip ? " J6_FLIP" : " J6_keep");
+      push_log(line.str());
+    }
     candidates.push_back(candidate);
   }
 
   if (candidates.empty()) {
-    out.error_title = "候选转换失败";
-    out.error_message = "所有 GraspNet 位姿均无效，或相机坐标系无法转换到 base_link。";
-    for (const auto & err : transform_errors) {
-      push_log("[graspnet][TF] " + err);
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      data_.graspnet_base_candidates = geometry_msgs::msg::PoseArray();
+      data_.graspnet_base_candidates.header.frame_id = "base_link";
+      data_.graspnet_base_candidate_indices.clear();
+      data_.graspnet_base_candidate_ik_ok.clear();
+      data_.graspnet_base_candidate_a_corrected.clear();
+      ++data_.graspnet_base_revision;
+      data_.has_selected_graspnet_pose = false;
+      data_.selected_graspnet_index = -1;
+      data_.selected_graspnet_arm = -1;
+      data_.graspnet_selection_summary.clear();
     }
+    out.error_title = "候选转换失败";
+    std::ostringstream detail;
+    detail << "候选总数=" << frozen.poses.size()
+           << "，无效位姿=" << invalid_pose_count
+           << "，TF 失败=" << transform_failure_count
+           << "，成功=0。\n"
+           << "源坐标系=" << frozen.header.frame_id << "，目标坐标系=base_link。";
+    if (!transform_errors.empty()) {
+      detail << "\n\n具体 TF 错误：";
+      for (const auto & err : transform_errors) {
+        detail << "\n" << err;
+      }
+    }
+    out.error_message = detail.str();
     return out;
   }
+
+  // 保留表格显示顺序（转换顺序），IK 标记按同一顺序写入；
+  // 选解后可能把某行的 TCP 换成 Rz180 对偶，再写回 table_order。
+  std::vector<Candidate> table_order = candidates;
 
   const int top_count = static_cast<int>(std::count_if(
       candidates.begin(), candidates.end(), [](const Candidate & c) {return c.top;}));
   // 排序只表达几何优先级：顶抓在前，同类中越接近竖直向下越靠前。
-  // PoseArray 没有 score，因此不假设网络评分。
+  // JSON candidates 已按 collision_free_rank 排列；同类中再按顶部几何优先级排序。
   std::stable_sort(
     candidates.begin(), candidates.end(),
     [](const Candidate & a, const Candidate & b) {
@@ -685,66 +963,250 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
   bool selected = false;
   Candidate selected_candidate;
   GraspPlan selected_plan;
-  double selected_cost = std::numeric_limits<double>::infinity();
+  double selected_pre_dz = 0.0;
+  double selected_lift_dz = 0.0;
   std::string last_ik_reason;
-  for (const auto & candidate : candidates) {
-    // 对当前几何最优候选测试双臂；同一候选选 pregrasp+grasp 总移动较小者。
-    for (int arm_id = 0; arm_id <= 1; ++arm_id) {
-      GraspPlan plan = make_graspnet_plan(candidate.tcp_base.pose, arm_id, planner_cfg_);
-      geometry_msgs::msg::PoseStamped pre_pose;
-      pre_pose.header = candidate.tcp_base.header;
-      pre_pose.pose = plan.pregrasp;
-      geometry_msgs::msg::PoseStamped grasp_pose;
-      grasp_pose.header = candidate.tcp_base.header;
-      grasp_pose.pose = plan.grasp;
+  std::map<int, uint8_t> ik_ok_by_index;
+  // Prefer configured clearance, then shorten if wrist exceeds workspace
+  // (empirically wrist Z ≳ 0.59 m → IK -31).
+  const double preferred_pre = std::clamp(
+    std::max(
+      planner_cfg_.graspnet_pregrasp_distance,
+      planner_cfg_.graspnet_min_approach_clearance),
+    0.05, 0.30);
+  const double preferred_lift = std::clamp(
+    planner_cfg_.graspnet_lift_z_offset, 0.05, 0.30);
+  // 缩短扫描档位：默认档 + 两档更短，减少连打 IK 次数。
+  const std::vector<double> pre_distances = {preferred_pre, 0.08, 0.05};
+  const std::vector<double> lift_distances = {preferred_lift, 0.08, 0.05};
 
-      double pre_cost = 0.0;
-      double grasp_cost = 0.0;
-      std::string reason;
-      if (!check_candidate_ik(arm_id, pre_pose, pre_cost, reason) ||
-        !check_candidate_ik(arm_id, grasp_pose, grasp_cost, reason))
-      {
-        last_ik_reason =
-          "#" + std::to_string(candidate.index) + " arm=" + std::to_string(arm_id) +
-          " " + reason;
-        continue;
+  // 对单个 TCP 姿态探测可达性（不含 J6 对偶）。
+  auto probe_one_tcp =
+    [&](const geometry_msgs::msg::Pose & tcp_pose,
+      const std_msgs::msg::Header & header, int cand_index, bool full_search,
+      double * out_cost, GraspPlan * out_plan, double * out_pre, double * out_lift,
+      int * out_arm)
+    {
+      for (int arm_id = 0; arm_id <= 1; ++arm_id) {
+        bool grasp_unreachable = false;
+        for (const double pre_dz : pre_distances) {
+          if (pre_dz > preferred_pre + 1e-9) {
+            continue;
+          }
+          if (grasp_unreachable) {
+            break;
+          }
+          for (const double lift_dz : lift_distances) {
+            if (lift_dz > preferred_lift + 1e-9) {
+              continue;
+            }
+            GraspPlan plan = make_graspnet_plan(
+              tcp_pose, arm_id, planner_cfg_, pre_dz, lift_dz);
+            geometry_msgs::msg::PoseStamped pre_pose;
+            pre_pose.header = header;
+            pre_pose.pose = plan.pregrasp;
+            geometry_msgs::msg::PoseStamped grasp_pose;
+            grasp_pose.header = header;
+            grasp_pose.pose = plan.grasp;
+            geometry_msgs::msg::PoseStamped lift_pose;
+            lift_pose.header = header;
+            lift_pose.pose = plan.lift;
+
+            double pre_cost = 0.0;
+            double grasp_cost = 0.0;
+            double lift_cost = 0.0;
+            std::string reason;
+            if (!check_candidate_ik(arm_id, grasp_pose, grasp_cost, reason)) {
+              last_ik_reason =
+                "#" + std::to_string(cand_index) + " arm=" + std::to_string(arm_id) +
+                " grasp " + reason;
+              grasp_unreachable = true;
+              break;
+            }
+            if (!check_candidate_ik(arm_id, pre_pose, pre_cost, reason)) {
+              std::ostringstream fail;
+              fail << std::fixed << std::setprecision(3)
+                   << "#" << cand_index << " arm=" << arm_id
+                   << " pre_dz=" << pre_dz << "m wrist_z=" << plan.pregrasp.position.z
+                   << "m pre " << reason;
+              last_ik_reason = fail.str();
+              break;
+            }
+            if (full_search) {
+              if (!check_candidate_ik(arm_id, lift_pose, lift_cost, reason)) {
+                std::ostringstream fail;
+                fail << std::fixed << std::setprecision(3)
+                     << "#" << cand_index << " arm=" << arm_id
+                     << " lift_dz=" << lift_dz << "m wrist_z=" << plan.lift.position.z
+                     << "m lift " << reason;
+                last_ik_reason = fail.str();
+                continue;
+              }
+            }
+            if (out_cost) {
+              *out_cost = pre_cost + grasp_cost + (full_search ? lift_cost : 0.0);
+            }
+            if (out_plan) {
+              *out_plan = plan;
+            }
+            if (out_pre) {
+              *out_pre = pre_dz;
+            }
+            if (out_lift) {
+              *out_lift = lift_dz;
+            }
+            if (out_arm) {
+              *out_arm = arm_id;
+            }
+            return true;
+          }
+        }
       }
-      const double total_cost = pre_cost + grasp_cost;
-      if (!selected || total_cost < selected_cost) {
-        selected = true;
-        selected_candidate = candidate;
-        selected_plan = plan;
-        selected_cost = total_cost;
+      return false;
+    };
+
+  // A 的对偶：半平面消歧后再与 Rz180 比 IK 代价，靠近当前关节的 J6 解胜出。
+  auto probe_reachable =
+    [&](Candidate & candidate, bool full_search, double * out_cost,
+      GraspPlan * out_plan, double * out_pre, double * out_lift, int * out_arm)
+    {
+      geometry_msgs::msg::Pose tcp0 = candidate.tcp_base.pose;
+      geometry_msgs::msg::Pose tcp1 = tcp0;
+      tcp1.orientation = tcp_quat_rz180(tcp0.orientation);
+
+      double best_cost = std::numeric_limits<double>::infinity();
+      GraspPlan best_plan;
+      double best_pre = 0.0;
+      double best_lift = 0.0;
+      int best_arm = 0;
+      int best_ori = -1;
+
+      for (int ori = 0; ori < 2; ++ori) {
+        const auto & tcp = (ori == 0) ? tcp0 : tcp1;
+        double cost = 0.0;
+        GraspPlan plan;
+        double pre_dz = 0.0;
+        double lift_dz = 0.0;
+        int arm_id = 0;
+        if (!probe_one_tcp(
+            tcp, candidate.tcp_base.header, candidate.index, full_search,
+            &cost, &plan, &pre_dz, &lift_dz, &arm_id))
+        {
+          continue;
+        }
+        if (cost < best_cost) {
+          best_cost = cost;
+          best_plan = plan;
+          best_pre = pre_dz;
+          best_lift = lift_dz;
+          best_arm = arm_id;
+          best_ori = ori;
+        }
+      }
+      if (best_ori < 0) {
+        return false;
+      }
+      if (best_ori == 1) {
+        candidate.tcp_base.pose = tcp1;
+        // 半平面已翻再选对偶 → 回到原始映射；半平面未翻再选对偶 → 最终修正。
+        candidate.a_corrected = !candidate.halfplane_flip;
+        push_log(
+          "[graspnet][J6] #" + std::to_string(candidate.index) +
+          " use Rz180 (lower IK cost vs current joints)" +
+          (candidate.a_corrected ? " A_mark" : " A_undo"));
+      } else {
+        candidate.a_corrected = candidate.halfplane_flip;
+      }
+      if (out_cost) {
+        *out_cost = best_cost;
+      }
+      if (out_plan) {
+        *out_plan = best_plan;
+      }
+      if (out_pre) {
+        *out_pre = best_pre;
+      }
+      if (out_lift) {
+        *out_lift = best_lift;
+      }
+      if (out_arm) {
+        *out_arm = best_arm;
+      }
+      return true;
+    };
+
+  for (auto & candidate : candidates) {
+    GraspPlan plan;
+    double pre_dz = preferred_pre;
+    double lift_dz = preferred_lift;
+    int arm_id = 0;
+    const bool need_full = !selected;
+    const bool ok = probe_reachable(
+      candidate, need_full, nullptr, &plan, &pre_dz, &lift_dz, &arm_id);
+    ik_ok_by_index[candidate.index] = ok ? 1 : 0;
+    if (ok && need_full) {
+      selected = true;
+      selected_candidate = candidate;
+      selected_candidate.ik_reachable = true;
+      selected_plan = plan;
+      selected_pre_dz = pre_dz;
+      selected_lift_dz = lift_dz;
+      selected_plan.arm_id = arm_id;
+      // 已选出执行解后，其余候选只做 grasp+pre 可达性着色，不再扫 lift。
+    }
+  }
+
+  // 表格顺序与 candidates 同步（含 IK 选出的 J6 对偶姿态 / A 标记）。
+  for (auto & row : table_order) {
+    for (const auto & c : candidates) {
+      if (c.index == row.index) {
+        row.tcp_base = c.tcp_base;
+        row.a_corrected = c.a_corrected;
+        row.halfplane_flip = c.halfplane_flip;
+        break;
       }
     }
-    // 候选按“顶抓优先、接近竖直程度”排序；当前候选任一臂可达即不再降级。
-    if (selected) {
-      break;
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    data_.graspnet_base_candidates = geometry_msgs::msg::PoseArray();
+    data_.graspnet_base_candidates.header.frame_id = "base_link";
+    data_.graspnet_base_candidate_indices.clear();
+    data_.graspnet_base_candidate_ik_ok.clear();
+    data_.graspnet_base_candidate_a_corrected.clear();
+    for (const auto & candidate : table_order) {
+      data_.graspnet_base_candidates.poses.push_back(candidate.tcp_base.pose);
+      data_.graspnet_base_candidate_indices.push_back(candidate.index);
+      const auto it = ik_ok_by_index.find(candidate.index);
+      data_.graspnet_base_candidate_ik_ok.push_back(
+        it != ik_ok_by_index.end() ? it->second : static_cast<uint8_t>(0));
+      data_.graspnet_base_candidate_a_corrected.push_back(
+        candidate.a_corrected ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0));
     }
+    ++data_.graspnet_base_revision;
+    data_.has_selected_graspnet_pose = false;
+    data_.selected_graspnet_index = -1;
+    data_.selected_graspnet_arm = -1;
+    data_.graspnet_selection_summary.clear();
   }
 
   if (!selected) {
     out.error_title = "无可达抓取位姿";
-    out.error_message = "候选已转换到 base_link，但两条机械臂均无法完成预抓取和抓取 IK。";
+    out.error_message =
+      "候选已转换到 base_link，但两条机械臂均无法完成预抓取/抓取/抬升 IK。\n"
+      "常见原因：腕部过高（本机约 Z>0.59 m 无解）。";
     if (!last_ik_reason.empty()) {
       out.error_message += "\n最后结果：" + last_ik_reason;
     }
     return out;
   }
 
-  EePoseSnapshot ee;
-  {
-    std::lock_guard<std::mutex> lk(mu_);
-    ee = selected_plan.arm_id == 0 ? cached_arm1_ee_ : cached_arm2_ee_;
-  }
-  if (ee.ok) {
-    selected_plan.has_raise = true;
-    selected_plan.raise.position.x = ee.x;
-    selected_plan.raise.position.y = ee.y;
-    selected_plan.raise.position.z = std::max(ee.z, selected_plan.pregrasp.position.z);
-    selected_plan.raise.orientation = selected_plan.pregrasp.orientation;
-    selected_plan.need_vertical_raise = ee.z < selected_plan.raise.position.z - 0.015;
-  }
+  // GraspNet: 禁止在「当前 XY」抬到 pregrasp 高度。
+  // pregrasp.z 只在目标附近可达；在 home XY 抬到 0.61 会 IK -31（你看到的 raise 失败）。
+  // 直接 move_xy → 已校验过的 pregrasp。
+  selected_plan.has_raise = false;
+  selected_plan.need_vertical_raise = false;
 
   std::ostringstream summary;
   summary << std::fixed << std::setprecision(2)
@@ -752,6 +1214,8 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
           << " arm=J" << (selected_plan.arm_id + 1)
           << " approach=" << selected_candidate.approach_deg << "deg"
           << (selected_candidate.top ? " TOP" : " fallback")
+          << " pre_dz=" << selected_pre_dz << "m"
+          << " lift_dz=" << selected_lift_dz << "m"
           << " top=" << top_count << "/" << candidates.size();
 
   {
@@ -947,9 +1411,9 @@ bool GraspRosNode::set_graspnet_topic(
     return false;
   }
   try {
-    auto subscription = create_subscription<geometry_msgs::msg::PoseArray>(
+    auto subscription = create_subscription<std_msgs::msg::String>(
       normalized, 10,
-      [this](const geometry_msgs::msg::PoseArray::SharedPtr msg) {
+      [this](const std_msgs::msg::String::SharedPtr msg) {
         on_graspnet_candidates(msg);
       });
     {
@@ -958,10 +1422,18 @@ bool GraspRosNode::set_graspnet_topic(
       graspnet_topic_ = normalized;
       data_.graspnet_topic = normalized;
       data_.graspnet_candidates = geometry_msgs::msg::PoseArray();
+      data_.graspnet_scores.clear();
+      data_.graspnet_base_candidates = geometry_msgs::msg::PoseArray();
+      data_.graspnet_base_candidate_indices.clear();
+      data_.graspnet_base_candidate_ik_ok.clear();
+      data_.graspnet_base_candidate_a_corrected.clear();
+      ++data_.graspnet_base_revision;
       data_.has_graspnet_candidates = false;
       data_.graspnet_message_count = 0;
       data_.graspnet_top_count = 0;
       data_.has_selected_graspnet_pose = false;
+      data_.selected_graspnet_index = -1;
+      data_.selected_graspnet_arm = -1;
       data_.graspnet_selection_summary.clear();
       last_graspnet_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
     }
@@ -1002,12 +1474,28 @@ void GraspRosNode::on_box_pose(const geometry_msgs::msg::PoseStamped::SharedPtr 
 }
 
 void GraspRosNode::on_graspnet_candidates(
-  const geometry_msgs::msg::PoseArray::SharedPtr msg)
+  const std_msgs::msg::String::SharedPtr msg)
 {
+  geometry_msgs::msg::PoseArray parsed;
+  std::vector<double> scores;
+  std::string parse_note;
+  if (!parse_graspnet_json(msg->data, parsed, scores, parse_note)) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "Invalid GraspNet JSON on %s: %s",
+      graspnet_topic_.c_str(), parse_note.c_str());
+    return;
+  }
+  if (!parse_note.empty()) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "GraspNet JSON accepted with warning: %s", parse_note.c_str());
+  }
   std::lock_guard<std::mutex> lk(mu_);
   last_graspnet_time_ = now();
-  data_.graspnet_candidates = *msg;
-  data_.has_graspnet_candidates = !msg->poses.empty();
+  data_.graspnet_candidates = std::move(parsed);
+  data_.graspnet_scores = std::move(scores);
+  data_.has_graspnet_candidates = !data_.graspnet_candidates.poses.empty();
   ++data_.graspnet_message_count;
 }
 
@@ -1023,17 +1511,51 @@ void GraspRosNode::on_pose_log(const std_msgs::msg::String::SharedPtr msg)
   bool notify_step = false;
   PoseStepResult step_result = PoseStepResult::Pending;
   std::string fail_reason;
+
+  // 解析本次 IK 请求坐标，只有匹配当前等待目标后才接受后续 Ok/Fail。
+  if (line.find("[INFO] IK request") != std::string::npos) {
+    const auto xyz_pos = line.find("xyz=(");
+    if (xyz_pos != std::string::npos) {
+      double rx = 0.0;
+      double ry = 0.0;
+      double rz = 0.0;
+      if (std::sscanf(
+          line.c_str() + xyz_pos, "xyz=(%lf,%lf,%lf)", &rx, &ry, &rz) == 3)
+      {
+        std::lock_guard<std::mutex> lk(pose_step_mu_);
+        if (pose_step_expect_valid_) {
+          const double dx = rx - pose_step_expect_x_;
+          const double dy = ry - pose_step_expect_y_;
+          const double dz = rz - pose_step_expect_z_;
+          if ((dx * dx + dy * dy + dz * dz) <= 1e-6) {  // 1 mm
+            pose_step_saw_matching_request_ = true;
+          }
+        }
+      }
+    }
+  }
+
   if (line.find("Pose command sent") != std::string::npos) {
-    notify_step = true;
-    step_result = PoseStepResult::Ok;
+    std::lock_guard<std::mutex> lk(pose_step_mu_);
+    // 丢弃上一步迟到的成功日志，否则连续序列会在 move_xy 后跳过真正的 descend 发令。
+    if (pose_step_saw_matching_request_) {
+      notify_step = true;
+      step_result = PoseStepResult::Ok;
+    }
   } else if (line.find("[ERROR][NG] IK timeout") != std::string::npos) {
-    notify_step = true;
-    step_result = PoseStepResult::Fail;
-    fail_reason = "IK service timeout (非死锁，/compute_ik 12s 无响应)";
+    std::lock_guard<std::mutex> lk(pose_step_mu_);
+    if (pose_step_saw_matching_request_ || !pose_step_expect_valid_) {
+      notify_step = true;
+      step_result = PoseStepResult::Fail;
+      fail_reason = "IK service timeout (非死锁，/compute_ik 12s 无响应)";
+    }
   } else if (line.find("[ERROR][NG] IK failed") != std::string::npos) {
-    notify_step = true;
-    step_result = PoseStepResult::Fail;
-    fail_reason = "IK 无解 (MoveIt 计算失败，非 executor 死锁)";
+    std::lock_guard<std::mutex> lk(pose_step_mu_);
+    if (pose_step_saw_matching_request_ || !pose_step_expect_valid_) {
+      notify_step = true;
+      step_result = PoseStepResult::Fail;
+      fail_reason = "IK 无解 (MoveIt 计算失败，非 executor 死锁)";
+    }
   } else if (line.find("[ERROR] Pose goal rejected") != std::string::npos) {
     notify_step = true;
     step_result = PoseStepResult::Fail;
@@ -1073,9 +1595,22 @@ void GraspRosNode::on_pose_log(const std_msgs::msg::String::SharedPtr msg)
 
 void GraspRosNode::reset_pose_step_wait()
 {
+  geometry_msgs::msg::Pose empty;
+  reset_pose_step_wait(empty);
+  std::lock_guard<std::mutex> lk(pose_step_mu_);
+  pose_step_expect_valid_ = false;
+}
+
+void GraspRosNode::reset_pose_step_wait(const geometry_msgs::msg::Pose & expected_pose)
+{
   std::lock_guard<std::mutex> lk(pose_step_mu_);
   pose_step_result_ = PoseStepResult::Pending;
   pose_step_fail_reason_.clear();
+  pose_step_expect_x_ = expected_pose.position.x;
+  pose_step_expect_y_ = expected_pose.position.y;
+  pose_step_expect_z_ = expected_pose.position.z;
+  pose_step_expect_valid_ = true;
+  pose_step_saw_matching_request_ = false;
 }
 
 bool GraspRosNode::wait_pose_step(double timeout_sec, std::string * fail_reason)

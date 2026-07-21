@@ -5,6 +5,9 @@
     graspnet_topic: "/yolo_graspnet/collision_free_grasps"
     # GraspNet 局部 +X 与 base_link -Z 的最大夹角；UI 可覆盖
     graspnet_top_max_angle_deg: 30.0
+    # GraspNet 推理发布较慢：10 s 内正常，10–30 s 显示延迟，超过 30 s 显示中断
+    graspnet_comm_ok_timeout_sec: 10.0
+    graspnet_comm_stale_timeout_sec: 30.0
     # 旧消息 frame 为空时的兼容默认值
     pose_frame: "base_link"
 
@@ -16,25 +19,28 @@
     pose_log_topic: "/nova_pose_log"
 
     # 路点几何，长度单位均为 m
-    # 盒子模式按 base_link X 分界选臂；GraspNet 模式会测试双臂 IK
+    # —— 抓取测试（/box_pose）——
     arm_split_x: 0.40
     pregrasp_z_offset: 0.15
     lift_z_offset: 0.15
     box_grasp_z_offset: 0.0
-    # J*_6 腕部到两指中心沿 TCP +Z 的距离
     ee_tcp_z_offset: 0.20
-    # 预抓取最小净空
     min_approach_clearance: 0.15
-    # 盒子模式下降前的绝对顶抓 yaw，单位 deg
     grasp_yaw_offset_deg: 90.0
+
+    # —— GraspNet（与上方独立，勿混用）——
+    graspnet_pregrasp_distance: 0.08
+    graspnet_lift_z_offset: 0.10
+    graspnet_ee_tcp_z_offset: 0.12
+    graspnet_min_approach_clearance: 0.08
+
+    # 两页共用夹爪开口
+    gripper_open_m: 0.08
+    gripper_close_m: 0.02
 
     # 每个腕部/夹爪步骤的等待时间，单位 s
     step_settle_sec: 2.0
     gripper_settle_sec: 0.8
-
-    # 两指之间的目标开口
-    gripper_open_m: 0.08
-    gripper_close_m: 0.02
 
     # TF 腕部 frame 与公共参考系
     ee_frame_arm0: "J1_6"

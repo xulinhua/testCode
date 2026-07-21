@@ -111,6 +111,9 @@ ARM_DRIVE_SPECS = (
     ("J2_5_joint", 8000.0, 800.0, 4000.0),
     ("J2_6_joint", 6000.0, 600.0, 3000.0),
 )
+# PhysX maxJointVelocity（deg/s）。原先 J1-4=120、J5-6=240 偏慢；抓取轨迹会拖很久。
+ARM_MAX_JOINT_VELOCITY_DEG_S = 360.0
+ARM_WRIST_MAX_JOINT_VELOCITY_DEG_S = 540.0
 
 # 下列为 Load 前 UI 占位；mount 高度仍由实测更新
 ROBOT_MOUNT_Z = TABLE_TOP_Z + PLATFORM_DEPTH_BELOW_BASE + ROBOT_MOUNT_FINE_Z
@@ -150,7 +153,7 @@ CAMERA_DEFS = (
         "key": "cam0",
         "label": "Camera 0 (Gemini 335)",
         "prim_path": GEMINI335_RGB_CAMERA_PATH,
-        "frame_id": "gemini335",
+        "frame_id": "cam0",
         "pub_color": "/camera0_rgb_sensor/image_raw",
         "pub_depth": "/camera0_depth_sensor/depth/image_raw",
         "pub_points": "/camera0_depth_sensor/depth/points",

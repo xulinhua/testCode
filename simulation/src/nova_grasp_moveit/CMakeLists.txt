@@ -18,6 +18,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(moveit_msgs REQUIRED)
+find_package(nlohmann_json REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 
 set(CMAKE_AUTOMOC ON)
@@ -59,6 +60,7 @@ ament_target_dependencies(nova_grasp_moveit_core
 target_link_libraries(nova_grasp_moveit_core
   Qt5::Widgets
   Qt5::Concurrent
+  nlohmann_json::nlohmann_json
   "${arm_pose_cpp_typesupport}"
   "${arm_pose_fastrtps_typesupport}"
 )

@@ -16,7 +16,7 @@ class CameraStreamConfig:
     key: str = "cam0"
     label: str = ""
     camera_prim_path: str = ""  # Load 后由 SceneLoader 填入
-    frame_id: str = "gemini335"
+    frame_id: str = "cam0"
     width: int = DEFAULT_CAMERA_WIDTH
     height: int = DEFAULT_CAMERA_HEIGHT
     pub_color: str = "/camera0_rgb_sensor/image_raw"

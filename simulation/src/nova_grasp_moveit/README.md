@@ -73,10 +73,10 @@ UI 中应显示 `/joint_states`、TF 和 MoveIt IK 均正常。
 
 ### 2.3 其它启动方式
 
-| Launch/脚本 | 作用 |
-| --- | --- |
-| `grasp_stack.launch.py` | 推荐；启动完整抓取栈 |
-| `move_group.launch.py` | 只启动本包 MoveIt `/compute_ik` |
+| Launch/脚本               | 作用                             |
+| ------------------------- | -------------------------------- |
+| `grasp_stack.launch.py` | 推荐；启动完整抓取栈             |
+| `move_group.launch.py`  | 只启动本包 MoveIt`/compute_ik` |
 
 ## 3. Qt 界面
 
@@ -101,11 +101,12 @@ open → raise → move_xy → reorient → descend → close → lift
 
 ### 3.3 GraspNet 抓取
 
-- 订阅 `geometry_msgs/PoseArray` 候选。
+- 订阅 `std_msgs/String`；内容为 `yolo_graspnet/collision_free_grasps/v1`
+  JSON，节点会将平移和旋转矩阵解码为内部候选。
 - 话题名可在界面中修改，默认 `/yolo_graspnet/collision_free_grasps`。
 - 点击“应用”或在话题输入框中按回车，会重新订阅并清空旧候选。
-- 进入本页时，页签右上角显示第三方发布状态：1 秒内有消息为正常，
-  1–3 秒为延迟，超过 3 秒为中断；持续收到空数组会显示“在线 / 无位姿”。
+- 进入本页时，页签右上角显示第三方发布状态：默认 10 秒内有消息为正常，
+  10–30 秒为延迟，超过 30 秒为中断；持续收到空候选会显示“在线 / 无位姿”。
 - 点击“选择最优并计算”时冻结最新一帧，不再受后续连续发布影响。
 - “单步”执行冻结规划中的一个步骤。
 - “抓取最新最优位姿”会重新冻结最新一帧、选姿态并直接执行。
@@ -114,14 +115,14 @@ open → raise → move_xy → reorient → descend → close → lift
 
 ### 4.1 订阅
 
-| 话题                     | 类型                          | 说明                              |
-| ------------------------ | ----------------------------- | --------------------------------- |
-| `/box_pose`            | `geometry_msgs/PoseStamped` | 盒子位姿；盒子抓取只使用位置      |
-| `/yolo_graspnet/collision_free_grasps` | `geometry_msgs/PoseArray` | GraspNet 候选；话题名可运行时修改 |
-| `/joint_states`        | `sensor_msgs/JointState`    | IK 种子、通信状态和当前关节角     |
-| `/tf`、`/tf_static`  | TF                            | 相机到`base_link`、腕部当前位姿 |
-| `/nova_grasp/status`   | `std_msgs/String`           | 执行器状态回读                    |
-| `/nova_pose_log`       | `std_msgs/String`           | IK 和关节命令调试日志             |
+| 话题                                     | 类型                          | 说明                              |
+| ---------------------------------------- | ----------------------------- | --------------------------------- |
+| `/box_pose`                            | `geometry_msgs/PoseStamped` | 盒子位姿；盒子抓取只使用位置      |
+| `/yolo_graspnet/collision_free_grasps` | `std_msgs/String`          | GraspNet JSON 候选；话题名可运行时修改 |
+| `/joint_states`                        | `sensor_msgs/JointState`    | IK 种子、通信状态和当前关节角     |
+| `/tf`、`/tf_static`                  | TF                            | 相机到`base_link`、腕部当前位姿 |
+| `/nova_grasp/status`                   | `std_msgs/String`           | 执行器状态回读                    |
+| `/nova_pose_log`                       | `std_msgs/String`           | IK 和关节命令调试日志             |
 
 ### 4.2 发布
 
@@ -148,17 +149,21 @@ open → raise → move_xy → reorient → descend → close → lift
 ### 5.1 公共参考系
 
 - 所有执行路点最终转换到 `base_link`。
-- GraspNet 必须填写 `PoseArray.header.frame_id`。
+- GraspNet JSON 必须填写 `frame_id`，每个候选必须包含
+  `translation_m[3]` 和 `rotation_matrix[3][3]`。
 - 转换优先使用消息时间戳；时间外推失败时回退到最新 TF。
 - MoveIt IK link 是 `J1_6` 或 `J2_6`，不是指尖中心。
 
 ### 5.2 TCP 与腕部
 
-`ee_tcp_z_offset` 表示腕部 J*_6 到两指中心沿 TCP 局部 `+Z` 的距离。
-当前默认值为 `0.20 m`：
+`ee_tcp_z_offset`（抓取测试）/ `graspnet_ee_tcp_z_offset`（GraspNet，彼此独立）
+表示腕部 J*_6 到两指中心沿 TCP 局部 `+Z` 的距离。
+
+抓取测试默认 `0.20 m`；GraspNet 默认 `0.12 m`（对齐 URDF ≈0.116）：
 
 ```text
-p_wrist = p_tcp - R_tcp * [0, 0, ee_tcp_z_offset]
+p_wrist = p_tcp - R_tcp * [0, 0, ee_tcp_z_offset]   # 盒子页
+p_wrist = p_tcp - R_tcp * [0, 0, graspnet_ee_tcp_z_offset]
 ```
 
 ### 5.3 GraspNet 姿态
@@ -196,10 +201,13 @@ lift     = p + [0, 0, lift_z_offset]
 设转换后的 TCP 抓取中心为 `p_g`，TCP 接近单位向量为 `a`：
 
 ```text
-pregrasp = p_g - a * pregrasp_distance
+pregrasp = p_g - a * graspnet_pregrasp_distance
 grasp    = p_g
-lift     = p_g + [0, 0, lift_z_offset]
+lift     = p_g + [0, 0, graspnet_lift_z_offset]
 ```
+
+上述距离只用 GraspNet 专用参数，**不会**读取抓取测试页的
+`pregrasp_z_offset` / `lift_z_offset` / `ee_tcp_z_offset`。
 
 GraspNet 路点设置 `preserve_waypoints=true`，执行器不会用盒子顶抓规则覆盖姿态。
 预抓取沿接近轴后退，抬升固定沿 `base_link +Z`。
@@ -209,53 +217,63 @@ GraspNet 路点设置 `preserve_waypoints=true`，执行器不会用盒子顶抓
 
 ## 7. GraspNet 候选选择
 
-1. 点击按钮时复制最新 `PoseArray`。
+1. 连续接收 JSON 并解码为内部 `PoseArray`；点击按钮时冻结最新一帧。
 2. 过滤 NaN、Inf 和无效四元数。
-3. 通过 TF 转换到 `base_link`。
-4. 计算局部 `+X` 与 `base_link -Z` 的夹角。
-5. 小于 `graspnet_top_max_angle_deg` 的候选标记为顶部抓取。
-6. 顶部抓取优先；同类候选按接近角从小到大排序。
-7. 对候选的 `pregrasp` 和 `grasp` 分别检查 J1、J2 IK。
-8. 同一候选两臂都可达时，选择关节移动代价较小者：
+3. JSON 位姿按 ROS optical（`+X` 右、`+Y` 下、`+Z` 前）解释，先映射到 TF 的
+   `cam0` camera-link（`camera_link=(Z,-X,-Y)`），再通过 TF 转到 `base_link`。
+4. 将 GraspNet 接近轴（本话题约定为局部 `-X`）映射为机器人 TCP `+Z` 后，在右侧表格
+   显示全部转换结果（RPY）；选中行绿色，IK 可达未选黄色，逆解失败红色。
+5. 计算接近轴与 `base_link -Z` 的夹角。
+6. 小于 `graspnet_top_max_angle_deg` 的候选标记为顶部抓取。
+7. 顶部抓取优先；同类候选按接近角从小到大排序。
+8. 对候选的 `pregrasp` 和 `grasp` 分别检查 J1、J2 IK。
+9. 同一候选两臂都可达时，选择关节移动代价较小者：
 
 ```text
 cost = Σ wrap_to_pi(q_solution - q_current)²
 ```
 
-找到排序后的第一个可达候选后停止。当前 `PoseArray` 不包含分数，因此不使用网络评分。
+找到排序后的第一个可达候选后停止。JSON 原始顺序（`collision_free_rank`）会在几何优先级
+相同时保留；当前不直接按 `score` 重排。
 
 ## 8. 参数
 
 参数文件：`config/grasp_moveit.yaml`。
 
-| 参数                           |                    默认值 | 说明                               |
-| ------------------------------ | ------------------------: | ---------------------------------- |
-| `box_topic`                  |             `/box_pose` | 盒子位姿话题                       |
-| `graspnet_topic` | `/yolo_graspnet/collision_free_grasps` | GraspNet PoseArray 话题；UI 可修改 |
-| `graspnet_top_max_angle_deg` |                  `30.0` | 顶部抓取最大接近倾角               |
-| `pose_frame`                 |             `base_link` | 无 frame 时的兼容默认值            |
-| `target_arm_pose_topic`      | `/nova_target_arm_pose` | 腕部位姿命令                       |
-| `arm_id_topic`               |         `/nova_arm_id` | 夹爪兼容命令当前机械臂             |
-| `gripper_topic`              |    `/nova_gripper_goal` | 夹爪兼容命令                       |
-| `status_topic`               |    `/nova_grasp/status` | 抓取状态                           |
-| `pose_log_topic`             |        `/nova_pose_log` | IK 调试日志                        |
-| `arm_split_x`                |                  `0.40` | 盒子抓取按 X 选择臂的分界          |
-| `pregrasp_z_offset`          |                  `0.15` | 预抓取距离                         |
-| `lift_z_offset`              |                  `0.15` | 抓取后抬升距离                     |
-| `box_grasp_z_offset`         |                   `0.0` | 盒子目标 Z 修正                    |
-| `ee_tcp_z_offset`            |                  `0.20` | 腕部到两指中心距离                 |
-| `min_approach_clearance`     |                  `0.15` | 预抓取最小安全距离                 |
-| `grasp_yaw_offset_deg`       |                  `90.0` | 盒子顶抓绝对 yaw                   |
-| `step_settle_sec`            |                   `2.0` | 位姿步骤仿真稳定时间               |
-| `gripper_settle_sec`         |                   `0.8` | 夹爪开闭等待时间                   |
-| `gripper_open_m`             |                  `0.08` | 张开距离                           |
-| `gripper_close_m`            |                  `0.02` | 闭合后保留距离                     |
-| `ee_frame_arm0`              |                  `J1_6` | J1 腕部 TF frame                   |
-| `ee_frame_arm1`              |                  `J2_6` | J2 腕部 TF frame                   |
-| `ref_frame`                  |             `base_link` | 腕部显示参考系                     |
-| `joint_command_topic`        |        `/joint_command` | Isaac 关节命令话题                 |
-| `joint_command_burst_count`  |                     `5` | 同一命令重复发送次数               |
-| `publish_mujoco_joint_array` |                  `true` | 是否发布旧控制器兼容数组           |
+| 参数                           |                                   默认值 | 说明                               |
+| ------------------------------ | ---------------------------------------: | ---------------------------------- |
+| `box_topic`                  |                            `/box_pose` | 盒子位姿话题                       |
+| `graspnet_topic`             | `/yolo_graspnet/collision_free_grasps` | GraspNet JSON String 话题；UI 可修改 |
+| `graspnet_top_max_angle_deg` |                                 `30.0` | 顶部抓取最大接近倾角               |
+| `graspnet_comm_ok_timeout_sec` |                               `10.0` | 最近消息在该时间内显示正常         |
+| `graspnet_comm_stale_timeout_sec` |                            `30.0` | 超过该时间显示发布中断             |
+| `pose_frame`                 |                            `base_link` | 无 frame 时的兼容默认值            |
+| `target_arm_pose_topic`      |                `/nova_target_arm_pose` | 腕部位姿命令                       |
+| `arm_id_topic`               |                         `/nova_arm_id` | 夹爪兼容命令当前机械臂             |
+| `gripper_topic`              |                   `/nova_gripper_goal` | 夹爪兼容命令                       |
+| `status_topic`               |                   `/nova_grasp/status` | 抓取状态                           |
+| `pose_log_topic`             |                       `/nova_pose_log` | IK 调试日志                        |
+| `arm_split_x`                |                                 `0.40` | 盒子抓取按 X 选择臂的分界          |
+| `pregrasp_z_offset`          |                                 `0.15` | **抓取测试**预抓取抬高              |
+| `lift_z_offset`              |                                 `0.15` | **抓取测试**抬升                   |
+| `box_grasp_z_offset`         |                                  `0.0` | 盒子目标 Z 修正                    |
+| `ee_tcp_z_offset`            |                                 `0.20` | **抓取测试**腕部到两指中心         |
+| `min_approach_clearance`     |                                 `0.15` | **抓取测试**预抓取最小净空         |
+| `graspnet_pregrasp_distance` |                                 `0.08` | **GraspNet** 沿接近轴后退          |
+| `graspnet_lift_z_offset`     |                                 `0.10` | **GraspNet** 抬升                  |
+| `graspnet_ee_tcp_z_offset`   |                                 `0.12` | **GraspNet** 腕部到两指中心        |
+| `graspnet_min_approach_clearance` |                        `0.08` | **GraspNet** 预抓取最小净空        |
+| `grasp_yaw_offset_deg`       |                                 `90.0` | 盒子顶抓绝对 yaw                   |
+| `step_settle_sec`            |                                  `2.0` | 位姿步骤仿真稳定时间               |
+| `gripper_settle_sec`         |                                  `0.8` | 夹爪开闭等待时间                   |
+| `gripper_open_m`             |                                 `0.08` | 张开距离                           |
+| `gripper_close_m`            |                                 `0.02` | 闭合后保留距离                     |
+| `ee_frame_arm0`              |                                 `J1_6` | J1 腕部 TF frame                   |
+| `ee_frame_arm1`              |                                 `J2_6` | J2 腕部 TF frame                   |
+| `ref_frame`                  |                            `base_link` | 腕部显示参考系                     |
+| `joint_command_topic`        |                       `/joint_command` | Isaac 关节命令话题                 |
+| `joint_command_burst_count`  |                                    `5` | 同一命令重复发送次数               |
+| `publish_mujoco_joint_array` |                                 `true` | 是否发布旧控制器兼容数组           |
 
 ## 9. 日志
 
@@ -285,15 +303,16 @@ ros2 topic echo --once /yolo_graspnet/collision_free_grasps
 ros2 run tf2_ros tf2_echo base_link <camera_frame>
 ```
 
-消息类型应为 `geometry_msgs/msg/PoseArray`，且 `header.frame_id` 必须存在。若使用其它话题，
+消息类型应为 `std_msgs/msg/String`，JSON 中必须存在 `frame_id` 和 `candidates`。若使用其它话题，
 在 GraspNet Tab 输入话题名后点击“应用”。
 
 ### 候选存在但全部 IK 失败
 
 - 检查相机外参和长度单位是否为米。
 - 检查 Pose 原点是否确实是夹爪中心。
-- 检查 GraspNet 局部 `+X` 是否为接近方向。
-- 检查 `ee_tcp_z_offset` 是否与模型一致。
+- 检查 GraspNet 局部 `-X` 是否为接近方向。
+- 检查对应模式的 TCP 偏移：抓取测试 `ee_tcp_z_offset`(0.20)、GraspNet
+  `graspnet_ee_tcp_z_offset`(0.12)，二者独立。
 - 查看 `[graspnet]` 和 `[pose_log]` 日志。
 
 ### 末端位姿无反应
@@ -313,4 +332,3 @@ ros2 run tf2_ros tf2_echo base_link <camera_frame>
 ```bash
 source install/setup.bash
 ```
-

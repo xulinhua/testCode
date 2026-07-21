@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -50,21 +51,31 @@ struct GraspRosSnapshot
   std::vector<std::string> pose_logs;
   geometry_msgs::msg::PoseStamped box_pose;
   bool has_box_pose{false};
-  /// 最近收到的一整帧 GraspNet 候选；按钮点击时会复制并冻结该帧。
+  /// 从 GraspNet JSON 解码出的最近一整帧候选；按钮点击时会复制并冻结该帧。
   geometry_msgs::msg::PoseArray graspnet_candidates;
+  /// 与 graspnet_candidates.poses 对齐的网络评分。
+  std::vector<double> graspnet_scores;
   bool has_graspnet_candidates{false};
   /// 切换话题后重新计数，用于判断新话题是否持续出流。
   int graspnet_message_count{0};
   /// 最近一次选择时满足顶部倾角阈值的候选数量。
   int graspnet_top_count{0};
   std::string graspnet_topic{"/yolo_graspnet/collision_free_grasps"};
-  /// 第三方 PoseArray 发布状态：ok<1s，stale<3s；空数组表示在线但暂无位姿。
+  /// 第三方 JSON String 发布状态：ok<1s，stale<3s；空候选表示在线但暂无位姿。
   bool graspnet_comm_ok{false};
   bool graspnet_comm_stale{false};
   double graspnet_age_sec{999.0};
   std::string graspnet_comm_summary;
   /// 最近选中的机器人 TCP 位姿，已经转换到 base_link。
   geometry_msgs::msg::PoseStamped selected_graspnet_pose;
+  /// 点击计算后，全部成功转换到 base_link 的 TCP 候选及其原始下标。
+  geometry_msgs::msg::PoseArray graspnet_base_candidates;
+  std::vector<int> graspnet_base_candidate_indices;
+  /// 与 base 候选一一对应：1=至少一臂 grasp+pregrasp IK 成功，0=失败。
+  std::vector<uint8_t> graspnet_base_candidate_ik_ok;
+  /// 与 base 候选一一对应：1=A 方案（开合轴半平面 / J6 Rz180）修正过姿态，0=未改。
+  std::vector<uint8_t> graspnet_base_candidate_a_corrected;
+  int graspnet_base_revision{0};
   bool has_selected_graspnet_pose{false};
   int selected_graspnet_index{-1};
   int selected_graspnet_arm{-1};
@@ -127,7 +138,7 @@ public:
 
   /// 使用最近 /box_pose 生成固定顶抓计划。
   GraspComputeResult compute_grasp_from_box_detailed();
-  /// 冻结最新一帧 GraspNet PoseArray，转换到 base_link 后优先选顶抓，并用双臂 IK 选臂。
+  /// 冻结最新一帧解码后的 GraspNet 候选，转换到 base_link 后优先选顶抓，并用双臂 IK 选臂。
   GraspComputeResult compute_grasp_from_graspnet_detailed(double top_max_angle_deg = 30.0);
   /// 异步启动最近一次成功计算的计划。
   bool execute_last_plan();
@@ -163,13 +174,13 @@ public:
 
   GraspPlannerConfig planner_config() const;
   void set_planner_config(const GraspPlannerConfig & cfg);
-  /// 运行时重建 PoseArray 订阅，并清空旧话题候选和选择结果。
+  /// 运行时重建 JSON String 订阅，并清空旧话题候选和选择结果。
   bool set_graspnet_topic(const std::string & topic, std::string * error_out = nullptr);
 
 private:
   void on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg);
   void on_box_pose(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-  void on_graspnet_candidates(const geometry_msgs::msg::PoseArray::SharedPtr msg);
+  void on_graspnet_candidates(const std_msgs::msg::String::SharedPtr msg);
   void on_grasp_status(const std_msgs::msg::String::SharedPtr msg);
   void on_pose_log(const std_msgs::msg::String::SharedPtr msg);
   void push_log(const std::string & line);
@@ -177,6 +188,7 @@ private:
   void refresh_ik_ready();
   void refresh_ee_poses();
   void reset_pose_step_wait();
+  void reset_pose_step_wait(const geometry_msgs::msg::Pose & expected_pose);
   bool wait_pose_step(double timeout_sec, std::string * fail_reason = nullptr);
   ArmJointSnapshot extract_arm_joints(const std::map<std::string, double> & joints, const std::string & prefix) const;
   EePoseSnapshot lookup_ee_pose(const std::string & child_frame, const std::string & ref_frame) const;
@@ -203,7 +215,7 @@ private:
 
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr box_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr graspnet_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr graspnet_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr status_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr pose_log_sub_;
   rclcpp::Publisher<nova_grasp_moveit::msg::ArmPose>::SharedPtr arm_pose_pub_;
@@ -218,14 +230,24 @@ private:
 
   double step_settle_sec_{2.0};
   double gripper_settle_sec_{0.8};
+  /// GraspNet 低频推理流的状态阈值；超过 ok 后显示延迟，超过 stale 后显示中断。
+  double graspnet_comm_ok_timeout_sec_{10.0};
+  double graspnet_comm_stale_timeout_sec_{30.0};
   std::string graspnet_topic_{"/yolo_graspnet/collision_free_grasps"};
 
   /// UI 节点通过 /nova_pose_log 与独立 IK executor 完成一步请求/响应握手。
+  /// 必须先匹配本次目标的 IK request xyz，再接受 Ok，避免连续执行时上一步
+  /// 迟到的 “Pose command sent” 让下一步（如下降）误判为已完成而不发令。
   enum class PoseStepResult { Pending, Ok, Fail };
   std::mutex pose_step_mu_;
   std::condition_variable pose_step_cv_;
   PoseStepResult pose_step_result_{PoseStepResult::Pending};
   std::string pose_step_fail_reason_;
+  bool pose_step_expect_valid_{false};
+  bool pose_step_saw_matching_request_{false};
+  double pose_step_expect_x_{0.0};
+  double pose_step_expect_y_{0.0};
+  double pose_step_expect_z_{0.0};
 };
 
 }  // namespace nova_grasp_moveit

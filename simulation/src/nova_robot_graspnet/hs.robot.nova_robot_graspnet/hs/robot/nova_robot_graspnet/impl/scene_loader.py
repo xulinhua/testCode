@@ -35,6 +35,8 @@ from ..global_variables import (
     ARM_DRIVE_SPECS,
     ARM_J1_X,
     ARM_J2_X,
+    ARM_MAX_JOINT_VELOCITY_DEG_S,
+    ARM_WRIST_MAX_JOINT_VELOCITY_DEG_S,
     BOX_COLLISION_GEO_ROOT,
     BOX_COLLISION_PATH,
     BOX_LINK_PATH,
@@ -47,6 +49,7 @@ from ..global_variables import (
     CAPTURE_LIGHTS_PATH,
     FLAT_GRID_PATH,
     GEMINI335_PRIM_PATH,
+    GEMINI335_RGB_CAMERA_PATH,
     GRASP_DYNAMIC_FRICTION,
     GRASP_PHYSICS_MATERIAL_PATH,
     GRASP_RESTITUTION,
@@ -273,6 +276,7 @@ class SceneLoader:
         self._ensure_gemini335_visual(stage)
         # cam0 绑 Gemini335 Stream_rgb，须在引用就绪后再解析
         self._resolve_camera_paths(stage)
+        self._sync_cam0_tf_to_gemini_rgb(stage)
         self._apply_default_robot_joints_usd(stage)
         self._stop_timeline()
         self._loaded = True
@@ -410,6 +414,7 @@ class SceneLoader:
 
         self._ensure_gemini335_visual(stage)
         self._resolve_camera_paths(stage)
+        self._sync_cam0_tf_to_gemini_rgb(stage)
 
         self._apply_default_robot_joints_usd(stage)
         self._stop_timeline()
@@ -644,9 +649,11 @@ class SceneLoader:
                     prim.CreateAttribute(
                         "physxJoint:jointFriction", Sdf.ValueTypeNames.Float
                     ).Set(0.05)
-                # 腕部 J5/J6 需要快速跟姿态，速度设为其余轴的两倍。
+                # 腕部 J5/J6 需要更快跟姿态；上限见 global_variables。
                 max_velocity_deg_s = (
-                    240.0 if "_5_joint" in name or "_6_joint" in name else 120.0
+                    float(ARM_WRIST_MAX_JOINT_VELOCITY_DEG_S)
+                    if "_5_joint" in name or "_6_joint" in name
+                    else float(ARM_MAX_JOINT_VELOCITY_DEG_S)
                 )
                 vel_attr = prim.GetAttribute("physxJoint:maxJointVelocity")
                 if vel_attr and vel_attr.IsValid():
@@ -660,7 +667,8 @@ class SceneLoader:
                 print(
                     f"SceneLoader: boosted arm USD drives x{tuned} "
                     f"(gravity compensated links={gravity_disabled}; "
-                    "maxVel J1-4=120deg/s J5-6=240deg/s; "
+                    f"maxVel J1-4={ARM_MAX_JOINT_VELOCITY_DEG_S:.0f}deg/s "
+                    f"J5-6={ARM_WRIST_MAX_JOINT_VELOCITY_DEG_S:.0f}deg/s; "
                     "TGS pos/vel iterations=32/0)"
                 )
         except Exception as exc:
@@ -848,8 +856,17 @@ class SceneLoader:
         if PhysxSchema is not None:
             try:
                 px_col = PhysxSchema.PhysxCollisionAPI.Apply(prim)
-                px_col.CreateContactOffsetAttr(0.002)
-                px_col.CreateRestOffsetAttr(0.0)
+                # 已有非法默认值时 Create 可能不覆盖，必须显式 Set
+                c_attr = px_col.GetContactOffsetAttr()
+                r_attr = px_col.GetRestOffsetAttr()
+                if c_attr and c_attr.IsValid():
+                    c_attr.Set(0.002)
+                else:
+                    px_col.CreateContactOffsetAttr(0.002)
+                if r_attr and r_attr.IsValid():
+                    r_attr.Set(0.0)
+                else:
+                    px_col.CreateRestOffsetAttr(0.0)
             except Exception:
                 pass
         return True
@@ -1165,6 +1182,101 @@ class SceneLoader:
         print(
             f"SceneLoader: cam0 aligned to gantry beam center "
             f"xy=({cx:.3f},{cy:.3f}), z={current_z:.3f}"
+        )
+
+    def sync_cam0_tf_to_gemini_rgb(self, stage=None) -> None:
+        """对外接口：把 TF ``cam0`` 对齐到 Gemini 出流等效外参（不改画面）。"""
+        if stage is None:
+            import omni.usd
+            stage = omni.usd.get_context().get_stage()
+        if stage is not None:
+            self._sync_cam0_tf_to_gemini_rgb(stage)
+
+    def _sync_cam0_tf_to_gemini_rgb(self, stage) -> None:
+        """不移动 Gemini（画面不变），只改 ``base_link/cam0`` 姿态。
+
+        Gemini335 Orient X≈-150° ⇒ 离竖直约 30°。原先 cam0 TF 为 15°（俯仰 75°），
+        与画面不一致会导致 optical→base 约 20cm 偏差。
+
+        注意：不要用 Stream_rgb 的 USD 矩阵盲目换算，也不要用
+        ``Gf.Rotation(Rz)*Ry`` 连乘——后者实际得到 RPY(60,0,90)/forward=(0,1,0)，
+        抓取 Z≈1.45m（Δ≈1m）。这里显式写入 RPY(0,60°,90°) 对应四元数。
+        """
+        import math
+
+        base_path = f"{self.robot_prim_path}/base_link"
+        cam_path = f"{base_path}/cam0"
+        cam_prim = stage.GetPrimAtPath(cam_path)
+        if not cam_prim or not cam_prim.IsValid():
+            print("SceneLoader: cam0 TF sync skipped — base_link/cam0 missing")
+            return
+
+        # Keep existing / gantry-aligned translation.
+        translation = Gf.Vec3d(0.53, -0.499, 1.009)
+        for op in UsdGeom.Xformable(cam_prim).GetOrderedXformOps():
+            if (not op.IsInverseOp()) and op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                val = op.Get()
+                if val is not None:
+                    translation = Gf.Vec3d(val)
+                break
+
+        # Prefer Gemini root world XY/Z mapped into base_link (position only).
+        gemini_prim = stage.GetPrimAtPath(GEMINI335_PRIM_PATH)
+        base_prim = stage.GetPrimAtPath(base_path)
+        if (
+            gemini_prim and gemini_prim.IsValid()
+            and base_prim and base_prim.IsValid()
+        ):
+            gemini_world = UsdGeom.Xformable(gemini_prim).ComputeLocalToWorldTransform(
+                Usd.TimeCode.Default()
+            )
+            base_world = UsdGeom.Xformable(base_prim).ComputeLocalToWorldTransform(
+                Usd.TimeCode.Default()
+            )
+            gemini_in_base = base_world.GetInverse().Transform(
+                gemini_world.ExtractTranslation()
+            )
+            if abs(float(gemini_in_base[2])) > 0.1:
+                translation = Gf.Vec3d(gemini_in_base)
+
+        # camera_link RPY(0, 60°, 90°): forward≈(0, 0.5, -0.866), tilt≈30° from vertical.
+        # DO NOT use Gf.Rotation(Rz)*Ry — that composition yields RPY(60,0,90) /
+        # forward=(0,1,0) and grasp Z≈1.45m (ΔZ≈1m vs box). Write quat explicitly.
+        cr, sr = 1.0, 0.0  # half roll 0
+        cp = math.cos(math.radians(30.0))  # half pitch 60
+        sp = math.sin(math.radians(30.0))
+        cy = math.cos(math.radians(45.0))  # half yaw 90
+        sy = math.sin(math.radians(45.0))
+        qw = cr * cp * cy + sr * sp * sy
+        qx = sr * cp * cy - cr * sp * sy
+        qy = cr * sp * cy + sr * cp * sy
+        qz = cr * cp * sy - sr * sp * cy
+        rotation = Gf.Quatd(qw, Gf.Vec3d(qx, qy, qz))
+        rotation.Normalize()
+
+        rot_m = Gf.Matrix4d()
+        rot_m.SetRotate(Gf.Rotation(rotation))
+        forward = rot_m.TransformDir(Gf.Vec3d(1, 0, 0))
+        fx, fy, fz = float(forward[0]), float(forward[1]), float(forward[2])
+        norm = math.sqrt(fx * fx + fy * fy + fz * fz) or 1.0
+        tilt_from_vertical_deg = math.degrees(
+            math.acos(min(1.0, max(-1.0, -fz / norm)))
+        )
+        if abs(tilt_from_vertical_deg - 30.0) > 5.0 or fy < 0.3:
+            raise RuntimeError(
+                f"cam0 TF quat wrong: tilt={tilt_from_vertical_deg:.1f}° "
+                f"forward=({fx:.3f},{fy:.3f},{fz:.3f}); expected ~30° / (0,0.5,-0.87)"
+            )
+
+        cam_xform = UsdGeom.Xformable(cam_prim)
+        cam_xform.ClearXformOpOrder()
+        cam_xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(translation)
+        cam_xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(rotation)
+        print(
+            f"SceneLoader: cam0 TF set to Gemini-equivalent 30° mount (image unchanged) "
+            f"t=({float(translation[0]):.3f},{float(translation[1]):.3f},{float(translation[2]):.3f}) "
+            f"RPY≈(0,60,90) tilt_from_vertical≈{tilt_from_vertical_deg:.1f}° "
+            f"forward=({fx:.3f},{fy:.3f},{fz:.3f})"
         )
 
     def _measure_support_bottom_world(self, stage) -> Optional[float]:

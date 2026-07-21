@@ -325,6 +325,11 @@ class SessionController:
             self.scene_loader.build_box_visual_if_needed(stage)
             self.scene_loader.fix_camera_physics(stage)
             self.scene_loader.fix_box_visual_material(stage)
+            # 画面不动；只把 TF cam0 对齐到 Gemini 出流（约 30°），消除图/TF 外参差。
+            try:
+                self.scene_loader.sync_cam0_tf_to_gemini_rgb(stage)
+            except Exception as exc:
+                print(f"SessionController: cam0 TF sync skipped: {exc}")
             print("SessionController: deferred post-load done")
             self._notify()
 

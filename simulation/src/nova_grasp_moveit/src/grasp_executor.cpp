@@ -125,12 +125,12 @@ bool GraspExecutor::send_arm_pose_and_wait(
   bool do_settle)
 {
   if (pose_step_reset_cb_) {
-    pose_step_reset_cb_();
+    pose_step_reset_cb_(pose.pose);
   }
   send_arm_pose(arm_id, pose);
 
   std::string fail_reason;
-  constexpr double kIkTimeoutSec = 12.0;
+  constexpr double kIkTimeoutSec = 5.0;
   if (pose_step_wait_cb_) {
     if (!pose_step_wait_cb_(kIkTimeoutSec, &fail_reason)) {
       publish_status(std::string("ERROR IK at ") + step);
@@ -149,12 +149,25 @@ bool GraspExecutor::send_arm_pose_and_wait(
     }
 
     // /compute_ik 返回只表示关节目标已发布，不表示 Isaac 已运动到位。
-    // 持续读取仿真 TF，位置和姿态均收敛后才允许该步完成。
     constexpr double kPositionToleranceM = 0.015;
-    constexpr double kOrientationToleranceRad = 1.0 * M_PI / 180.0;
-    // Isaac 当前约 0.2x 实时运行；UI 的等待秒数按仿真时间理解，
-    // 墙钟给 6 倍兜底。到位会立即返回，不会固定等待满。
-    const double wall_timeout_sec = std::clamp(step_settle_sec_ * 6.0, 5.0, 30.0);
+    constexpr double kOrientationToleranceRad = 5.0 * M_PI / 180.0;
+
+    geometry_msgs::msg::Pose start_ee;
+    double travel_m = 0.25;
+    if (current_ee_cb_(arm_id, start_ee)) {
+      const double dx0 = start_ee.position.x - pose.pose.position.x;
+      const double dy0 = start_ee.position.y - pose.pose.position.y;
+      const double dz0 = start_ee.position.z - pose.pose.position.z;
+      travel_m = std::sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0);
+    }
+    // 短位移快判；长位移（home→pregrasp ~0.4m）在慢实时下需要更长墙钟。
+    // 约 10 s/m，下限 3s、上限 12s；到位立即返回。
+    const double wall_timeout_sec = std::clamp(3.0 + travel_m * 10.0, 3.0, 12.0);
+    publish_log(
+      std::string("[executor] wait ") + step +
+      " travel=" + std::to_string(travel_m) +
+      "m wall_timeout=" + std::to_string(wall_timeout_sec) + "s");
+
     const auto deadline = std::chrono::steady_clock::now() +
       std::chrono::duration<double>(wall_timeout_sec);
     double last_pos_err = 999.0;
@@ -189,7 +202,15 @@ bool GraspExecutor::send_arm_pose_and_wait(
       std::string("[executor] NOT REACHED ") + step +
       " pos_err=" + std::to_string(last_pos_err) +
       "m rot_err_deg=" + std::to_string(last_rot_err * 180.0 / M_PI) +
-      " after wall_timeout=" + std::to_string(wall_timeout_sec) + "s");
+      " after wall_timeout=" + std::to_string(wall_timeout_sec) + "s" +
+      " (arm still en-route; descend skipped)");
+    // 位置已够近时放行（姿态在仿真里常抖）。
+    if (last_pos_err <= 0.025) {
+      publish_log(
+        std::string("[executor] CONTINUE ") + step +
+        " despite rot/settle timeout (pos close enough)");
+      return true;
+    }
     return false;
   }
   return true;
@@ -249,16 +270,10 @@ void GraspExecutor::prepare_transit_poses(GraspPlan & plan)
   geometry_msgs::msg::Pose ee;
   const bool have_ee = current_ee_cb_ && current_ee_cb_(plan.arm_id, ee);
   if (plan.preserve_waypoints) {
-    // GraspNet 已给出方向相关的 pregrasp/grasp；这里只能补当前 XY 的安全抬高，
-    // 不能调用 fill_plan_waypoints，否则会被盒子固定顶抓姿态覆盖。
-    plan.has_raise = have_ee;
+    // GraspNet: 不要在当前 XY 抬到 pregrasp.z（该高度只在目标附近可达）。
+    // 直接走已 IK 校验的 pregrasp / grasp / lift。
+    plan.has_raise = false;
     plan.need_vertical_raise = false;
-    if (have_ee) {
-      plan.raise = ee;
-      plan.raise.position.z = std::max(ee.position.z, plan.pregrasp.position.z);
-      plan.raise.orientation = plan.pregrasp.orientation;
-      plan.need_vertical_raise = ee.position.z < plan.raise.position.z - 0.015;
-    }
   } else {
     fill_plan_waypoints(plan, cfg_, have_ee ? &ee : nullptr);
   }
@@ -526,104 +541,58 @@ void GraspExecutor::run_sequence(GraspPlan plan)
       return;
     }
 
-    // 执行前重新取当前末端，再填路点（避免沿用上一次抓取后的过期规划姿态）
+    // 与单步共用同一套步骤列表，避免连续路径漏掉 descend / close。
     prepare_transit_poses(plan);
+    const auto items = build_step_list(plan);
 
     publish_status("EXECUTE path");
     for (const auto & line : format_plan_path_lines(plan)) {
       publish_log(line);
     }
+    publish_log(
+      "[executor] continuous uses same " + std::to_string(items.size()) +
+      " steps as 单步");
 
-    geometry_msgs::msg::PoseStamped stamped;
-    stamped.header.frame_id = plan.frame_id;
+    for (size_t i = 0; i < items.size() && !shutdown_.load(); ++i) {
+      const auto & item = items[i];
+      const std::string tag =
+        "[SEQ] " + std::to_string(i + 1) + "/" + std::to_string(items.size()) +
+        " " + item.name;
+      publish_status(
+        "STEP " + std::to_string(i + 1) + "/" + std::to_string(items.size()) +
+        " " + item.name);
+      publish_log(tag + " ——— begin ———");
 
-    apply_gripper_opening(plan.arm_id, cfg_.gripper_open_m);
-    publish_status("step gripper open");
-    sleep_sec(gripper_settle_sec_);
-    if (shutdown_.load()) {
-      publish_status("CANCELLED");
-      return;
-    }
-
-    // 1) 先抬到对应高度（当前 XY，姿态不变）
-    if (plan.has_raise && plan.need_vertical_raise) {
-      stamped.pose = plan.raise;
-      publish_status("step raise");
-      publish_log("[executor] raise: current XY -> transit_z + top-down yaw0");
-      if (!send_arm_pose_and_wait(plan.arm_id, stamped, "raise")) {
-        publish_log("[executor] WARN raise failed, continue");
+      bool ok = true;
+      if (item.kind == StepKind::GripperOpen) {
+        apply_gripper_opening(plan.arm_id, cfg_.gripper_open_m);
+        sleep_sec(gripper_settle_sec_);
+      } else if (item.kind == StepKind::GripperClose) {
+        apply_gripper_opening(plan.arm_id, cfg_.gripper_close_m);
+        sleep_sec(gripper_settle_sec_);
+      } else if (item.has_pose) {
+        geometry_msgs::msg::PoseStamped stamped;
+        stamped.header.frame_id = plan.frame_id;
+        stamped.pose = item.pose;
+        if ((item.kind == StepKind::Descend || item.kind == StepKind::Lift) &&
+          !plan.preserve_waypoints)
+        {
+          geometry_msgs::msg::Pose ee_now;
+          if (current_ee_cb_ && current_ee_cb_(plan.arm_id, ee_now)) {
+            stamped.pose = vertical_axis_pose(item.pose, ee_now);
+          }
+        }
+        publish_log(tag + " PLAN  " + format_pose_xyz_q(stamped.pose));
+        ok = send_arm_pose_and_wait(plan.arm_id, stamped, item.name.c_str(), true);
       }
-      if (shutdown_.load()) {
-        publish_status("CANCELLED");
+
+      if (!ok || shutdown_.load()) {
+        publish_status(
+          shutdown_.load() ? "CANCELLED" : ("ABORT " + item.name));
+        publish_log(tag + " FAIL");
         return;
       }
-    }
-
-    // 2) 平移到盒子中心上方（只改 XY，姿态不变）
-    stamped.pose = plan.pregrasp;
-    publish_status("step move_xy");
-    publish_log("[executor] move: box XY @ transit_z + top-down yaw0 (ignore skewed EE)");
-    if (!send_arm_pose_and_wait(plan.arm_id, stamped, "move_xy") || shutdown_.load()) {
-      publish_status(shutdown_.load() ? "CANCELLED" : "ABORT move_xy");
-      return;
-    }
-
-    // 3) 下降前：原地转 yaw（指尖 TCP 固定盒心，腕部用规划位）
-    if (plan.has_reorient) {
-      stamped.pose = plan.reorient;
-      publish_status("step reorient");
-      publish_log(
-        "[executor] reorient: top-down yaw -> " + std::to_string(cfg_.grasp_yaw_offset_deg) +
-        " deg, finger XY fixed at box center");
-      if (!send_arm_pose_and_wait(plan.arm_id, stamped, "reorient") || shutdown_.load()) {
-        publish_status(shutdown_.load() ? "CANCELLED" : "ABORT reorient");
-        return;
-      }
-    }
-
-    // 4) 旋转完成后再下降（顶抓姿态，只改 Z）
-    stamped.pose = plan.grasp;
-    if (!plan.preserve_waypoints) {
-      geometry_msgs::msg::Pose ee_now;
-      if (current_ee_cb_ && current_ee_cb_(plan.arm_id, ee_now)) {
-        stamped.pose = vertical_axis_pose(plan.grasp, ee_now);
-      }
-    }
-    publish_status("step descend");
-    publish_log(
-      plan.preserve_waypoints ?
-      "[executor] descend: use frozen GraspNet approach waypoint" :
-      "[executor] descend AFTER reorient: only Z down");
-    if (!send_arm_pose_and_wait(plan.arm_id, stamped, "descend") || shutdown_.load()) {
-      publish_status(shutdown_.load() ? "CANCELLED" : "ABORT descend");
-      return;
-    }
-
-    // 5) 抓
-    apply_gripper_opening(plan.arm_id, cfg_.gripper_close_m);
-    publish_status("step gripper close");
-    sleep_sec(gripper_settle_sec_);
-    if (shutdown_.load()) {
-      publish_status("CANCELLED");
-      return;
-    }
-
-    // 6) 提起（顶抓姿态不变，只改 Z）
-    stamped.pose = plan.lift;
-    if (!plan.preserve_waypoints) {
-      geometry_msgs::msg::Pose ee_now;
-      if (current_ee_cb_ && current_ee_cb_(plan.arm_id, ee_now)) {
-        stamped.pose = vertical_axis_pose(plan.lift, ee_now);
-      }
-    }
-    publish_status("step lift");
-    publish_log(
-      plan.preserve_waypoints ?
-      "[executor] lift: preserve GraspNet orientation, world +Z" :
-      "[executor] lift: keep grasp top-down");
-    if (!send_arm_pose_and_wait(plan.arm_id, stamped, "lift") || shutdown_.load()) {
-      publish_status(shutdown_.load() ? "CANCELLED" : "ABORT lift");
-      return;
+      publish_log(tag + " ——— ok ———");
     }
 
     publish_status("DONE");

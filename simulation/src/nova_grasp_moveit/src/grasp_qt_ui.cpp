@@ -5,11 +5,13 @@
 
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <QApplication>
+#include <QBrush>
 #include <QCheckBox>
 #include <QColor>
 #include <QDoubleSpinBox>
@@ -17,6 +19,7 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -30,11 +33,15 @@
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QTabWidget>
+#include <QTableWidget>
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include "tf2/LinearMath/Matrix3x3.h"
+#include "tf2/LinearMath/Quaternion.h"
 
 namespace nova_grasp_moveit
 {
@@ -99,6 +106,47 @@ void refill_log_view(QTextEdit * edit, const std::vector<std::string> & lines)
     append_log_line_colored(edit, QString::fromStdString(line));
   }
   edit->moveCursor(QTextCursor::End);
+}
+
+void set_grasp_pose_table_row(
+  QTableWidget * table,
+  int row,
+  int source_index,
+  double score,
+  const geometry_msgs::msg::Pose & pose,
+  const QColor & background = QColor(),
+  const QColor & rpy_background = QColor())
+{
+  tf2::Quaternion q(
+    pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
+  q.normalize();
+  double roll = 0.0;
+  double pitch = 0.0;
+  double yaw = 0.0;
+  tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+  const QStringList values = {
+    QString::number(source_index),
+    std::isfinite(score) ? QString::number(score, 'f', 5) : QStringLiteral("--"),
+    QString::number(pose.position.x, 'f', 4),
+    QString::number(pose.position.y, 'f', 4),
+    QString::number(pose.position.z, 'f', 4),
+    QString::number(roll * kRadToDeg, 'f', 2),
+    QString::number(pitch * kRadToDeg, 'f', 2),
+    QString::number(yaw * kRadToDeg, 'f', 2)};
+  // 列：# Score X Y Z Roll Pitch Yaw —— RPY 为 5..7
+  constexpr int kRpyColBegin = 5;
+  constexpr int kRpyColEnd = 8;
+  for (int column = 0; column < values.size(); ++column) {
+    auto * item = new QTableWidgetItem(values[column]);
+    item->setTextAlignment(Qt::AlignCenter);
+    const bool is_rpy = column >= kRpyColBegin && column < kRpyColEnd;
+    if (is_rpy && rpy_background.isValid()) {
+      item->setBackground(QBrush(rpy_background));
+    } else if (background.isValid()) {
+      item->setBackground(QBrush(background));
+    }
+    table->setItem(row, column, item);
+  }
 }
 
 QDoubleSpinBox * make_deg_spin(QWidget * parent, double value_deg = 0.0)
@@ -936,7 +984,8 @@ int RunGraspQtUiApp(
   ctrl_layout->addWidget(ik_label);
   ctrl_layout->addWidget(status_label);
 
-  auto * traj_group = new QGroupBox(QString::fromUtf8("轨迹参数"), control_group);
+  auto * traj_group = new QGroupBox(
+    QString::fromUtf8("轨迹参数（仅抓取测试 /box_pose）"), control_group);
   auto * traj_form = new QFormLayout(traj_group);
   traj_form->setSpacing(6);
   auto * spin_pregrasp = make_metric_spin(traj_group, 0.0, 0.5, 0.01, 3,
@@ -1023,21 +1072,59 @@ int RunGraspQtUiApp(
   auto * graspnet_top = new QSplitter(Qt::Horizontal, graspnet_tab);
   auto * graspnet_feed_group = new QGroupBox(
     QString::fromUtf8("实时 GraspNet 候选"), graspnet_top);
-  auto * graspnet_feed_view = new QTextEdit(graspnet_feed_group);
-  graspnet_feed_view->setReadOnly(true);
-  graspnet_feed_view->setPlainText(QString::fromUtf8("等待 PoseArray ..."));
+  auto * graspnet_feed_table = new QTableWidget(graspnet_feed_group);
+  graspnet_feed_table->setColumnCount(8);
+  graspnet_feed_table->setHorizontalHeaderLabels(
+    {QStringLiteral("#"), QString::fromUtf8("分数"),
+      QStringLiteral("X (m)"), QStringLiteral("Y (m)"), QStringLiteral("Z (m)"),
+      QString::fromUtf8("Roll (°)"), QString::fromUtf8("Pitch (°)"),
+      QString::fromUtf8("Yaw (°)")});
+  graspnet_feed_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  graspnet_feed_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  graspnet_feed_table->setAlternatingRowColors(true);
+  graspnet_feed_table->verticalHeader()->setVisible(false);
+  graspnet_feed_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+  graspnet_feed_table->horizontalHeader()->setStretchLastSection(false);
   auto * graspnet_feed_layout = new QVBoxLayout(graspnet_feed_group);
   graspnet_feed_layout->setContentsMargins(8, 8, 8, 8);
-  graspnet_feed_layout->addWidget(graspnet_feed_view);
+  graspnet_feed_layout->addWidget(graspnet_feed_table);
 
   auto * graspnet_selected_group = new QGroupBox(
-    QString::fromUtf8("已冻结的最优抓取"), graspnet_top);
-  auto * graspnet_selected_view = new QTextEdit(graspnet_selected_group);
-  graspnet_selected_view->setReadOnly(true);
-  graspnet_selected_view->setPlainText(QString::fromUtf8("点击选择或抓取后显示结果"));
+    QString::fromUtf8("转换后 base_link 候选"), graspnet_top);
+  auto * graspnet_selected_table = new QTableWidget(graspnet_selected_group);
+  graspnet_selected_table->setColumnCount(8);
+  graspnet_selected_table->setHorizontalHeaderLabels(
+    {QStringLiteral("#"), QString::fromUtf8("分数"),
+      QStringLiteral("X (m)"), QStringLiteral("Y (m)"), QStringLiteral("Z (m)"),
+      QString::fromUtf8("Roll (°)"), QString::fromUtf8("Pitch (°)"),
+      QString::fromUtf8("Yaw (°)")});
+  graspnet_selected_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  graspnet_selected_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  graspnet_selected_table->verticalHeader()->setVisible(false);
+  graspnet_selected_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+  graspnet_selected_table->horizontalHeader()->setStretchLastSection(false);
+  auto * graspnet_box_ref_label = new QLabel(graspnet_selected_group);
+  graspnet_box_ref_label->setWordWrap(true);
+  graspnet_box_ref_label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  graspnet_box_ref_label->setMinimumHeight(72);
+  graspnet_box_ref_label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  graspnet_box_ref_label->setStyleSheet(
+    QStringLiteral(
+      "QLabel {"
+      "  background: #e8f4fc;"
+      "  border: 2px solid #5dade2;"
+      "  border-radius: 4px;"
+      "  padding: 6px 8px;"
+      "  color: #2c3e50;"
+      "  font-family: monospace;"
+      "  font-size: 12px;"
+      "}"));
+  graspnet_box_ref_label->setText(
+    QString::fromUtf8("标准盒子中心 /box_pose：等待数据 ..."));
   auto * graspnet_selected_layout = new QVBoxLayout(graspnet_selected_group);
   graspnet_selected_layout->setContentsMargins(8, 8, 8, 8);
-  graspnet_selected_layout->addWidget(graspnet_selected_view);
+  graspnet_selected_layout->addWidget(graspnet_selected_table, 1);
+  graspnet_selected_layout->addWidget(graspnet_box_ref_label, 0);
   graspnet_top->addWidget(graspnet_feed_group);
   graspnet_top->addWidget(graspnet_selected_group);
   graspnet_top->setStretchFactor(0, 1);
@@ -1085,16 +1172,48 @@ int RunGraspQtUiApp(
     ros_node->get_parameter("graspnet_top_max_angle_deg").as_double());
   spin_graspnet_top_angle->setSuffix(QString::fromUtf8(" °"));
   spin_graspnet_top_angle->setToolTip(
-    QString::fromUtf8("GraspNet 局部 +X 与 base_link 竖直向下方向的最大夹角"));
+    QString::fromUtf8("GraspNet 局部 -X 与 base_link 竖直向下方向的最大夹角"));
   graspnet_filter_form->addRow(QString::fromUtf8("最大倾角"), spin_graspnet_top_angle);
   graspnet_ctrl_layout->addWidget(graspnet_filter_group);
 
+  const auto gn_cfg0 = ros_node->planner_config();
+  auto * graspnet_traj_group = new QGroupBox(
+    QString::fromUtf8("GraspNet 轨迹参数（独立于抓取测试）"), graspnet_control);
+  auto * graspnet_traj_form = new QFormLayout(graspnet_traj_group);
+  auto * spin_gn_pre = make_metric_spin(
+    graspnet_traj_group, 0.05, 0.30, 0.01, 3, gn_cfg0.graspnet_pregrasp_distance);
+  auto * spin_gn_lift = make_metric_spin(
+    graspnet_traj_group, 0.05, 0.30, 0.01, 3, gn_cfg0.graspnet_lift_z_offset);
+  auto * spin_gn_tcp = make_metric_spin(
+    graspnet_traj_group, 0.05, 0.30, 0.005, 3, gn_cfg0.graspnet_ee_tcp_z_offset);
+  auto * spin_gn_clear = make_metric_spin(
+    graspnet_traj_group, 0.05, 0.30, 0.01, 3, gn_cfg0.graspnet_min_approach_clearance);
+  spin_gn_pre->setToolTip(QString::fromUtf8("沿接近轴后退距离；与「抓取测试」预抓取 Z+ 无关"));
+  spin_gn_lift->setToolTip(QString::fromUtf8("闭合后沿世界 +Z 抬升；与「抓取测试」抬升无关"));
+  spin_gn_tcp->setToolTip(QString::fromUtf8("腕部→两指中心；GraspNet 默认 0.12，盒子页默认 0.20"));
+  spin_gn_clear->setToolTip(QString::fromUtf8("预抓取最小净空下限（与后退距离取 max）"));
+  graspnet_traj_form->addRow(QString::fromUtf8("预抓取后退 (m)"), spin_gn_pre);
+  graspnet_traj_form->addRow(QString::fromUtf8("抬升 Z+ (m)"), spin_gn_lift);
+  graspnet_traj_form->addRow(QString::fromUtf8("腕部→指尖 (m)"), spin_gn_tcp);
+  graspnet_traj_form->addRow(QString::fromUtf8("最小净空 (m)"), spin_gn_clear);
+  graspnet_ctrl_layout->addWidget(graspnet_traj_group);
+
   auto * btn_graspnet_select = new QPushButton(QString::fromUtf8("选择最优并计算"), graspnet_control);
   auto * btn_graspnet_step = new QPushButton(QString::fromUtf8("单步"), graspnet_control);
+  auto * btn_graspnet_run = new QPushButton(QString::fromUtf8("使用最优解抓取"), graspnet_control);
   auto * btn_graspnet_execute = new QPushButton(QString::fromUtf8("抓取最新最优位姿"), graspnet_control);
   auto * btn_graspnet_clear = new QPushButton(QString::fromUtf8("清空日志"), graspnet_control);
+  btn_graspnet_step->setToolTip(
+    QString::fromUtf8("按「选择最优并计算」得到的同一规划，点一次走一个路点"));
+  btn_graspnet_run->setToolTip(
+    QString::fromUtf8(
+      "连续执行「选择最优并计算」冻结的同一规划（不重新选解）。\n"
+      "用于和「单步」对比自动序列是否一致。"));
+  btn_graspnet_execute->setToolTip(
+    QString::fromUtf8("重新从最新候选选解并连续执行（可能与刚才算的规划不同）"));
   for (auto * button : {
-      btn_graspnet_select, btn_graspnet_step, btn_graspnet_execute, btn_graspnet_clear})
+      btn_graspnet_select, btn_graspnet_step, btn_graspnet_run,
+      btn_graspnet_execute, btn_graspnet_clear})
   {
     button->setMinimumHeight(30);
     graspnet_ctrl_layout->addWidget(button);
@@ -1117,7 +1236,7 @@ int RunGraspQtUiApp(
   win.setCentralWidget(central);
   win.resize(1200, 860);
 
-  const auto apply_params = [&]() {
+  const auto apply_box_params = [&]() {
       GraspPlannerConfig cfg = ros_node->planner_config();
       cfg.pregrasp_z_offset = spin_pregrasp->value();
       cfg.lift_z_offset = spin_lift->value();
@@ -1126,8 +1245,18 @@ int RunGraspQtUiApp(
       cfg.arm_split_x = spin_split->value();
       cfg.gripper_open_m = spin_grip_open->value();
       cfg.gripper_close_m = spin_grip_close->value();
+      // 不改动 GraspNet 专用字段
       ros_node->set_planner_config(cfg);
       ros_node->set_settle_timing(spin_step_settle->value(), spin_grip_settle->value());
+    };
+  const auto apply_graspnet_params = [&]() {
+      GraspPlannerConfig cfg = ros_node->planner_config();
+      cfg.graspnet_pregrasp_distance = spin_gn_pre->value();
+      cfg.graspnet_lift_z_offset = spin_gn_lift->value();
+      cfg.graspnet_ee_tcp_z_offset = spin_gn_tcp->value();
+      cfg.graspnet_min_approach_clearance = spin_gn_clear->value();
+      // 不改动抓取测试专用字段
+      ros_node->set_planner_config(cfg);
     };
 
   auto * compute_watcher = new QFutureWatcher<GraspComputeResult>(&win);
@@ -1135,6 +1264,7 @@ int RunGraspQtUiApp(
   auto * step_watcher = new QFutureWatcher<GraspExecuteResult>(&win);
   auto * graspnet_select_watcher = new QFutureWatcher<GraspComputeResult>(&win);
   auto * graspnet_execute_watcher = new QFutureWatcher<GraspExecuteResult>(&win);
+  auto * graspnet_run_watcher = new QFutureWatcher<GraspExecuteResult>(&win);
   auto * graspnet_step_watcher = new QFutureWatcher<GraspExecuteResult>(&win);
 
   const auto set_grasp_buttons_enabled = [&](bool enabled) {
@@ -1145,7 +1275,14 @@ int RunGraspQtUiApp(
   const auto set_graspnet_buttons_enabled = [&](bool enabled) {
       btn_graspnet_select->setEnabled(enabled);
       btn_graspnet_step->setEnabled(enabled);
+      btn_graspnet_run->setEnabled(enabled);
       btn_graspnet_execute->setEnabled(enabled);
+    };
+  const auto graspnet_busy = [&]() {
+      return graspnet_select_watcher->isRunning() ||
+        graspnet_execute_watcher->isRunning() ||
+        graspnet_run_watcher->isRunning() ||
+        graspnet_step_watcher->isRunning();
     };
   const auto disable_manual_realtime = [&]() {
       for (ArmControlPanel * panel : {&j1_panel, &j2_panel}) {
@@ -1201,6 +1338,14 @@ int RunGraspQtUiApp(
       }
     });
   QObject::connect(
+    graspnet_run_watcher, &QFutureWatcher<GraspExecuteResult>::finished, [&]() {
+      set_graspnet_buttons_enabled(true);
+      const auto result = graspnet_run_watcher->result();
+      if (!result.ok) {
+        show_grasp_error(&win, result);
+      }
+    });
+  QObject::connect(
     graspnet_step_watcher, &QFutureWatcher<GraspExecuteResult>::finished, [&]() {
       set_graspnet_buttons_enabled(true);
       const auto result = graspnet_step_watcher->result();
@@ -1214,7 +1359,7 @@ int RunGraspQtUiApp(
         return;
       }
       disable_manual_realtime();
-      apply_params();
+      apply_box_params();
       const auto snap = ros_node->snapshot();
       if (!snap.arm_comm_ok) {
         GraspComputeResult err;
@@ -1242,7 +1387,7 @@ int RunGraspQtUiApp(
         return;
       }
       disable_manual_realtime();
-      apply_params();
+      apply_box_params();
       const auto snap = ros_node->snapshot();
       if (!snap.has_plan) {
         GraspExecuteResult err;
@@ -1276,7 +1421,7 @@ int RunGraspQtUiApp(
         return;
       }
       disable_manual_realtime();
-      apply_params();
+      apply_box_params();
       const auto snap = ros_node->snapshot();
       if (!snap.arm_comm_ok) {
         GraspExecuteResult err;
@@ -1323,18 +1468,18 @@ int RunGraspQtUiApp(
     btn_graspnet_topic, &QPushButton::click);
 
   QObject::connect(btn_graspnet_select, &QPushButton::clicked, [&]() {
-      if (graspnet_select_watcher->isRunning() || graspnet_execute_watcher->isRunning()) {
+      if (graspnet_busy()) {
         return;
       }
       disable_manual_realtime();
-      apply_params();
+      apply_graspnet_params();
       const auto snap = ros_node->snapshot();
       if (!snap.arm_comm_ok || !snap.ik_service_ready || !snap.has_graspnet_candidates) {
         GraspComputeResult err;
         err.error_title = "GraspNet 抓取未就绪";
         if (!snap.has_graspnet_candidates) {
           err.error_message =
-            "尚未收到非空的 " + snap.graspnet_topic + " PoseArray。";
+            "尚未收到 " + snap.graspnet_topic + " 中的有效 GraspNet JSON 候选。";
         } else if (!snap.arm_comm_ok) {
           err.error_message = snap.arm_comm_summary;
         } else {
@@ -1354,11 +1499,11 @@ int RunGraspQtUiApp(
     });
 
   QObject::connect(btn_graspnet_step, &QPushButton::clicked, [&]() {
-      if (graspnet_step_watcher->isRunning() || graspnet_execute_watcher->isRunning()) {
+      if (graspnet_busy()) {
         return;
       }
       disable_manual_realtime();
-      apply_params();
+      apply_graspnet_params();
       const auto snap = ros_node->snapshot();
       if (!snap.has_selected_graspnet_pose || !snap.has_plan) {
         GraspExecuteResult err;
@@ -1372,19 +1517,55 @@ int RunGraspQtUiApp(
           [ros_node]() { return ros_node->execute_step_once_detailed(); }));
     });
 
-  QObject::connect(btn_graspnet_execute, &QPushButton::clicked, [&]() {
-      if (graspnet_execute_watcher->isRunning() || graspnet_select_watcher->isRunning()) {
+  QObject::connect(btn_graspnet_run, &QPushButton::clicked, [&]() {
+      if (graspnet_busy()) {
         return;
       }
       disable_manual_realtime();
-      apply_params();
+      apply_graspnet_params();
+      const auto snap = ros_node->snapshot();
+      if (!snap.has_selected_graspnet_pose || !snap.has_plan) {
+        GraspExecuteResult err;
+        err.error_title = "未选择 GraspNet 位姿";
+        err.error_message =
+          "请先点击「选择最优并计算」，再点「使用最优解抓取」。\n"
+          "本按钮连续执行已冻结规划，与「单步」用同一套路点。";
+        show_grasp_error(&win, err);
+        return;
+      }
+      if (!snap.arm_comm_ok) {
+        GraspExecuteResult err;
+        err.error_title = "机械臂通信异常";
+        err.error_message = snap.arm_comm_summary.empty() ?
+          "/joint_states 不可用。" : snap.arm_comm_summary;
+        show_grasp_error(&win, err);
+        return;
+      }
+      if (!snap.ik_service_ready) {
+        GraspExecuteResult err;
+        err.error_title = "IK 不可用";
+        err.error_message = "/compute_ik 未就绪。";
+        show_grasp_error(&win, err);
+        return;
+      }
+      set_graspnet_buttons_enabled(false);
+      graspnet_run_watcher->setFuture(QtConcurrent::run(
+          [ros_node]() { return ros_node->execute_last_plan_detailed(); }));
+    });
+
+  QObject::connect(btn_graspnet_execute, &QPushButton::clicked, [&]() {
+      if (graspnet_busy()) {
+        return;
+      }
+      disable_manual_realtime();
+      apply_graspnet_params();
       const auto snap = ros_node->snapshot();
       if (!snap.arm_comm_ok || !snap.ik_service_ready || !snap.has_graspnet_candidates) {
         GraspExecuteResult err;
         err.error_title = "GraspNet 抓取未就绪";
         if (!snap.has_graspnet_candidates) {
           err.error_message =
-            "尚未收到非空的 " + snap.graspnet_topic + " PoseArray。";
+            "尚未收到 " + snap.graspnet_topic + " 中的有效 GraspNet JSON 候选。";
         } else if (!snap.arm_comm_ok) {
           err.error_message = snap.arm_comm_summary;
         } else {
@@ -1421,6 +1602,9 @@ int RunGraspQtUiApp(
   std::vector<std::string> rendered_logs;
   std::vector<std::string> rendered_status_logs;
   std::vector<std::string> rendered_graspnet_logs;
+  int rendered_graspnet_message_count = -1;
+  int rendered_graspnet_base_revision = -1;
+  int rendered_graspnet_selected_index = -2;
 
   QTimer ui_timer;
   QTimer shutdown_watchdog;
@@ -1507,47 +1691,129 @@ int RunGraspQtUiApp(
             .arg(QString::fromStdString(last_snap.box_pose.header.frame_id))
             .arg(p.x, 0, 'f', 4).arg(p.y, 0, 'f', 4).arg(p.z, 0, 'f', 4)
             .arg(q.x, 0, 'f', 4).arg(q.y, 0, 'f', 4).arg(q.z, 0, 'f', 4).arg(q.w, 0, 'f', 4));
-      }
 
-      if (last_snap.has_graspnet_candidates) {
-        const auto & array = last_snap.graspnet_candidates;
-        QString text = QString::fromUtf8(
-          "topic=%1\nframe=%2\n本帧候选=%3，累计消息=%4\n")
-          .arg(QString::fromStdString(last_snap.graspnet_topic))
-          .arg(QString::fromStdString(array.header.frame_id))
-          .arg(array.poses.size())
-          .arg(last_snap.graspnet_message_count);
-        const size_t preview_count = std::min<size_t>(array.poses.size(), 6);
-        for (size_t i = 0; i < preview_count; ++i) {
-          const auto & p = array.poses[i].position;
-          text += QString("#%1  (%2, %3, %4)\n")
-            .arg(i)
-            .arg(p.x, 0, 'f', 4).arg(p.y, 0, 'f', 4).arg(p.z, 0, 'f', 4);
+        tf2::Quaternion box_q(q.x, q.y, q.z, q.w);
+        box_q.normalize();
+        double box_roll = 0.0;
+        double box_pitch = 0.0;
+        double box_yaw = 0.0;
+        tf2::Matrix3x3(box_q).getRPY(box_roll, box_pitch, box_yaw);
+        QString box_ref_text = QString::fromUtf8(
+          "标准盒子中心 /box_pose  frame=%1\n"
+          "XYZ=(%2, %3, %4) m    RPY=(%5, %6, %7)°")
+          .arg(QString::fromStdString(
+            last_snap.box_pose.header.frame_id.empty() ?
+            "base_link" : last_snap.box_pose.header.frame_id))
+          .arg(p.x, 0, 'f', 4).arg(p.y, 0, 'f', 4).arg(p.z, 0, 'f', 4)
+          .arg(box_roll * kRadToDeg, 0, 'f', 2)
+          .arg(box_pitch * kRadToDeg, 0, 'f', 2)
+          .arg(box_yaw * kRadToDeg, 0, 'f', 2);
+
+        // 与转换后表格对比：优先选中行，否则用最近候选。
+        int cmp_index = -1;
+        geometry_msgs::msg::Pose cmp_pose;
+        bool have_cmp = false;
+        if (last_snap.has_selected_graspnet_pose) {
+          cmp_index = last_snap.selected_graspnet_index;
+          cmp_pose = last_snap.selected_graspnet_pose.pose;
+          have_cmp = true;
+        } else if (!last_snap.graspnet_base_candidates.poses.empty()) {
+          double best_err = std::numeric_limits<double>::infinity();
+          for (size_t i = 0; i < last_snap.graspnet_base_candidates.poses.size(); ++i) {
+            const auto & gp = last_snap.graspnet_base_candidates.poses[i].position;
+            const double dx = gp.x - p.x;
+            const double dy = gp.y - p.y;
+            const double dz = gp.z - p.z;
+            const double err = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (err < best_err) {
+              best_err = err;
+              cmp_pose = last_snap.graspnet_base_candidates.poses[i];
+              cmp_index =
+                i < last_snap.graspnet_base_candidate_indices.size() ?
+                last_snap.graspnet_base_candidate_indices[i] : static_cast<int>(i);
+              have_cmp = true;
+            }
+          }
         }
-        if (array.poses.size() > preview_count) {
-          text += QString::fromUtf8("… 其余 %1 个").arg(array.poses.size() - preview_count);
+        if (have_cmp) {
+          const auto & gp = cmp_pose.position;
+          const double dx = gp.x - p.x;
+          const double dy = gp.y - p.y;
+          const double dz = gp.z - p.z;
+          const double err = std::sqrt(dx * dx + dy * dy + dz * dz);
+          box_ref_text += QString::fromUtf8(
+            "\n对比#%1  XYZ=(%2, %3, %4)  Δ=(%5, %6, %7) cm  |Δ|=%8 cm")
+            .arg(cmp_index)
+            .arg(gp.x, 0, 'f', 4).arg(gp.y, 0, 'f', 4).arg(gp.z, 0, 'f', 4)
+            .arg(dx * 100.0, 0, 'f', 1)
+            .arg(dy * 100.0, 0, 'f', 1)
+            .arg(dz * 100.0, 0, 'f', 1)
+            .arg(err * 100.0, 0, 'f', 1);
         }
-        graspnet_feed_view->setPlainText(text);
+        graspnet_box_ref_label->setText(box_ref_text);
       } else {
-        graspnet_feed_view->setPlainText(
-          QString::fromUtf8("等待 %1 PoseArray ...")
-          .arg(QString::fromStdString(last_snap.graspnet_topic)));
+        graspnet_box_ref_label->setText(
+          QString::fromUtf8("标准盒子中心：等待 /box_pose ..."));
       }
 
-      if (last_snap.has_selected_graspnet_pose) {
-        const auto & pose = last_snap.selected_graspnet_pose.pose;
-        graspnet_selected_view->setPlainText(
-          QString::fromUtf8(
-            "%1\nframe=base_link\nTCP center=(%2, %3, %4)\n"
-            "TCP quat=(%5, %6, %7, %8)")
-          .arg(QString::fromStdString(last_snap.graspnet_selection_summary))
-          .arg(pose.position.x, 0, 'f', 4)
-          .arg(pose.position.y, 0, 'f', 4)
-          .arg(pose.position.z, 0, 'f', 4)
-          .arg(pose.orientation.x, 0, 'f', 4)
-          .arg(pose.orientation.y, 0, 'f', 4)
-          .arg(pose.orientation.z, 0, 'f', 4)
-          .arg(pose.orientation.w, 0, 'f', 4));
+      if (last_snap.graspnet_message_count != rendered_graspnet_message_count) {
+        const auto & poses = last_snap.graspnet_candidates.poses;
+        graspnet_feed_table->setRowCount(static_cast<int>(poses.size()));
+        for (size_t i = 0; i < poses.size(); ++i) {
+          const double score =
+            i < last_snap.graspnet_scores.size() ?
+            last_snap.graspnet_scores[i] : std::numeric_limits<double>::quiet_NaN();
+          set_grasp_pose_table_row(
+            graspnet_feed_table, static_cast<int>(i), static_cast<int>(i), score, poses[i]);
+        }
+        rendered_graspnet_message_count = last_snap.graspnet_message_count;
+      }
+
+      if (last_snap.graspnet_base_revision != rendered_graspnet_base_revision ||
+        last_snap.selected_graspnet_index != rendered_graspnet_selected_index)
+      {
+        const auto & poses = last_snap.graspnet_base_candidates.poses;
+        graspnet_selected_table->setRowCount(static_cast<int>(poses.size()));
+        for (size_t row = 0; row < poses.size(); ++row) {
+          const int source_index =
+            row < last_snap.graspnet_base_candidate_indices.size() ?
+            last_snap.graspnet_base_candidate_indices[row] : static_cast<int>(row);
+          const double score =
+            source_index >= 0 &&
+            static_cast<size_t>(source_index) < last_snap.graspnet_scores.size() ?
+            last_snap.graspnet_scores[static_cast<size_t>(source_index)] :
+            std::numeric_limits<double>::quiet_NaN();
+          const bool selected =
+            last_snap.has_selected_graspnet_pose &&
+            source_index == last_snap.selected_graspnet_index;
+          const bool ik_ok =
+            row < last_snap.graspnet_base_candidate_ik_ok.size() &&
+            last_snap.graspnet_base_candidate_ik_ok[row] != 0;
+          const bool a_corrected =
+            row < last_snap.graspnet_base_candidate_a_corrected.size() &&
+            last_snap.graspnet_base_candidate_a_corrected[row] != 0;
+          QColor row_bg;
+          if (selected) {
+            row_bg = QColor(QStringLiteral("#c6efce"));  // 选中：绿
+          } else if (!ik_ok) {
+            row_bg = QColor(QStringLiteral("#f4c7c3"));  // IK 失败：红
+          } else {
+            row_bg = QColor(QStringLiteral("#fff2a8"));  // 可达未选：黄
+          }
+          // A 方案修正后的 RPY：仅 Roll/Pitch/Yaw 单元格浅蓝，不整行。
+          const QColor rpy_bg = a_corrected ?
+            QColor(QStringLiteral("#9ec5fe")) : QColor();
+          set_grasp_pose_table_row(
+            graspnet_selected_table,
+            static_cast<int>(row),
+            source_index,
+            score,
+            poses[row],
+            row_bg,
+            rpy_bg);
+        }
+        rendered_graspnet_base_revision = last_snap.graspnet_base_revision;
+        rendered_graspnet_selected_index = last_snap.selected_graspnet_index;
       }
 
       if (last_snap.has_plan) {
