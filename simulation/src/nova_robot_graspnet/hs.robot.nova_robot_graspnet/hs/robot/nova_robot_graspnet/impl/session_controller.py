@@ -308,6 +308,10 @@ class SessionController:
         self._notify()
         return ok
 
+    def set_object_kind(self, kind: Optional[str]) -> str:
+        """转发到 SceneLoader：Load 前选择纸盒 / 料盒资源。"""
+        return self.scene_loader.set_object_kind(kind)
+
     async def _deferred_post_load(self) -> None:
         """等几帧渲染稳定后再设关节零位、补剥离相机物理（避免 Load 时 GPU 竞争）。"""
         import omni.kit.app

@@ -83,14 +83,27 @@ from ..global_variables import (
     WORKSPACE_BASE_LINK_MESH_TOP_Z,
 )
 from ..mesh_bounds import base_link_stl_z_bounds
-from ..paths import load_box_meta, resolve_robot_usd, resolve_scene_usd
+from ..paths import (
+    OBJECT_KIND_CASSETTE,
+    OBJECT_KIND_PAPER_BOX,
+    load_box_meta,
+    normalize_object_kind,
+    resolve_object_asset_dir,
+    resolve_robot_usd,
+    resolve_scene_usd,
+)
 from .box_physics import (
     configure_box_usd_dynamic,
     lift_box_clear_of_surface,
     release_box_for_gravity,
 )
 from .box_mesh_builder import ensure_box_collision, has_box_collision, remove_legacy_box_collision_cube, setup_box_collision
-from .box_visual_loader import _box_has_visible_mesh, apply_box_textures, load_box_visual
+from .box_visual_loader import (
+    _box_has_visible_mesh,
+    apply_box_textures,
+    clear_box_visual,
+    load_box_visual,
+)
 from .pose_utils import Pose6D, set_pose
 
 
@@ -111,10 +124,12 @@ class SceneLoader:
 
         Args:
             robot_dir: ``data/robot``，含 ``nova_robot_prepared.usda``。
-            box_dir: ``data/box``，含 ``grasp_box.usda`` 与 ``grasp_box_meta.json``。
+            box_dir: ``data/box`` 根目录；纸盒资源在根下，料盒在 ``cassette/``。
         """
         self._robot_dir = robot_dir
-        self._box_dir = box_dir
+        self._box_root_dir = box_dir
+        self._object_kind = OBJECT_KIND_PAPER_BOX
+        self._box_dir = resolve_object_asset_dir(box_dir, self._object_kind)
         self._data_dir = os.path.dirname(os.path.abspath(robot_dir))
         self.world: Optional["World"] = None
         self.robot_prim_path = ROBOT_PRIM_PATH
@@ -134,8 +149,56 @@ class SceneLoader:
             TABLE_TOP_Z + WORKSPACE_BASE_LINK_MESH_TOP_Z
         )
         self._box_visual_ready = False
+        self._loaded_object_kind: Optional[str] = None
         self._master_scene_path: Optional[str] = None
         self._using_master_scene = False
+
+    def set_object_kind(self, kind: Optional[str]) -> str:
+        """设置场景物体类型（纸盒 / 料盒），并切换 ``_box_dir`` 到对应资源目录。"""
+        self._object_kind = normalize_object_kind(kind)
+        self._box_dir = resolve_object_asset_dir(self._box_root_dir, self._object_kind)
+        # 类型变化后必须重建 visual（否则会沿用上一次的 mesh）
+        if self._loaded_object_kind != self._object_kind:
+            self._box_visual_ready = False
+        print(
+            f"SceneLoader: object_kind={self._object_kind} "
+            f"asset_dir={self._box_dir}"
+        )
+        return self._object_kind
+
+    @property
+    def object_kind(self) -> str:
+        return self._object_kind
+
+    @property
+    def active_box_dir(self) -> str:
+        """当前物体资源目录（纸盒=``data/box``，料盒=``data/box/cassette``）。"""
+        return self._box_dir
+
+    def _sync_box_visual(self, stage) -> None:
+        """按当前 ``object_kind`` 强制同步 grasp_box 视觉与碰撞。
+
+        每次切换/Load 都 clear 后重建，避免 Cassette 写在 root 层的 mesh
+        意见在改回 Paper box 后仍盖住 master 场景里的纸盒。
+        """
+        try:
+            ensure_box_collision(stage, self._box_dir)
+        except Exception as exc:
+            print(f"SceneLoader: box collision ensure: {exc}")
+
+        print(
+            f"SceneLoader: sync box visual kind={self._object_kind} "
+            f"(was={self._loaded_object_kind})"
+        )
+        clear_box_visual(stage)
+        ok = load_box_visual(stage, self._box_dir, force=True)
+        if ok:
+            self._loaded_object_kind = self._object_kind
+            self._box_visual_ready = True
+        else:
+            self._loaded_object_kind = None
+            self._box_visual_ready = False
+            print(f"SceneLoader: WARN box visual load failed for {self._object_kind}")
 
     @property
     def mount_xy(self) -> tuple[float, float]:
@@ -261,15 +324,10 @@ class SceneLoader:
                 f"t={box_pose.translation} rpy={box_pose.rotation_deg}"
             )
 
-        # Ensure collision / visual + texture (master scene mesh may lack MaterialBindingAPI)
-        try:
-            ensure_box_collision(stage, self._box_dir)
-        except Exception as exc:
-            print(f"SceneLoader: box collision ensure: {exc}")
-        if not _box_has_visible_mesh(stage, self.box_link_path):
-            load_box_visual(stage, self._box_dir)
-        else:
-            apply_box_textures(stage, self._box_dir)
+        # Always sync grasp_box visual to the selected object kind.
+        # Master embeds paper box; a prior Cassette load can leave stronger
+        # root-layer mesh opinions that must be cleared when switching back.
+        self._sync_box_visual(stage)
         self._apply_grasp_friction(stage)
 
         self._fix_flatgrid_texture_paths(stage)
@@ -486,6 +544,7 @@ class SceneLoader:
         self._using_master_scene = False
         self._physics_initialized = False
         self._box_visual_ready = False
+        self._loaded_object_kind = None
         self._box_rigid = None
         self._table_rigid = None
         self._robot_articulation = None
@@ -1674,24 +1733,20 @@ class SceneLoader:
             print("SceneLoader: box placeholder visible until deferred mesh build")
 
     def build_box_visual_if_needed(self, stage) -> None:
-        """延迟构建带贴图的盒子 mesh（Load 后异步调用，仅执行一次）。"""
-        if self._box_visual_ready:
-            return
-        mesh_path = f"{BOX_VISUAL_PATH}/mesh"
-        if _box_has_visible_mesh(stage, mesh_path):
-            remove_legacy_box_collision_cube(stage)
-            if not has_box_collision(stage):
-                try:
-                    setup_box_collision(stage, box_dir=self._box_dir)
-                except Exception as exc:
-                    print(f"SceneLoader: setup_box_collision failed: {exc}")
+        """延迟构建带贴图的盒子 mesh（Load 后异步调用）。"""
+        if (
+            self._box_visual_ready
+            and self._loaded_object_kind == self._object_kind
+            and _box_has_visible_mesh(stage, f"{BOX_VISUAL_PATH}/mesh")
+        ):
             apply_box_textures(stage, self._box_dir)
-            self._box_visual_ready = True
             return
-        if load_box_visual(stage, self._box_dir):
-            self._box_visual_ready = True
-            return
-        print("SceneLoader: WARN box textured mesh unavailable (placeholder cube remains visible)")
+        self._sync_box_visual(stage)
+        if not self._box_visual_ready:
+            print(
+                "SceneLoader: WARN box textured mesh unavailable "
+                "(placeholder cube remains visible)"
+            )
 
     def fix_box_visual_material(self, stage=None) -> None:
         """Load 后延迟调用：等 payload 就绪后再次应用贴图。"""

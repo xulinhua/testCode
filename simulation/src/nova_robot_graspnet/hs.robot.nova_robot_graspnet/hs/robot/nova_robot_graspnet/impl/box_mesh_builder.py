@@ -20,7 +20,12 @@ from ..global_variables import (
     BOX_SIZE_Z,
     BOX_VISUAL_PATH,
 )
-from ..paths import ensure_box_texture_sidecar, load_box_meta, resolve_box_texture_path
+from ..paths import (
+    ensure_box_texture_sidecar,
+    find_box_obj_path,
+    load_box_meta,
+    resolve_box_texture_path,
+)
 
 
 @dataclass
@@ -364,15 +369,12 @@ def setup_box_collision(
 
     if mesh_data is None:
         if box_dir:
-            model_dir = os.path.join(box_dir, "model")
-            if os.path.isdir(model_dir):
-                for name in sorted(os.listdir(model_dir)):
-                    if name.endswith(".obj"):
-                        try:
-                            mesh_data = parse_box_obj(os.path.join(model_dir, name), box_dir)
-                        except (OSError, ValueError) as exc:
-                            print(f"box_mesh_builder: OBJ parse for collision failed: {exc}")
-                        break
+            obj_path = find_box_obj_path(box_dir)
+            if obj_path:
+                try:
+                    mesh_data = parse_box_obj(obj_path, box_dir)
+                except (OSError, ValueError) as exc:
+                    print(f"box_mesh_builder: OBJ parse for collision failed: {exc}")
         if mesh_data is None:
             mesh_data = _extract_visual_mesh_data(stage, visual_root)
     if mesh_data is not None and _write_collision_mesh(stage, mesh_data):

@@ -1,0 +1,16 @@
+{
+  "source_obj": "mesh/20260518.obj",
+  "scale": 1.0,
+  "kind": "cassette",
+  "size_m": {
+    "x": 0.266073761,
+    "y": 0.089264312,
+    "z": 0.181238289
+  },
+  "center_m": {
+    "x": 0.006086318500000007,
+    "y": -0.002863921999999998,
+    "z": -0.006803287500000005
+  },
+  "note": "Vertices already in meters (Blender export). Centered like paper box via center_m."
+}

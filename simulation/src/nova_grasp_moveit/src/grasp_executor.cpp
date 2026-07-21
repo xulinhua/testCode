@@ -148,69 +148,197 @@ bool GraspExecutor::send_arm_pose_and_wait(
       return true;
     }
 
-    // /compute_ik 返回只表示关节目标已发布，不表示 Isaac 已运动到位。
+    // /compute_ik 返回只表示关节目标已发布。到位判定：
+    // 1) 先确认末端已开始移动（或本来就很近）
+    // 2) 再等停稳 → 延时 step_settle_sec_ → 判定
+    // 避免指令刚发出、Isaac 尚未响应时把“静止”误判为到位失败。
     constexpr double kPositionToleranceM = 0.015;
     constexpr double kOrientationToleranceRad = 5.0 * M_PI / 180.0;
+    constexpr double kStillPosM = 0.002;
+    constexpr double kStillRotRad = 1.0 * M_PI / 180.0;
+    constexpr int kStillSamplesNeeded = 8;      // 连续约 0.4s 不动
+    constexpr double kStartMoveM = 0.012;       // 相对起点位移，视为已启动
+    constexpr double kStartupGraceSec = 1.5;    // 启动宽限：期间不计“停稳”
+    // 按行程估算等待上限，夹在 4–12s（原先固定 60s 过长）
+    constexpr double kMaxMotionWaitFloorSec = 4.0;
+    constexpr double kMaxMotionWaitCeilSec = 12.0;
+    constexpr double kMaxMotionWaitPerMeterSec = 40.0;
 
     geometry_msgs::msg::Pose start_ee;
+    bool have_start = current_ee_cb_(arm_id, start_ee);
     double travel_m = 0.25;
-    if (current_ee_cb_(arm_id, start_ee)) {
+    if (have_start) {
       const double dx0 = start_ee.position.x - pose.pose.position.x;
       const double dy0 = start_ee.position.y - pose.pose.position.y;
       const double dz0 = start_ee.position.z - pose.pose.position.z;
       travel_m = std::sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0);
     }
-    // 短位移快判；长位移（home→pregrasp ~0.4m）在慢实时下需要更长墙钟。
-    // 约 10 s/m，下限 3s、上限 12s；到位立即返回。
-    const double wall_timeout_sec = std::clamp(3.0 + travel_m * 10.0, 3.0, 12.0);
+    const double settle_after_stop_sec = std::max(0.1, step_settle_sec_);
+    // 行程很短：无需等“启动”，直接看停稳。
+    bool motion_started = travel_m <= 0.03;
+    const double max_motion_wait_sec = std::clamp(
+      3.0 + travel_m * kMaxMotionWaitPerMeterSec,
+      kMaxMotionWaitFloorSec,
+      kMaxMotionWaitCeilSec);
     publish_log(
       std::string("[executor] wait ") + step +
       " travel=" + std::to_string(travel_m) +
-      "m wall_timeout=" + std::to_string(wall_timeout_sec) + "s");
+      "m mode=start_then_stop_settle settle=" + std::to_string(settle_after_stop_sec) +
+      "s max_motion=" + std::to_string(max_motion_wait_sec) + "s");
 
-    const auto deadline = std::chrono::steady_clock::now() +
-      std::chrono::duration<double>(wall_timeout_sec);
-    double last_pos_err = 999.0;
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto motion_deadline = t0 + std::chrono::duration<double>(max_motion_wait_sec);
+    geometry_msgs::msg::Pose prev;
+    bool have_prev = false;
+    int still_count = 0;
+    double last_pos_err = travel_m;
     double last_rot_err = 999.0;
     geometry_msgs::msg::Pose actual;
-    while (std::chrono::steady_clock::now() < deadline && !shutdown_.load()) {
-      if (current_ee_cb_(arm_id, actual)) {
-        const double dx = actual.position.x - pose.pose.position.x;
-        const double dy = actual.position.y - pose.pose.position.y;
-        const double dz = actual.position.z - pose.pose.position.z;
-        last_pos_err = std::sqrt(dx * dx + dy * dy + dz * dz);
+    bool motion_stopped = false;
+    bool logged_start = motion_started;
 
-        const auto & qa = actual.orientation;
-        const auto & qt = pose.pose.orientation;
-        const double dot = std::clamp(
-          std::abs(qa.x * qt.x + qa.y * qt.y + qa.z * qt.z + qa.w * qt.w),
-          0.0, 1.0);
-        last_rot_err = 2.0 * std::acos(dot);
-        if (last_pos_err <= kPositionToleranceM &&
-          last_rot_err <= kOrientationToleranceRad)
-        {
+    while (std::chrono::steady_clock::now() < motion_deadline && !shutdown_.load()) {
+      if (!current_ee_cb_(arm_id, actual)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        continue;
+      }
+
+      const double dx = actual.position.x - pose.pose.position.x;
+      const double dy = actual.position.y - pose.pose.position.y;
+      const double dz = actual.position.z - pose.pose.position.z;
+      last_pos_err = std::sqrt(dx * dx + dy * dy + dz * dz);
+      const auto & qa = actual.orientation;
+      const auto & qt = pose.pose.orientation;
+      const double dot = std::clamp(
+        std::abs(qa.x * qt.x + qa.y * qt.y + qa.z * qt.z + qa.w * qt.w),
+        0.0, 1.0);
+      last_rot_err = 2.0 * std::acos(dot);
+
+      double from_start_m = 0.0;
+      if (have_start) {
+        const double dsx = actual.position.x - start_ee.position.x;
+        const double dsy = actual.position.y - start_ee.position.y;
+        const double dsz = actual.position.z - start_ee.position.z;
+        from_start_m = std::sqrt(dsx * dsx + dsy * dsy + dsz * dsz);
+      }
+      const double progress_m = std::max(0.0, travel_m - last_pos_err);
+      if (!motion_started &&
+        (from_start_m >= kStartMoveM || progress_m >= kStartMoveM))
+      {
+        motion_started = true;
+        still_count = 0;
+        if (!logged_start) {
+          logged_start = true;
           publish_log(
-            std::string("[executor] REACHED ") + step +
-            " pos_err=" + std::to_string(last_pos_err) +
-            "m rot_err_deg=" + std::to_string(last_rot_err * 180.0 / M_PI));
-          return true;
+            std::string("[executor] motion started ") + step +
+            " from_start=" + std::to_string(from_start_m) +
+            "m pos_err=" + std::to_string(last_pos_err) + "m");
         }
       }
+
+      const double elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+
+      if (have_prev) {
+        const double dpx = actual.position.x - prev.position.x;
+        const double dpy = actual.position.y - prev.position.y;
+        const double dpz = actual.position.z - prev.position.z;
+        const double move_m = std::sqrt(dpx * dpx + dpy * dpy + dpz * dpz);
+        const auto & qp = prev.orientation;
+        const double qdot = std::clamp(
+          std::abs(qa.x * qp.x + qa.y * qp.y + qa.z * qp.z + qa.w * qp.w),
+          0.0, 1.0);
+        const double move_rot = 2.0 * std::acos(qdot);
+        const bool sample_still = (move_m <= kStillPosM && move_rot <= kStillRotRad);
+
+        // 未启动 / 启动宽限内：不计停稳（防“还没动就判停”）。
+        if (!motion_started || elapsed < kStartupGraceSec) {
+          still_count = 0;
+        } else if (sample_still) {
+          ++still_count;
+        } else {
+          still_count = 0;
+        }
+
+        if (still_count >= kStillSamplesNeeded) {
+          // 误差仍接近出发行程 → 假停（响应慢或卡住），继续等。
+          const bool false_stop =
+            last_pos_err > 0.05 && last_pos_err > std::max(0.05, 0.35 * travel_m);
+          if (false_stop) {
+            still_count = 0;
+          } else {
+            motion_stopped = true;
+            break;
+          }
+        }
+      }
+      prev = actual;
+      have_prev = true;
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    if (!motion_stopped) {
+      if (shutdown_.load()) {
+        publish_log(std::string("[executor] CANCELLED wait ") + step + " (shutdown)");
+        return false;
+      }
+      publish_log(
+        std::string("[executor] NOT REACHED ") + step +
+        " pos_err=" + std::to_string(last_pos_err) +
+        "m rot_err_deg=" + std::to_string(last_rot_err * 180.0 / M_PI) +
+        (motion_started ? " (no stop before max_motion=" : " (never started before max_motion=") +
+        std::to_string(max_motion_wait_sec) + "s)");
+      if (last_pos_err <= 0.025) {
+        publish_log(
+          std::string("[executor] CONTINUE ") + step +
+          " despite motion timeout (pos close enough)");
+        return true;
+      }
+      return false;
+    }
+
+    publish_log(
+      std::string("[executor] motion stopped ") + step +
+      " pos_err=" + std::to_string(last_pos_err) +
+      "m rot_err_deg=" + std::to_string(last_rot_err * 180.0 / M_PI) +
+      "; settle " + std::to_string(settle_after_stop_sec) + "s then judge");
+    sleep_sec(settle_after_stop_sec);
+
+    if (current_ee_cb_(arm_id, actual)) {
+      const double dx = actual.position.x - pose.pose.position.x;
+      const double dy = actual.position.y - pose.pose.position.y;
+      const double dz = actual.position.z - pose.pose.position.z;
+      last_pos_err = std::sqrt(dx * dx + dy * dy + dz * dz);
+      const auto & qa = actual.orientation;
+      const auto & qt = pose.pose.orientation;
+      const double dot = std::clamp(
+        std::abs(qa.x * qt.x + qa.y * qt.y + qa.z * qt.z + qa.w * qt.w),
+        0.0, 1.0);
+      last_rot_err = 2.0 * std::acos(dot);
+    }
+
+    if (last_pos_err <= kPositionToleranceM &&
+      last_rot_err <= kOrientationToleranceRad)
+    {
+      publish_log(
+        std::string("[executor] REACHED ") + step +
+        " pos_err=" + std::to_string(last_pos_err) +
+        "m rot_err_deg=" + std::to_string(last_rot_err * 180.0 / M_PI));
+      return true;
+    }
+    if (last_pos_err <= 0.025) {
+      publish_log(
+        std::string("[executor] CONTINUE ") + step +
+        " pos_err=" + std::to_string(last_pos_err) +
+        "m rot_err_deg=" + std::to_string(last_rot_err * 180.0 / M_PI) +
+        " (pos close enough after settle)");
+      return true;
     }
     publish_log(
       std::string("[executor] NOT REACHED ") + step +
       " pos_err=" + std::to_string(last_pos_err) +
       "m rot_err_deg=" + std::to_string(last_rot_err * 180.0 / M_PI) +
-      " after wall_timeout=" + std::to_string(wall_timeout_sec) + "s" +
-      " (arm still en-route; descend skipped)");
-    // 位置已够近时放行（姿态在仿真里常抖）。
-    if (last_pos_err <= 0.025) {
-      publish_log(
-        std::string("[executor] CONTINUE ") + step +
-        " despite rot/settle timeout (pos close enough)");
-      return true;
-    }
+      " after stop+settle");
     return false;
   }
   return true;
@@ -237,6 +365,15 @@ void GraspExecutor::apply_gripper_opening(int arm_id, double opening_m)
 void GraspExecutor::request_shutdown()
 {
   shutdown_.store(true);
+}
+
+void GraspExecutor::force_idle()
+{
+  shutdown_.store(true);
+  reset_step_mode();
+  busy_.store(false);
+  publish_status("IDLE");
+  publish_log("[executor] force_idle — busy cleared (reset/abort)");
 }
 
 void GraspExecutor::sleep_sec(double sec)

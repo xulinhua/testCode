@@ -23,7 +23,12 @@ from ..global_variables import (
     COLLECT_TZ_RANGE,
     COLLECT_YAW_RANGE,
 )
-from ..paths import get_extension_paths
+from ..paths import (
+    OBJECT_KIND_LABELS,
+    get_extension_paths,
+    read_object_kind_pref,
+    write_object_kind_pref,
+)
 from .data_collect import BoxPoseRange
 from .pose_utils import Pose6D, parse_pose_from_fields
 from .topic_config import (
@@ -72,6 +77,10 @@ class UIBuilder:
         self._buttons = {}
         self._status_label = None
         self._collect_progress_label = None
+        self._object_kind_combo = None
+        self._selected_object_kind = OBJECT_KIND_LABELS[0][0]
+        self._object_kind_labels = [label for _, label in OBJECT_KIND_LABELS]
+        self._object_kind_keys = [key for key, _ in OBJECT_KIND_LABELS]
         self.frames = []
         self._session = None
 
@@ -179,6 +188,24 @@ class UIBuilder:
         with actions_frame:
             with ui.VStack(style=ui_style, spacing=_STACK_SPACING, height=0):
                 self._status_label = ui.Label("Status: IDLE", height=0)
+                with ui.HStack(height=ROW_HEIGHT):
+                    ui.Label("Object", width=TOPIC_LABEL_W, height=0)
+                    pref_kind = read_object_kind_pref(self._box_dir)
+                    pref_idx = (
+                        self._object_kind_keys.index(pref_kind)
+                        if pref_kind in self._object_kind_keys
+                        else 0
+                    )
+                    self._selected_object_kind = self._object_kind_keys[pref_idx]
+                    self._object_kind_combo = ui.ComboBox(
+                        pref_idx, *self._object_kind_labels, height=0
+                    )
+                    try:
+                        self._object_kind_combo.model.add_item_changed_fn(
+                            self._on_object_kind_changed
+                        )
+                    except Exception:
+                        pass
                 with self._compact_btn_row():
                     self._buttons["load"] = self._compact_btn(
                         "Load", "Load table + Nova robot + box", self._on_load
@@ -498,9 +525,56 @@ class UIBuilder:
             Pose6D(DEFAULT_BOX_CENTER, DEFAULT_BOX_POSE_RPY),
         )
 
+    def _on_object_kind_changed(self, model, _item=None):
+        """ComboBox 变更时缓存选择（omni.ui 读 index 不可靠，不依赖 Load 时再读）。"""
+        if model is None:
+            return
+        idx = None
+        try:
+            idx = int(model.get_item_value_model().as_int)
+        except Exception:
+            try:
+                idx = int(model.get_item_value_model().get_value_as_int())
+            except Exception:
+                idx = None
+        if idx is None or idx < 0 or idx >= len(self._object_kind_keys):
+            return
+        self._selected_object_kind = self._object_kind_keys[idx]
+        print(
+            f"UI: object kind -> {dict(OBJECT_KIND_LABELS).get(self._selected_object_kind)} "
+            f"({self._selected_object_kind})"
+        )
+
+    def _read_object_kind(self) -> str:
+        """从 Actions 面板读取当前物体类型。"""
+        # Prefer cached selection from ComboBox change callback.
+        if getattr(self, "_selected_object_kind", None) in self._object_kind_keys:
+            return self._selected_object_kind
+        combo = self._object_kind_combo
+        if combo is None:
+            return read_object_kind_pref(self._box_dir)
+        try:
+            idx = int(combo.model.get_item_value_model().as_int)
+        except Exception:
+            try:
+                idx = int(combo.model.get_item_value_model().get_value_as_int())
+            except Exception:
+                idx = 0
+        if idx < 0 or idx >= len(self._object_kind_keys):
+            idx = 0
+        self._selected_object_kind = self._object_kind_keys[idx]
+        return self._selected_object_kind
+
     def _on_load(self):
         """Load scene 按钮：应用配置 → Load → Sync 位姿回 UI。"""
         print("UI: loading scene...")
+        # Re-sample ComboBox once more in case change callback missed the last click.
+        if self._object_kind_combo is not None:
+            self._on_object_kind_changed(self._object_kind_combo.model)
+        kind = write_object_kind_pref(self._box_dir, self._read_object_kind())
+        self.session.set_object_kind(kind)
+        label = dict(OBJECT_KIND_LABELS).get(kind, kind)
+        print(f"UI: object kind = {label} ({kind})")
         self._apply_session_config()
         ok = self.session.load_scene(box_pose=self._default_box_pose())
         if ok:

@@ -169,6 +169,8 @@ public:
     int arm_id, double x, double y, double z,
     double qx, double qy, double qz, double qw,
     const std::string & frame_id = "base_link");
+  /// 复位/手动打断：中止抓取序列并清空执行器 busy 标志。
+  void abort_grasp_execution();
 
   std::map<std::string, double> joint_positions() const;
 

@@ -562,6 +562,8 @@ QGroupBox * build_arm_panel(
       }
     });
   QObject::connect(btn_reset_j, &QPushButton::clicked, [ &panel, ros_node, parent ]() {
+      // 复位打断抓取序列并清空 busy
+      ros_node->abort_grasp_execution();
       // 仅复位本臂 J1–J6→0；不碰本臂夹爪，也不碰另一臂
       panel.joints_dirty = true;
       panel.pose_dirty = false;
@@ -1029,6 +1031,8 @@ int RunGraspQtUiApp(
   auto * spin_grip_settle = make_metric_spin(timing_group, 0.1, 5.0, 0.1, 2,
     ros_node->gripper_settle_sec());
   timing_form->addRow(QString::fromUtf8("位姿停顿 (s)"), spin_step_settle);
+  spin_step_settle->setToolTip(
+    QString::fromUtf8("末端几乎不动后，再等待这么久，然后判定是否到位（不再用行程墙钟超时）"));
   timing_form->addRow(QString::fromUtf8("夹爪停顿 (s)"), spin_grip_settle);
   ctrl_layout->addWidget(timing_group);
 
@@ -1106,7 +1110,9 @@ int RunGraspQtUiApp(
   auto * graspnet_box_ref_label = new QLabel(graspnet_selected_group);
   graspnet_box_ref_label->setWordWrap(true);
   graspnet_box_ref_label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-  graspnet_box_ref_label->setMinimumHeight(72);
+  // 三行对比信息需要稳定高度，避免被表格挤成一条缝。
+  graspnet_box_ref_label->setMinimumHeight(96);
+  graspnet_box_ref_label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
   graspnet_box_ref_label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
   graspnet_box_ref_label->setStyleSheet(
     QStringLiteral(
@@ -1129,15 +1135,145 @@ int RunGraspQtUiApp(
   graspnet_top->addWidget(graspnet_selected_group);
   graspnet_top->setStretchFactor(0, 1);
   graspnet_top->setStretchFactor(1, 1);
-  graspnet_root->addWidget(graspnet_top, 1);
 
-  auto * graspnet_bottom = new QSplitter(Qt::Horizontal, graspnet_tab);
-  auto * graspnet_log_group = new QGroupBox(QString::fromUtf8("GraspNet 抓取日志"), graspnet_bottom);
+  // 垂直分隔：上=候选表，下=复位(紧凑)+日志(主要)+右侧操作
+  auto * graspnet_vsplit = new QSplitter(Qt::Vertical, graspnet_tab);
+  graspnet_vsplit->setChildrenCollapsible(false);
+  graspnet_vsplit->addWidget(graspnet_top);
+
+  // 复位位姿：两行 arm0 / arm1（紧凑，不占日志高度）
+  struct ResetPoseRow
+  {
+    int arm_id{0};
+    QDoubleSpinBox * x{nullptr};
+    QDoubleSpinBox * y{nullptr};
+    QDoubleSpinBox * z{nullptr};
+    QDoubleSpinBox * roll{nullptr};
+    QDoubleSpinBox * pitch{nullptr};
+    QDoubleSpinBox * yaw{nullptr};
+    QPushButton * btn_get{nullptr};
+    QPushButton * btn_reset{nullptr};
+    double qx{0.0}, qy{0.0}, qz{0.0}, qw{1.0};
+    bool have_quat{false};
+    bool orientation_dirty{false};
+  };
+
+  auto make_reset_spin = [](QWidget * parent, double lo, double hi, double step, int dec, double v) {
+      auto * spin = new QDoubleSpinBox(parent);
+      spin->setDecimals(dec);
+      spin->setRange(lo, hi);
+      spin->setSingleStep(step);
+      spin->setValue(v);
+      spin->setFixedWidth(78);
+      return spin;
+    };
+
+  auto * graspnet_reset_group = new QGroupBox(QString::fromUtf8("复位位姿"));
+  graspnet_reset_group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+  auto * graspnet_reset_layout = new QVBoxLayout(graspnet_reset_group);
+  graspnet_reset_layout->setContentsMargins(6, 6, 6, 6);
+  graspnet_reset_layout->setSpacing(4);
+
+  ResetPoseRow reset_rows[2];
+  for (int i = 0; i < 2; ++i) {
+    auto & row = reset_rows[i];
+    row.arm_id = i;
+    auto * line = new QWidget(graspnet_reset_group);
+    auto * hl = new QHBoxLayout(line);
+    hl->setContentsMargins(0, 0, 0, 0);
+    hl->setSpacing(4);
+    auto * arm_label = new QLabel(
+      i == 0 ? QStringLiteral("arm0") : QStringLiteral("arm1"), line);
+    arm_label->setFixedWidth(40);
+    row.x = make_reset_spin(line, -2.0, 2.0, 0.01, 4, 0.0);
+    row.y = make_reset_spin(line, -2.0, 2.0, 0.01, 4, 0.0);
+    row.z = make_reset_spin(line, 0.0, 1.5, 0.01, 4, 0.4);
+    row.roll = make_reset_spin(line, -180.0, 180.0, 1.0, 2, 180.0);
+    row.pitch = make_reset_spin(line, -180.0, 180.0, 1.0, 2, 0.0);
+    row.yaw = make_reset_spin(line, -180.0, 180.0, 1.0, 2, 0.0);
+    row.btn_get = new QPushButton(QString::fromUtf8("获取当前位姿"), line);
+    row.btn_reset = new QPushButton(QString::fromUtf8("复位"), line);
+    row.btn_get->setFixedWidth(110);
+    row.btn_reset->setFixedWidth(64);
+    hl->addWidget(arm_label);
+    hl->addWidget(new QLabel(QStringLiteral("X"), line));
+    hl->addWidget(row.x);
+    hl->addWidget(new QLabel(QStringLiteral("Y"), line));
+    hl->addWidget(row.y);
+    hl->addWidget(new QLabel(QStringLiteral("Z"), line));
+    hl->addWidget(row.z);
+    hl->addWidget(new QLabel(QStringLiteral("R"), line));
+    hl->addWidget(row.roll);
+    hl->addWidget(new QLabel(QStringLiteral("P"), line));
+    hl->addWidget(row.pitch);
+    hl->addWidget(new QLabel(QStringLiteral("Y"), line));
+    hl->addWidget(row.yaw);
+    hl->addStretch(1);
+    hl->addWidget(row.btn_get);
+    hl->addWidget(row.btn_reset);
+    graspnet_reset_layout->addWidget(line);
+
+    for (QDoubleSpinBox * spin : {row.roll, row.pitch, row.yaw}) {
+      QObject::connect(spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        [&row](double) { row.orientation_dirty = true; });
+    }
+
+    QObject::connect(row.btn_get, &QPushButton::clicked, [&row, get_j1_ee, get_j2_ee]() {
+        const EePoseSnapshot ee = (row.arm_id == 0) ? get_j1_ee() : get_j2_ee();
+        if (!ee.ok) {
+          return;
+        }
+        {
+          QSignalBlocker bx(row.x); row.x->setValue(ee.x);
+          QSignalBlocker by(row.y); row.y->setValue(ee.y);
+          QSignalBlocker bz(row.z); row.z->setValue(ee.z);
+          QSignalBlocker br(row.roll); row.roll->setValue(ee.roll_deg);
+          QSignalBlocker bp(row.pitch); row.pitch->setValue(ee.pitch_deg);
+          QSignalBlocker byaw(row.yaw); row.yaw->setValue(ee.yaw_deg);
+        }
+        row.qx = ee.qx;
+        row.qy = ee.qy;
+        row.qz = ee.qz;
+        row.qw = ee.qw;
+        row.have_quat = true;
+        row.orientation_dirty = false;
+      });
+
+    QObject::connect(row.btn_reset, &QPushButton::clicked,
+      [&row, ros_node]() {
+        // 复位打断抓取序列，清空 busy，避免一直报「执行器忙」
+        ros_node->abort_grasp_execution();
+        const double x = row.x->value();
+        const double y = row.y->value();
+        const double z = row.z->value();
+        if (!row.orientation_dirty && row.have_quat) {
+          ros_node->send_arm_pose_goal_quat(
+            row.arm_id, x, y, z, row.qx, row.qy, row.qz, row.qw);
+        } else {
+          ros_node->send_arm_pose_goal(
+            row.arm_id, x, y, z,
+            row.roll->value(), row.pitch->value(), row.yaw->value());
+        }
+      });
+  }
+
+  auto * graspnet_bottom = new QSplitter(Qt::Horizontal, graspnet_vsplit);
+  graspnet_bottom->setChildrenCollapsible(false);
+
+  auto * graspnet_left = new QWidget(graspnet_bottom);
+  auto * graspnet_left_layout = new QVBoxLayout(graspnet_left);
+  graspnet_left_layout->setContentsMargins(0, 0, 0, 0);
+  graspnet_left_layout->setSpacing(6);
+  graspnet_left_layout->addWidget(graspnet_reset_group, 0);
+
+  auto * graspnet_log_group = new QGroupBox(QString::fromUtf8("GraspNet 抓取日志"), graspnet_left);
   auto * graspnet_log_view = new QTextEdit(graspnet_log_group);
   graspnet_log_view->setReadOnly(true);
+  graspnet_log_view->setMinimumHeight(160);
   auto * graspnet_log_layout = new QVBoxLayout(graspnet_log_group);
   graspnet_log_layout->setContentsMargins(8, 8, 8, 8);
   graspnet_log_layout->addWidget(graspnet_log_view);
+  graspnet_left_layout->addWidget(graspnet_log_group, 1);
 
   auto * graspnet_control = new QGroupBox(QString::fromUtf8("候选选择 / 操作"), graspnet_bottom);
   graspnet_control->setMinimumWidth(320);
@@ -1219,11 +1355,15 @@ int RunGraspQtUiApp(
     graspnet_ctrl_layout->addWidget(button);
   }
   graspnet_ctrl_layout->addStretch(1);
-  graspnet_bottom->addWidget(graspnet_log_group);
+  graspnet_bottom->addWidget(graspnet_left);
   graspnet_bottom->addWidget(graspnet_control);
   graspnet_bottom->setStretchFactor(0, 3);
   graspnet_bottom->setStretchFactor(1, 2);
-  graspnet_root->addWidget(graspnet_bottom, 2);
+  graspnet_vsplit->addWidget(graspnet_bottom);
+  graspnet_vsplit->setStretchFactor(0, 2);
+  graspnet_vsplit->setStretchFactor(1, 3);
+  graspnet_vsplit->setSizes({320, 480});
+  graspnet_root->addWidget(graspnet_vsplit, 1);
   const int graspnet_tab_index =
     tabs->addTab(graspnet_tab, QString::fromUtf8("GraspNet 抓取"));
   QObject::connect(tabs, &QTabWidget::currentChanged, [=](int index) {

@@ -115,14 +115,14 @@ open → raise → move_xy → reorient → descend → close → lift
 
 ### 4.1 订阅
 
-| 话题                                     | 类型                          | 说明                              |
-| ---------------------------------------- | ----------------------------- | --------------------------------- |
-| `/box_pose`                            | `geometry_msgs/PoseStamped` | 盒子位姿；盒子抓取只使用位置      |
-| `/yolo_graspnet/collision_free_grasps` | `std_msgs/String`          | GraspNet JSON 候选；话题名可运行时修改 |
-| `/joint_states`                        | `sensor_msgs/JointState`    | IK 种子、通信状态和当前关节角     |
-| `/tf`、`/tf_static`                  | TF                            | 相机到`base_link`、腕部当前位姿 |
-| `/nova_grasp/status`                   | `std_msgs/String`           | 执行器状态回读                    |
-| `/nova_pose_log`                       | `std_msgs/String`           | IK 和关节命令调试日志             |
+| 话题                                     | 类型                          | 说明                                   |
+| ---------------------------------------- | ----------------------------- | -------------------------------------- |
+| `/box_pose`                            | `geometry_msgs/PoseStamped` | 盒子位姿；盒子抓取只使用位置           |
+| `/yolo_graspnet/collision_free_grasps` | `std_msgs/String`           | GraspNet JSON 候选；话题名可运行时修改 |
+| `/joint_states`                        | `sensor_msgs/JointState`    | IK 种子、通信状态和当前关节角          |
+| `/tf`、`/tf_static`                  | TF                            | 相机到`base_link`、腕部当前位姿      |
+| `/nova_grasp/status`                   | `std_msgs/String`           | 执行器状态回读                         |
+| `/nova_pose_log`                       | `std_msgs/String`           | IK 和关节命令调试日志                  |
 
 ### 4.2 发布
 
@@ -225,55 +225,54 @@ GraspNet 路点设置 `preserve_waypoints=true`，执行器不会用盒子顶抓
    显示全部转换结果（RPY）；选中行绿色，IK 可达未选黄色，逆解失败红色。
 5. 计算接近轴与 `base_link -Z` 的夹角。
 6. 小于 `graspnet_top_max_angle_deg` 的候选标记为顶部抓取。
-7. 顶部抓取优先；同类候选按接近角从小到大排序。
-8. 对候选的 `pregrasp` 和 `grasp` 分别检查 J1、J2 IK。
-9. 同一候选两臂都可达时，选择关节移动代价较小者：
+7. 对每个候选做完整 `pregrasp` / `grasp` / `lift` IK（含 J6 `Rz180` 对偶比代价）。
+8. **在全部 IK 可达候选中选 `score` 最高者**；同分则更竖直（`approach_deg` 更小）、再更小原始下标。
+9. 同一候选两臂探测时，先通的臂返回；臂内用关节移动代价选 J6 对偶：
 
 ```text
 cost = Σ wrap_to_pi(q_solution - q_current)²
 ```
 
-找到排序后的第一个可达候选后停止。JSON 原始顺序（`collision_free_rank`）会在几何优先级
-相同时保留；当前不直接按 `score` 重排。
+探测顺序（顶抓 → score 降序）仅影响日志/扫描顺序，不决定最终选中。
 
 ## 8. 参数
 
 参数文件：`config/grasp_moveit.yaml`。
 
-| 参数                           |                                   默认值 | 说明                               |
-| ------------------------------ | ---------------------------------------: | ---------------------------------- |
-| `box_topic`                  |                            `/box_pose` | 盒子位姿话题                       |
-| `graspnet_topic`             | `/yolo_graspnet/collision_free_grasps` | GraspNet JSON String 话题；UI 可修改 |
-| `graspnet_top_max_angle_deg` |                                 `30.0` | 顶部抓取最大接近倾角               |
-| `graspnet_comm_ok_timeout_sec` |                               `10.0` | 最近消息在该时间内显示正常         |
-| `graspnet_comm_stale_timeout_sec` |                            `30.0` | 超过该时间显示发布中断             |
-| `pose_frame`                 |                            `base_link` | 无 frame 时的兼容默认值            |
-| `target_arm_pose_topic`      |                `/nova_target_arm_pose` | 腕部位姿命令                       |
-| `arm_id_topic`               |                         `/nova_arm_id` | 夹爪兼容命令当前机械臂             |
-| `gripper_topic`              |                   `/nova_gripper_goal` | 夹爪兼容命令                       |
-| `status_topic`               |                   `/nova_grasp/status` | 抓取状态                           |
-| `pose_log_topic`             |                       `/nova_pose_log` | IK 调试日志                        |
-| `arm_split_x`                |                                 `0.40` | 盒子抓取按 X 选择臂的分界          |
-| `pregrasp_z_offset`          |                                 `0.15` | **抓取测试**预抓取抬高              |
-| `lift_z_offset`              |                                 `0.15` | **抓取测试**抬升                   |
-| `box_grasp_z_offset`         |                                  `0.0` | 盒子目标 Z 修正                    |
-| `ee_tcp_z_offset`            |                                 `0.20` | **抓取测试**腕部到两指中心         |
-| `min_approach_clearance`     |                                 `0.15` | **抓取测试**预抓取最小净空         |
-| `graspnet_pregrasp_distance` |                                 `0.08` | **GraspNet** 沿接近轴后退          |
-| `graspnet_lift_z_offset`     |                                 `0.10` | **GraspNet** 抬升                  |
-| `graspnet_ee_tcp_z_offset`   |                                 `0.12` | **GraspNet** 腕部到两指中心        |
-| `graspnet_min_approach_clearance` |                        `0.08` | **GraspNet** 预抓取最小净空        |
-| `grasp_yaw_offset_deg`       |                                 `90.0` | 盒子顶抓绝对 yaw                   |
-| `step_settle_sec`            |                                  `2.0` | 位姿步骤仿真稳定时间               |
-| `gripper_settle_sec`         |                                  `0.8` | 夹爪开闭等待时间                   |
-| `gripper_open_m`             |                                 `0.08` | 张开距离                           |
-| `gripper_close_m`            |                                 `0.02` | 闭合后保留距离                     |
-| `ee_frame_arm0`              |                                 `J1_6` | J1 腕部 TF frame                   |
-| `ee_frame_arm1`              |                                 `J2_6` | J2 腕部 TF frame                   |
-| `ref_frame`                  |                            `base_link` | 腕部显示参考系                     |
-| `joint_command_topic`        |                       `/joint_command` | Isaac 关节命令话题                 |
-| `joint_command_burst_count`  |                                    `5` | 同一命令重复发送次数               |
-| `publish_mujoco_joint_array` |                                 `true` | 是否发布旧控制器兼容数组           |
+| 参数                                |                                   默认值 | 说明                                 |
+| ----------------------------------- | ---------------------------------------: | ------------------------------------ |
+| `box_topic`                       |                            `/box_pose` | 盒子位姿话题                         |
+| `graspnet_topic`                  | `/yolo_graspnet/collision_free_grasps` | GraspNet JSON String 话题；UI 可修改 |
+| `graspnet_top_max_angle_deg`      |                                 `30.0` | 顶部抓取最大接近倾角                 |
+| `graspnet_comm_ok_timeout_sec`    |                                 `10.0` | 最近消息在该时间内显示正常           |
+| `graspnet_comm_stale_timeout_sec` |                                 `30.0` | 超过该时间显示发布中断               |
+| `pose_frame`                      |                            `base_link` | 无 frame 时的兼容默认值              |
+| `target_arm_pose_topic`           |                `/nova_target_arm_pose` | 腕部位姿命令                         |
+| `arm_id_topic`                    |                         `/nova_arm_id` | 夹爪兼容命令当前机械臂               |
+| `gripper_topic`                   |                   `/nova_gripper_goal` | 夹爪兼容命令                         |
+| `status_topic`                    |                   `/nova_grasp/status` | 抓取状态                             |
+| `pose_log_topic`                  |                       `/nova_pose_log` | IK 调试日志                          |
+| `arm_split_x`                     |                                 `0.40` | 盒子抓取按 X 选择臂的分界            |
+| `pregrasp_z_offset`               |                                 `0.15` | **抓取测试**预抓取抬高         |
+| `lift_z_offset`                   |                                 `0.15` | **抓取测试**抬升               |
+| `box_grasp_z_offset`              |                                  `0.0` | 盒子目标 Z 修正                      |
+| `ee_tcp_z_offset`                 |                                 `0.20` | **抓取测试**腕部到两指中心     |
+| `min_approach_clearance`          |                                 `0.15` | **抓取测试**预抓取最小净空     |
+| `graspnet_pregrasp_distance`      |                                 `0.08` | **GraspNet** 沿接近轴后退      |
+| `graspnet_lift_z_offset`          |                                 `0.10` | **GraspNet** 抬升              |
+| `graspnet_ee_tcp_z_offset`        |                                 `0.12` | **GraspNet** 腕部到两指中心    |
+| `graspnet_min_approach_clearance` |                                 `0.08` | **GraspNet** 预抓取最小净空    |
+| `grasp_yaw_offset_deg`            |                                 `90.0` | 盒子顶抓绝对 yaw                     |
+| `step_settle_sec`                 |                                  `2.0` | 末端停稳后再延时，再判定是否到位     |
+| `gripper_settle_sec`              |                                  `0.8` | 夹爪开闭等待时间                     |
+| `gripper_open_m`                  |                                 `0.08` | 张开距离                             |
+| `gripper_close_m`                 |                                 `0.02` | 闭合后保留距离                       |
+| `ee_frame_arm0`                   |                                 `J1_6` | J1 腕部 TF frame                     |
+| `ee_frame_arm1`                   |                                 `J2_6` | J2 腕部 TF frame                     |
+| `ref_frame`                       |                            `base_link` | 腕部显示参考系                       |
+| `joint_command_topic`             |                       `/joint_command` | Isaac 关节命令话题                   |
+| `joint_command_burst_count`       |                                    `5` | 同一命令重复发送次数                 |
+| `publish_mujoco_joint_array`      |                                 `true` | 是否发布旧控制器兼容数组             |
 
 ## 9. 日志
 

@@ -77,6 +77,8 @@ public:
   void send_gripper(const std::string & cmd);
   /// 请求正在运行的序列在步骤边界退出。
   void request_shutdown();
+  /// 复位/手动干预：立刻中止序列并清空 busy（避免一直报「执行器忙」）。
+  void force_idle();
 
 private:
   /// 固定的执行步骤类型；是否包含 Raise/Reorient 由计划标志决定。

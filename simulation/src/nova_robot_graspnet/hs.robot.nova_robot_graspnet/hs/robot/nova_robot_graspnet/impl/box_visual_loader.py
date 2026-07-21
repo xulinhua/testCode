@@ -8,8 +8,17 @@ from typing import Optional
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
-from ..global_variables import BOX_LINK_PATH, BOX_VISUAL_PATH
-from ..paths import ensure_box_texture_sidecar, resolve_box_texture_path
+from ..global_variables import (
+    BOX_COLLISION_GEO_ROOT,
+    BOX_COLLISION_PATH,
+    BOX_LINK_PATH,
+    BOX_VISUAL_PATH,
+)
+from ..paths import (
+    ensure_box_texture_sidecar,
+    find_box_obj_path,
+    resolve_box_texture_path,
+)
 from .box_mesh_builder import (
     build_box_mesh_on_stage,
     remove_legacy_box_collision_cube,
@@ -17,35 +26,59 @@ from .box_mesh_builder import (
 )
 
 
-def _find_obj_path(box_dir: str) -> Optional[str]:
-    model_dir = os.path.join(box_dir, "model")
-    if not os.path.isdir(model_dir):
-        return None
-    for name in sorted(os.listdir(model_dir)):
-        if name.endswith(".obj"):
-            return os.path.join(model_dir, name)
-    return None
-
-
 def _existing_baked(box_dir: str) -> Optional[str]:
-    obj_path = _find_obj_path(box_dir)
+    obj_path = find_box_obj_path(box_dir)
     if not obj_path:
         return None
     baked = os.path.join(box_dir, "grasp_box_baked.usdc")
     if not os.path.isfile(baked):
         return None
     stamp = os.path.getmtime(obj_path)
-    model_dir = os.path.join(box_dir, "model")
-    for name in os.listdir(model_dir):
-        if name.endswith(".png"):
-            png = os.path.join(model_dir, name)
-            stamp = max(stamp, os.path.getmtime(png))
+    for sub in ("model", "mesh", "textures"):
+        folder = os.path.join(box_dir, sub)
+        if not os.path.isdir(folder):
+            continue
+        for name in os.listdir(folder):
+            if name.lower().endswith(".png"):
+                stamp = max(stamp, os.path.getmtime(os.path.join(folder, name)))
     meta = os.path.join(box_dir, "grasp_box_meta.json")
     if os.path.isfile(meta):
         stamp = max(stamp, os.path.getmtime(meta))
     if os.path.getmtime(baked) >= stamp:
         return baked
     return None
+
+
+def clear_box_visual(stage) -> None:
+    """清除 grasp_box 视觉/碰撞子树，便于切换纸盒↔料盒后重新构建。"""
+    # Remove visual children first (mesh references / live OBJ), then legacy paths.
+    visual = stage.GetPrimAtPath(BOX_VISUAL_PATH)
+    if visual and visual.IsValid():
+        for child in list(visual.GetChildren()):
+            path = child.GetPath().pathString
+            try:
+                stage.RemovePrim(path)
+            except Exception as exc:
+                print(f"box_visual_loader: remove {path} failed: {exc}")
+    for path in (
+        f"{BOX_VISUAL_PATH}/mesh",
+        f"{BOX_VISUAL_PATH}/placeholder",
+        BOX_COLLISION_GEO_ROOT,
+        BOX_COLLISION_PATH,
+    ):
+        prim = stage.GetPrimAtPath(path)
+        if prim and prim.IsValid():
+            try:
+                stage.RemovePrim(path)
+            except Exception as exc:
+                print(f"box_visual_loader: remove {path} failed: {exc}")
+    # Drop Looks so previous OmniPBR / materials do not stick across kinds.
+    looks = stage.GetPrimAtPath(f"{BOX_LINK_PATH}/Looks")
+    if looks and looks.IsValid():
+        try:
+            stage.RemovePrim(f"{BOX_LINK_PATH}/Looks")
+        except Exception as exc:
+            print(f"box_visual_loader: remove Looks failed: {exc}")
 
 
 def _box_has_visible_mesh(stage, root_path: str) -> bool:
@@ -178,9 +211,16 @@ def apply_box_textures(stage, box_dir: str) -> None:
         )
 
 
-def load_box_visual(stage, box_dir: str) -> bool:
-    """Load 抓取盒视觉：baked USD 或现场从 OBJ 构建带贴图 mesh。"""
+def load_box_visual(stage, box_dir: str, *, force: bool = False) -> bool:
+    """Load 抓取盒视觉：baked USD 或现场从 OBJ 构建带贴图 mesh。
+
+    Args:
+        force: True 时先清空现有 visual/collision（切换物体类型时用）。
+    """
     from isaacsim.core.utils.stage import add_reference_to_stage
+
+    if force:
+        clear_box_visual(stage)
 
     UsdGeom.Xform.Define(stage, Sdf.Path(BOX_VISUAL_PATH))
 
@@ -207,17 +247,20 @@ def load_box_visual(stage, box_dir: str) -> bool:
             return True
         print(f"box_visual_loader: baked reference failed at {mesh_ref}")
 
-    obj_path = _find_obj_path(box_dir)
+    obj_path = find_box_obj_path(box_dir)
     if obj_path:
-        print("box_visual_loader: building mesh from OBJ (may take ~30-60s for large models) ...")
+        print(
+            f"box_visual_loader: building mesh from OBJ "
+            f"({os.path.basename(obj_path)}; may take ~30-60s) ..."
+        )
         if build_box_mesh_on_stage(stage, box_dir, obj_path):
             apply_box_textures(stage, box_dir)
             return True
         print("box_visual_loader: live OBJ build failed")
 
     print(
-        "box_visual_loader: failed — run once: python3 scripts/bake_box_mesh.py "
-        "(or start_isaac.sh with NOVA_SKIP_BOX_BAKE=0)"
+        "box_visual_loader: failed — no baked USD / OBJ under "
+        f"{box_dir} (paper: model/; cassette: mesh/)"
     )
     return False
 

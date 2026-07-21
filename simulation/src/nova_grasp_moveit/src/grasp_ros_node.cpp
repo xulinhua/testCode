@@ -486,6 +486,21 @@ void GraspRosNode::prepare_shutdown()
   tf_buffer_.reset();
 }
 
+void GraspRosNode::abort_grasp_execution()
+{
+  if (executor_) {
+    executor_->force_idle();
+  }
+  {
+    std::lock_guard<std::mutex> lk(pose_step_mu_);
+    pose_step_result_ = PoseStepResult::Fail;
+    pose_step_fail_reason_ = "aborted by reset";
+    pose_step_expect_valid_ = false;
+    pose_step_cv_.notify_all();
+  }
+  push_log("[executor] abort_grasp_execution — busy cleared");
+}
+
 GraspRosSnapshot GraspRosNode::snapshot()
 {
   GraspRosSnapshot snap;
@@ -797,6 +812,7 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
 {
   GraspComputeResult out;
   geometry_msgs::msg::PoseArray frozen;
+  std::vector<double> frozen_scores;
   // 点击时复制整帧：计算期间即使发布端继续更新，也不会混入另一帧候选。
   {
     std::lock_guard<std::mutex> lk(mu_);
@@ -807,6 +823,7 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
       return out;
     }
     frozen = data_.graspnet_candidates;
+    frozen_scores = data_.graspnet_scores;
   }
   if (!tf_buffer_) {
     out.error_title = "TF 不可用";
@@ -823,6 +840,7 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
   {
     int index{-1};
     double approach_deg{180.0};
+    double score{std::numeric_limits<double>::quiet_NaN()};
     bool top{false};
     bool ik_reachable{false};
     /// 半平面消歧是否已翻 Rz180；再与 IK 对偶选择异或后得到最终 a_corrected。
@@ -885,6 +903,9 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
 
     Candidate candidate;
     candidate.index = static_cast<int>(i);
+    if (i < frozen_scores.size()) {
+      candidate.score = frozen_scores[i];
+    }
     candidate.approach_deg = graspnet_top_angle_deg(grasp_base.pose.orientation);
     candidate.top = candidate.approach_deg <= top_limit;
     candidate.tcp_base = grasp_base;
@@ -949,13 +970,20 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
 
   const int top_count = static_cast<int>(std::count_if(
       candidates.begin(), candidates.end(), [](const Candidate & c) {return c.top;}));
-  // 排序只表达几何优先级：顶抓在前，同类中越接近竖直向下越靠前。
-  // JSON candidates 已按 collision_free_rank 排列；同类中再按顶部几何优先级排序。
+  // 探测顺序：顶抓在前，同级按 score 降序，便于日志阅读；最终选中仍在全部可达里取最高分。
   std::stable_sort(
     candidates.begin(), candidates.end(),
     [](const Candidate & a, const Candidate & b) {
       if (a.top != b.top) {
         return a.top > b.top;
+      }
+      const bool a_ok = std::isfinite(a.score);
+      const bool b_ok = std::isfinite(b.score);
+      if (a_ok != b_ok) {
+        return a_ok > b_ok;
+      }
+      if (a_ok && b_ok && a.score != b.score) {
+        return a.score > b.score;
       }
       return a.approach_deg < b.approach_deg;
     });
@@ -965,6 +993,7 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
   GraspPlan selected_plan;
   double selected_pre_dz = 0.0;
   double selected_lift_dz = 0.0;
+  double selected_score = -std::numeric_limits<double>::infinity();
   std::string last_ik_reason;
   std::map<int, uint8_t> ik_ok_by_index;
   // Prefer configured clearance, then shorten if wrist exceeds workspace
@@ -1140,20 +1169,34 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
     double pre_dz = preferred_pre;
     double lift_dz = preferred_lift;
     int arm_id = 0;
-    const bool need_full = !selected;
+    // 全部做完整 IK（含 lift），再在可达集合里取 score 最高者。
     const bool ok = probe_reachable(
-      candidate, need_full, nullptr, &plan, &pre_dz, &lift_dz, &arm_id);
+      candidate, true, nullptr, &plan, &pre_dz, &lift_dz, &arm_id);
     ik_ok_by_index[candidate.index] = ok ? 1 : 0;
-    if (ok && need_full) {
-      selected = true;
-      selected_candidate = candidate;
-      selected_candidate.ik_reachable = true;
-      selected_plan = plan;
-      selected_pre_dz = pre_dz;
-      selected_lift_dz = lift_dz;
-      selected_plan.arm_id = arm_id;
-      // 已选出执行解后，其余候选只做 grasp+pre 可达性着色，不再扫 lift。
+    if (!ok) {
+      continue;
     }
+    const double score_key = std::isfinite(candidate.score) ?
+      candidate.score : -std::numeric_limits<double>::infinity();
+    const bool better =
+      !selected ||
+      score_key > selected_score ||
+      (score_key == selected_score &&
+        candidate.approach_deg < selected_candidate.approach_deg) ||
+      (score_key == selected_score &&
+        candidate.approach_deg == selected_candidate.approach_deg &&
+        candidate.index < selected_candidate.index);
+    if (!better) {
+      continue;
+    }
+    selected = true;
+    selected_score = score_key;
+    selected_candidate = candidate;
+    selected_candidate.ik_reachable = true;
+    selected_plan = plan;
+    selected_pre_dz = pre_dz;
+    selected_lift_dz = lift_dz;
+    selected_plan.arm_id = arm_id;
   }
 
   // 表格顺序与 candidates 同步（含 IK 选出的 J6 对偶姿态 / A 标记）。
@@ -1212,6 +1255,8 @@ GraspComputeResult GraspRosNode::compute_grasp_from_graspnet_detailed(
   summary << std::fixed << std::setprecision(2)
           << "selected #" << selected_candidate.index
           << " arm=J" << (selected_plan.arm_id + 1)
+          << " score=" << std::setprecision(5) << selected_candidate.score
+          << std::setprecision(2)
           << " approach=" << selected_candidate.approach_deg << "deg"
           << (selected_candidate.top ? " TOP" : " fallback")
           << " pre_dz=" << selected_pre_dz << "m"
