@@ -6,7 +6,7 @@
   - DistantLight 隐藏
   - cam0 RSD455 隐藏（避免挡主视角）；三路 RSD455 去刚体
   - Gemini335 机位（本地 Camera 占位；有 Orbbec USD 时自动引用）
-  - nova_robot / 桌子 / grasp_box 相对路径引用
+  - nova_robot / 桌子相对路径引用（grasp_box 由插件按 UI 运行时创建）
 
 用法（Isaac python 或带 pxr 的环境）::
 
@@ -46,20 +46,15 @@ def bake(out_path: Path | None = None) -> Path:
     if not robot_usd.is_file():
         robot_usd = root / "data" / "robot" / "nova_robot.usda"
     env_usd = root / "data" / "env" / "default_environment.usd"
-    box_baked = root / "data" / "box" / "grasp_box_baked.usdc"
     gemini_local = root / "data" / "sensors" / "orbbec_gemini_335.usd"
 
     if not robot_usd.is_file():
         raise SystemExit(f"robot USD missing: {robot_usd}")
     if not env_usd.is_file():
         raise SystemExit(f"env USD missing: {env_usd} (run scripts/download_environment.py)")
-    if not box_baked.is_file():
-        raise SystemExit(f"box baked USD missing: {box_baked}")
 
     # Capture-aligned constants (from dobot_graspent_datacapture.usd)
     robot_mount = (-0.5299997329711914, 0.18000000715255737, 0.6400001108646393)
-    # 双臂肩线中点 + 朝机器人侧偏移（与 global_variables.DEFAULT_BOX_CENTER 一致）
-    box_center = (-0.18, 0.18, 0.9)
     gemini_t = (0.0, -0.31703293039677527, 1.6606134042644396)
     gemini_q = (-1.6081226496766364e-16, 1.0460184128151074e-16, 0.9659258262890684, 0.2588190451025208)
     distant_q = (0.6532814824381883, 0.2705980500730985, 0.27059805007309845, 0.6532814824381882)
@@ -199,76 +194,31 @@ def bake(out_path: Path | None = None) -> Path:
             "state:angular:physics:position", Sdf.ValueTypeNames.Float
         ).Set(float(yaw_deg))
 
-    # Camera overs: hide cam0 RSD455, disable rigid body on all RSD455
-    for cam_suffix, hide in (
-        ("base_link/cam0/RSD455", True),
-        ("J1_6/cam1/RSD455", False),
-        ("J2_6/cam2/RSD455", False),
+    # Camera overs: 三路 RSD455 全部隐藏 mesh（防重载后腕部相机掉桌上挡 Gemini）；
+    # Camera 传感器 prim 仍可用；抓取主视角用 Gemini335。
+    for cam_suffix in (
+        "base_link/cam0/RSD455",
+        "J1_6/cam1/RSD455",
+        "J2_6/cam2/RSD455",
     ):
         path = f"/World/nova_robot/{cam_suffix}"
-        # Author overs even if payload not loaded yet (composition applies when ready)
         prim = stage.OverridePrim(path)
         prim.CreateAttribute("physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool).Set(False)
-        if hide:
-            UsdGeom.Imageable(prim).MakeInvisible()
-            # disable collisions on visual case parts if present
-            for part in (
-                "Visual/Case_front",
-                "Visual/Glass",
-                "Visual/Case_back",
-                "Visual/USB_C",
-                "Visual/Mount",
-                "Visual/Camera_module",
-                "Visual/Front_mask",
-                "Visual/camera_mask",
-            ):
-                vp = stage.OverridePrim(f"{path}/{part}")
-                vp.CreateAttribute("physics:collisionEnabled", Sdf.ValueTypeNames.Bool).Set(False)
+        UsdGeom.Imageable(prim).MakeInvisible()
+        for part in (
+            "Visual/Case_front",
+            "Visual/Glass",
+            "Visual/Case_back",
+            "Visual/USB_C",
+            "Visual/Mount",
+            "Visual/Camera_module",
+            "Visual/Front_mask",
+            "Visual/camera_mask",
+        ):
+            vp = stage.OverridePrim(f"{path}/{part}")
+            vp.CreateAttribute("physics:collisionEnabled", Sdf.ValueTypeNames.Bool).Set(False)
 
-    # ---- grasp_box ----
-    box = UsdGeom.Xform.Define(stage, "/World/grasp_box")
-    bxf = UsdGeom.Xformable(box)
-    bxf.ClearXformOpOrder()
-    bxf.AddTranslateOp().Set(Gf.Vec3d(*box_center))
-    bxf.AddRotateXYZOp().Set(Gf.Vec3f(0, 90, 0))  # pitch=90°，与 DEFAULT_BOX_POSE_RPY 一致
-    box_rb = UsdPhysics.RigidBodyAPI.Apply(box.GetPrim())
-    box_rb.CreateRigidBodyEnabledAttr(True)
-    box_rb.CreateKinematicEnabledAttr(False)
-    mass = UsdPhysics.MassAPI.Apply(box.GetPrim())
-    mass.CreateMassAttr(0.1)  # 与 global_variables.BOX_MASS_KG 一致，便于夹取
-
-    UsdGeom.Xform.Define(stage, "/World/grasp_box/visual")
-    mesh_prim = stage.DefinePrim("/World/grasp_box/visual/mesh", "Mesh")
-    mesh_prim.GetReferences().AddReference(_rel(scenes_dir, box_baked))
-    # Isaac/Hydra 需要 MaterialBindingAPI，否则烘焙引用里的 material:binding 不生效
-    UsdShade.MaterialBindingAPI.Apply(mesh_prim)
-    bind_rel = mesh_prim.GetRelationship("material:binding")
-    if not bind_rel or not bind_rel.GetTargets():
-        mat_path = "/World/grasp_box/visual/mesh/Looks/box_material"
-        if stage.GetPrimAtPath(mat_path):
-            UsdShade.MaterialBindingAPI(mesh_prim).Bind(
-                UsdShade.Material(stage.GetPrimAtPath(mat_path))
-            )
-
-    # Simple collision box (AABB from meta / cleaned OBJ) under collision_geo
-    import json
-
-    meta_path = root / "data" / "box" / "grasp_box_meta.json"
-    coll_size = (0.172, 0.070, 0.219)
-    if meta_path.is_file():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        sm = meta.get("size_m") or {}
-        coll_size = (
-            float(sm.get("x", coll_size[0])),
-            float(sm.get("y", coll_size[1])),
-            float(sm.get("z", coll_size[2])),
-        )
-    coll_root = UsdGeom.Xform.Define(stage, "/World/grasp_box/collision_geo")
-    coll = UsdGeom.Cube.Define(stage, "/World/grasp_box/collision_geo/mesh")
-    coll.CreateSizeAttr(1.0)
-    UsdGeom.Xformable(coll).AddScaleOp().Set(Gf.Vec3f(*coll_size))
-    UsdPhysics.CollisionAPI.Apply(coll.GetPrim())
-    UsdGeom.Imageable(coll).CreatePurposeAttr().Set(UsdGeom.Tokens.guide)
+    # grasp_box 不写入 master：由插件按 UI（Paper box / Cassette）运行时创建。
 
     # ---- Gemini335 capture camera (pose-aligned; local Camera always present) ----
     gemini = UsdGeom.Xform.Define(stage, "/World/Gemini335")
@@ -299,7 +249,7 @@ def bake(out_path: Path | None = None) -> Path:
     print(f"Wrote master scene: {out_path}")
     print(f"  robot={_rel(scenes_dir, robot_usd)}")
     print(f"  env={_rel(scenes_dir, env_usd)}")
-    print(f"  box={_rel(scenes_dir, box_baked)}")
+    print("  grasp_box=runtime (plugin UI)")
     print(f"  robot_mount={robot_mount}")
     print(f"  lights=Distant(hidden)+5xSphere@10000, Gemini335 + RSD455 overs")
     return out_path

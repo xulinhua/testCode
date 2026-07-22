@@ -196,6 +196,11 @@ bool GraspExecutor::send_arm_pose_and_wait(
     geometry_msgs::msg::Pose actual;
     bool motion_stopped = false;
     bool logged_start = motion_started;
+    // Isaac ArticulationController / OmniGraph 在 soft reset 后可能漏掉首包 /joint_command
+    constexpr int kMaxPoseResend = 3;
+    constexpr double kResendIntervalSec = 2.0;
+    int pose_resend_count = 0;
+    double next_resend_elapsed = kResendIntervalSec;
 
     while (std::chrono::steady_clock::now() < motion_deadline && !shutdown_.load()) {
       if (!current_ee_cb_(arm_id, actual)) {
@@ -238,6 +243,20 @@ bool GraspExecutor::send_arm_pose_and_wait(
 
       const double elapsed =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+
+      // 臂完全不动：重发位姿让 ArmExecutor 再 IK + /joint_command（防 Isaac 漏收）
+      if (!motion_started &&
+        pose_resend_count < kMaxPoseResend &&
+        elapsed >= next_resend_elapsed)
+      {
+        ++pose_resend_count;
+        next_resend_elapsed = elapsed + kResendIntervalSec;
+        publish_log(
+          std::string("[executor] resend pose ") + step +
+          " #" + std::to_string(pose_resend_count) +
+          " (arm not moving, pos_err=" + std::to_string(last_pos_err) + "m)");
+        send_arm_pose(arm_id, pose);
+      }
 
       if (have_prev) {
         const double dpx = actual.position.x - prev.position.x;

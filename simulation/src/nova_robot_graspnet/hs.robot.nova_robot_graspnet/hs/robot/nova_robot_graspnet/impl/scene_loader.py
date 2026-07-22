@@ -175,30 +175,70 @@ class SceneLoader:
         """当前物体资源目录（纸盒=``data/box``，料盒=``data/box/cassette``）。"""
         return self._box_dir
 
-    def _sync_box_visual(self, stage) -> None:
-        """按当前 ``object_kind`` 强制同步 grasp_box 视觉与碰撞。
+    @staticmethod
+    def _purge_prim_layer_specs(stage, prim_path: str) -> None:
+        """从 Session/Root 层删掉 prim *规格*（含 deleted 意见）。
 
-        每次切换/Load 都 clear 后重建，避免 Cassette 写在 root 层的 mesh
-        意见在改回 Paper box 后仍盖住 master 场景里的纸盒。
+        ``stage.RemovePrim`` 在 Session 编辑目标上会留下 delete opinion，
+        盖过 Root 上后续 ``Define``，表现为二次 Load 盒子消失 / 无重力 / 无法切换 mesh。
+        必须用 ``Sdf.Layer.RemovePrim`` 清除该路径上的层意见。
         """
-        try:
-            ensure_box_collision(stage, self._box_dir)
-        except Exception as exc:
-            print(f"SceneLoader: box collision ensure: {exc}")
+        from pxr import Sdf
 
+        path = Sdf.Path(str(prim_path))
+        for layer in (stage.GetSessionLayer(), stage.GetRootLayer()):
+            if layer is None:
+                continue
+            try:
+                if layer.GetPrimAtPath(path):
+                    layer.RemovePrim(path)
+            except Exception as exc:
+                print(f"SceneLoader: purge {prim_path} on layer: {exc}")
+
+    def _rebuild_grasp_box(self, stage, pose: Pose6D) -> None:
+        """按 object_kind 在 Root 层干净创建 grasp_box（master 不再内嵌盒子）。"""
+        self._loaded_object_kind = None
+        self._box_visual_ready = False
         print(
-            f"SceneLoader: sync box visual kind={self._object_kind} "
-            f"(was={self._loaded_object_kind})"
+            f"SceneLoader: create grasp_box kind={self._object_kind} "
+            f"dir={self._box_dir}"
         )
-        clear_box_visual(stage)
-        ok = load_box_visual(stage, self._box_dir, force=True)
-        if ok:
+        self._purge_prim_layer_specs(stage, self.box_link_path)
+        try:
+            stage.SetEditTarget(stage.GetRootLayer())
+        except Exception:
+            pass
+
+        self._create_box(stage, pose)
+        if _box_has_visible_mesh(stage, f"{BOX_VISUAL_PATH}/mesh"):
             self._loaded_object_kind = self._object_kind
             self._box_visual_ready = True
+            print(f"SceneLoader: grasp_box visual OK kind={self._object_kind}")
         else:
-            self._loaded_object_kind = None
-            self._box_visual_ready = False
-            print(f"SceneLoader: WARN box visual load failed for {self._object_kind}")
+            print(
+                f"SceneLoader: WARN grasp_box visual missing kind={self._object_kind} "
+                f"dir={self._box_dir}"
+            )
+        try:
+            from .box_physics import configure_box_usd_dynamic
+
+            configure_box_usd_dynamic(stage, kinematic=False)
+            self._apply_grasp_friction(stage)
+        except Exception as exc:
+            print(f"SceneLoader: box physics/friction after create: {exc}")
+
+    def _sync_box_visual(self, stage) -> None:
+        """按当前 ``object_kind`` 强制同步 grasp_box（整树重建）。"""
+        from .pose_utils import read_pose
+
+        pose = None
+        try:
+            pose = read_pose(self.box_link_path, stage)
+        except Exception:
+            pose = None
+        if pose is None:
+            pose = Pose6D(DEFAULT_BOX_CENTER, DEFAULT_BOX_POSE_RPY)
+        self._rebuild_grasp_box(stage, pose)
 
     @property
     def mount_xy(self) -> tuple[float, float]:
@@ -258,7 +298,14 @@ class SceneLoader:
                 print("SceneLoader: no USD stage")
                 return False
 
-            if self.world is None:
+            # Isaac World 多为单例；Unload 后勿丢弃，二次 Load/Play 复用
+            try:
+                existing = World.instance()
+            except Exception:
+                existing = None
+            if existing is not None:
+                self.world = existing
+            elif self.world is None:
                 self.world = World(physics_dt=1.0 / 60.0)
 
             master = resolve_scene_usd(self._data_dir)
@@ -318,17 +365,15 @@ class SceneLoader:
             print(f"SceneLoader: workspace collision fill skipped: {exc}")
 
         if box_pose is not None:
-            set_pose(self.box_link_path, box_pose, stage)
-            print(
-                f"SceneLoader: override grasp_box pose "
-                f"t={box_pose.translation} rpy={box_pose.rotation_deg}"
-            )
-
-        # Always sync grasp_box visual to the selected object kind.
-        # Master embeds paper box; a prior Cassette load can leave stronger
-        # root-layer mesh opinions that must be cleared when switching back.
-        self._sync_box_visual(stage)
-        self._apply_grasp_friction(stage)
+            pose = box_pose
+        else:
+            pose = Pose6D(DEFAULT_BOX_CENTER, DEFAULT_BOX_POSE_RPY)
+        # master 不含 grasp_box；按 UI object_kind 运行时创建
+        self._rebuild_grasp_box(stage, pose)
+        print(
+            f"SceneLoader: grasp_box pose "
+            f"t={pose.translation} rpy={pose.rotation_deg}"
+        )
 
         self._fix_flatgrid_texture_paths(stage)
         self._ensure_gemini335_visual(stage)
@@ -524,6 +569,8 @@ class SceneLoader:
         try:
             stage = omni.usd.get_context().get_stage()
             if stage:
+                # 先清 Session/Root 层规格，避免留下 delete opinion 污染二次 Load
+                self._purge_prim_layer_specs(stage, self.box_link_path)
                 self._detach_master_scene_sublayer(stage)
                 for path in (
                     self.robot_prim_path,
@@ -535,8 +582,12 @@ class SceneLoader:
                     CAPTURE_LIGHTS_PATH,
                     "/Environment",
                 ):
-                    if stage.GetPrimAtPath(path):
-                        stage.RemovePrim(path)
+                    self._purge_prim_layer_specs(stage, path)
+                    try:
+                        if stage.GetPrimAtPath(path) and stage.GetPrimAtPath(path).IsValid():
+                            stage.RemovePrim(path)
+                    except Exception:
+                        pass
         except Exception as exc:
             print(f"SceneLoader.unload: {exc}")
         self._camera_prim_paths.clear()
@@ -548,7 +599,10 @@ class SceneLoader:
         self._box_rigid = None
         self._table_rigid = None
         self._robot_articulation = None
-        self.world = None
+        # 保留 World 单例引用；仅清物理句柄
+        from .box_physics import invalidate_box_physx_view
+
+        invalidate_box_physx_view()
 
     def _register_table_physics(self) -> bool:
         """桌子注册为 kinematic 刚体，否则盒子会穿过桌面落到地面。"""
@@ -1526,39 +1580,96 @@ class SceneLoader:
             rb_attr.Set(False)
         return count
 
+    _CAMERA_MOUNT_SUFFIXES = (
+        "base_link/cam0",
+        "J1_6/cam1",
+        "J2_6/cam2",
+    )
+
+    def _clear_session_xform_ops(self, stage, prim_path: str) -> int:
+        """清掉 Session 层对 RSD455 的 xform 意见（PhysX 写回世界系后会残留幽灵相机）。"""
+        session = stage.GetSessionLayer()
+        if session is None:
+            return 0
+        cleared = 0
+        spec = session.GetPrimAtPath(Sdf.Path(str(prim_path)))
+        if spec is None:
+            return 0
+        stack = [spec]
+        while stack:
+            cur = stack.pop()
+            for name in list(cur.properties.keys()):
+                if name.startswith("xformOp:") or name == "xformOpOrder":
+                    try:
+                        cur.RemoveProperty(name)
+                        cleared += 1
+                    except Exception:
+                        pass
+            for child in cur.nameChildren.values():
+                stack.append(child)
+        return cleared
+
     def _fix_sensor_mount_physics(self, stage) -> None:
-        """RSD455 payload 自带碰撞/刚体，作为 link 子节点会触发 PhysX 嵌套刚体错误。"""
-        mount_suffixes = (
-            "base_link/cam0",
-            "J1_6/cam1",
-            "J2_6/cam2",
-        )
+        """RSD455 payload 自带碰撞/刚体；二次 Load/Play 后易再启用，臂动相机掉桌上。"""
         fixed = 0
-        for suffix in mount_suffixes:
+        xform_cleared = 0
+        for suffix in self._CAMERA_MOUNT_SUFFIXES:
             mount_path = f"{self.robot_prim_path}/{suffix}"
             mount = stage.GetPrimAtPath(mount_path)
             if not mount or not mount.IsValid():
                 print(f"SceneLoader: camera mount not found: {mount_path}")
                 continue
 
-            # 原 nova_isaac_sim/2.usda 无 resetXformStack；须保持相机随父 link 运动
-            xformable = UsdGeom.Xformable(mount)
-            if xformable:
-                xformable.SetResetXformStack(False)
-            reset_attr = mount.GetAttribute("xformOp:resetXformStack")
-            if reset_attr and reset_attr.IsValid():
-                reset_attr.Set(False)
-
+            # 须保持相机随父 link 运动；整棵子树关掉 resetXformStack + 剥刚体
             for prim in Usd.PrimRange(mount):
+                if prim.IsA(UsdGeom.Xformable):
+                    try:
+                        UsdGeom.Xformable(prim).SetResetXformStack(False)
+                    except Exception:
+                        pass
+                    reset_attr = prim.GetAttribute("xformOp:resetXformStack")
+                    if reset_attr and reset_attr.IsValid():
+                        reset_attr.Set(False)
                 fixed += self._strip_prim_physics(prim)
+
+            rsd_path = f"{mount_path}/RSD455"
+            rsd = stage.GetPrimAtPath(rsd_path)
+            if rsd and rsd.IsValid():
+                rb_attr = rsd.GetAttribute("physics:rigidBodyEnabled")
+                if rb_attr and rb_attr.IsValid():
+                    rb_attr.Set(False)
+                else:
+                    rsd.CreateAttribute(
+                        "physics:rigidBodyEnabled", Sdf.ValueTypeNames.Bool
+                    ).Set(False)
+                xform_cleared += self._clear_session_xform_ops(stage, rsd_path)
+                # 隐藏 RS mesh：二次 Play 后仍可能脱节掉桌上，挡 Gemini 抓取视角
+                try:
+                    UsdGeom.Imageable(rsd).MakeInvisible()
+                    visual = stage.GetPrimAtPath(f"{rsd_path}/Visual")
+                    if visual and visual.IsValid():
+                        UsdGeom.Imageable(visual).MakeInvisible()
+                except Exception:
+                    pass
 
             print(f"SceneLoader: fixed camera mount physics at {mount_path}")
 
-        if fixed:
-            print(f"SceneLoader: stripped {fixed} physics API(s) on camera mounts")
+        if fixed or xform_cleared:
+            print(
+                f"SceneLoader: stripped {fixed} physics API(s) on camera mounts"
+                + (
+                    f", cleared {xform_cleared} session xform ops"
+                    if xform_cleared
+                    else ""
+                )
+            )
 
     def fix_camera_physics(self, stage) -> None:
-        """公开入口：Play 前可再次调用，确保相机 mount 无嵌套刚体。"""
+        """公开入口：Load/Play 前后都可调用；先确保 payload 再剥离刚体。"""
+        try:
+            self._ensure_camera_payloads_loaded(stage)
+        except Exception as exc:
+            print(f"SceneLoader: camera payload reload: {exc}")
         self._fix_sensor_mount_physics(stage)
 
     def _create_table(self, stage) -> None:
@@ -1729,8 +1840,11 @@ class SceneLoader:
             f"{pose.translation[1]:.3f}, {pose.translation[2]:.3f}), "
             f"mesh collision pending (visual load)"
         )
-        if not load_box_visual(stage, self._box_dir):
+        if not load_box_visual(stage, self._box_dir, force=True):
             print("SceneLoader: box placeholder visible until deferred mesh build")
+        else:
+            self._loaded_object_kind = self._object_kind
+            self._box_visual_ready = True
 
     def build_box_visual_if_needed(self, stage) -> None:
         """延迟构建带贴图的盒子 mesh（Load 后异步调用）。"""
@@ -1774,6 +1888,9 @@ class SceneLoader:
 
     def invalidate_physics(self) -> None:
         """Timeline Stop / Unload 后清除标记，下次 Play 重新 soft reset。"""
+        from .box_physics import invalidate_box_physx_view
+
+        invalidate_box_physx_view()
         self._physics_initialized = False
         self._box_rigid = None
         self._table_rigid = None
@@ -1816,26 +1933,22 @@ class SceneLoader:
             except Exception:
                 return False
 
-        if self._robot_articulation is None:
-            for path in (ROBOT_ROOT_JOINT_PATH, ROBOT_PRIM_PATH):
-                try:
-                    art = SingleArticulation(prim_path=path, name="nova_robot_grasp")
-                    art.initialize()
-                    if _art_ready(art):
-                        names = list(art.dof_names or [])
-                        self._robot_articulation = art
-                        print(
-                            f"SceneLoader: robot articulation @ {path} "
-                            f"(dofs={len(names)})"
-                        )
-                        break
-                except Exception as exc:
-                    print(f"SceneLoader: articulation init @ {path}: {exc}")
-        elif hasattr(self._robot_articulation, "initialize"):
+        # soft reset 会 invalidate 旧 view：必须丢弃后重建，不能只 initialize
+        self._robot_articulation = None
+        for path in (ROBOT_ROOT_JOINT_PATH, ROBOT_PRIM_PATH):
             try:
-                self._robot_articulation.initialize()
-            except Exception:
-                pass
+                art = SingleArticulation(prim_path=path, name="nova_robot_grasp")
+                art.initialize()
+                if _art_ready(art):
+                    names = list(art.dof_names or [])
+                    self._robot_articulation = art
+                    print(
+                        f"SceneLoader: robot articulation @ {path} "
+                        f"(dofs={len(names)})"
+                    )
+                    break
+            except Exception as exc:
+                print(f"SceneLoader: articulation init @ {path}: {exc}")
 
         return self._robot_articulation is not None
 
@@ -1872,38 +1985,79 @@ class SceneLoader:
         *,
         release_box: bool = True,
         kinematic_box: Optional[bool] = None,
+        force: bool = False,
     ) -> bool:
-        """Play 期间注册 articulation 后 soft reset（顺序：先注册，再 reset）。"""
-        if not self._loaded or self.world is None or self._physics_initialized:
-            return self._physics_initialized
+        """Play 期间 soft reset 后再注册 articulation（顺序很重要）。
+
+        ``world.reset(soft=True)`` 会使已有 PhysX tensor view 失效；若先创建
+        Articulation/RigidPrim 再 reset，随后 getVelocities/set_gains 会刷屏报错。
+        """
+        if not self._loaded:
+            return False
+        if self.world is None:
+            try:
+                from isaacsim.core.api.world import World
+
+                self.world = World.instance() or World(physics_dt=1.0 / 60.0)
+            except Exception as exc:
+                print(f"SceneLoader: World unavailable: {exc}")
+                return False
         import omni.timeline
 
         if not omni.timeline.get_timeline_interface().is_playing():
             return False
         kin = bool(kinematic_box) if kinematic_box is not None else (not release_box)
+
+        if force:
+            self._physics_initialized = False
+
+        # 已初始化时仍强制重放重力（二次 Load 后常见 kinematic 残留）
+        if self._physics_initialized and not force:
+            if release_box and not kin:
+                try:
+                    from .box_physics import configure_box_usd_dynamic, release_box_for_gravity
+
+                    configure_box_usd_dynamic(kinematic=False)
+                    release_box_for_gravity(
+                        log=True, surface_z_world=self._workspace_surface_z_world
+                    )
+                except Exception as exc:
+                    print(f"SceneLoader: re-release gravity: {exc}")
+            return True
         try:
+            from .box_physics import invalidate_box_physx_view
+
             stage = omni.usd.get_context().get_stage()
             if stage:
+                # soft reset 前必须先剥 RSD455 刚体，否则二次 Play 相机会掉桌上残留
+                self.fix_camera_physics(stage)
                 self.build_box_visual_if_needed(stage)
-                if not ensure_box_collision(stage, self._box_dir):
-                    print("SceneLoader: WARN box has no collision — skip gravity release")
-                    return False
+                if not has_box_collision(stage):
+                    if not ensure_box_collision(stage, self._box_dir):
+                        print("SceneLoader: WARN box has no collision — skip gravity release")
+                        return False
+                self._boost_arm_drives(stage)
+                self._boost_gripper_drives(stage)
+                self._apply_grasp_friction(stage)
+                self._apply_default_robot_joints_usd(stage)
+
+            invalidate_box_physx_view()
+            self._robot_articulation = None
+            self._table_rigid = None
+            self._box_rigid = None
+            self.world.reset(soft=True)
+
+            if stage:
+                self._boost_arm_drives(stage)
+                self._boost_gripper_drives(stage)
+                self._apply_grasp_friction(stage)
+                self._apply_default_robot_joints_usd(stage)
+
             self._register_table_physics()
             self.register_physics_prims(kinematic_box=kin)
-            if stage:
-                self._boost_arm_drives(stage)
-                self._boost_gripper_drives(stage)
-                self._apply_grasp_friction(stage)
-                self._apply_default_robot_joints_usd(stage)
-            self.world.reset(soft=True)
-            if stage:
-                self._boost_arm_drives(stage)
-                self._boost_gripper_drives(stage)
-                self._apply_grasp_friction(stage)
-                self._apply_default_robot_joints_usd(stage)
             self._apply_default_robot_joints_articulation()
-            self._apply_arm_drive_gains_articulation()  # 内含夹爪 articulation gains
-            if release_box:
+            self._apply_arm_drive_gains_articulation()
+            if release_box and not kin:
                 release_box_for_gravity(
                     log=True, surface_z_world=self._workspace_surface_z_world
                 )

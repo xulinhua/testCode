@@ -24,7 +24,9 @@ from ..global_variables import (
     COLLECT_YAW_RANGE,
 )
 from ..paths import (
+    OBJECT_KIND_CASSETTE,
     OBJECT_KIND_LABELS,
+    OBJECT_KIND_PAPER_BOX,
     get_extension_paths,
     read_object_kind_pref,
     write_object_kind_pref,
@@ -78,7 +80,10 @@ class UIBuilder:
         self._status_label = None
         self._collect_progress_label = None
         self._object_kind_combo = None
-        self._selected_object_kind = OBJECT_KIND_LABELS[0][0]
+        self._object_kind_label = None
+        self._btn_kind_paper = None
+        self._btn_kind_cassette = None
+        self._selected_object_kind = OBJECT_KIND_PAPER_BOX
         self._object_kind_labels = [label for _, label in OBJECT_KIND_LABELS]
         self._object_kind_keys = [key for key, _ in OBJECT_KIND_LABELS]
         self.frames = []
@@ -191,21 +196,27 @@ class UIBuilder:
                 with ui.HStack(height=ROW_HEIGHT):
                     ui.Label("Object", width=TOPIC_LABEL_W, height=0)
                     pref_kind = read_object_kind_pref(self._box_dir)
-                    pref_idx = (
-                        self._object_kind_keys.index(pref_kind)
-                        if pref_kind in self._object_kind_keys
-                        else 0
+                    self._selected_object_kind = (
+                        pref_kind if pref_kind in self._object_kind_keys else OBJECT_KIND_PAPER_BOX
                     )
-                    self._selected_object_kind = self._object_kind_keys[pref_idx]
-                    self._object_kind_combo = ui.ComboBox(
-                        pref_idx, *self._object_kind_labels, height=0
+                    # ComboBox 在 Isaac 里读 index 不可靠 → 用两个按钮
+                    self._btn_kind_paper = ui.Button(
+                        "Paper box",
+                        height=_BTN_H,
+                        width=_BTN_W,
+                        clicked_fn=lambda: self._set_object_kind(OBJECT_KIND_PAPER_BOX),
                     )
-                    try:
-                        self._object_kind_combo.model.add_item_changed_fn(
-                            self._on_object_kind_changed
-                        )
-                    except Exception:
-                        pass
+                    self._btn_kind_cassette = ui.Button(
+                        "Cassette",
+                        height=_BTN_H,
+                        width=_BTN_W,
+                        clicked_fn=lambda: self._set_object_kind(OBJECT_KIND_CASSETTE),
+                    )
+                    self._object_kind_label = ui.Label(
+                        dict(OBJECT_KIND_LABELS).get(self._selected_object_kind, "?"),
+                        height=0,
+                    )
+                    self._refresh_object_kind_buttons()
                 with self._compact_btn_row():
                     self._buttons["load"] = self._compact_btn(
                         "Load", "Load table + Nova robot + box", self._on_load
@@ -525,21 +536,24 @@ class UIBuilder:
             Pose6D(DEFAULT_BOX_CENTER, DEFAULT_BOX_POSE_RPY),
         )
 
-    def _on_object_kind_changed(self, model, _item=None):
-        """ComboBox 变更时缓存选择（omni.ui 读 index 不可靠，不依赖 Load 时再读）。"""
-        if model is None:
-            return
-        idx = None
-        try:
-            idx = int(model.get_item_value_model().as_int)
-        except Exception:
-            try:
-                idx = int(model.get_item_value_model().get_value_as_int())
-            except Exception:
-                idx = None
-        if idx is None or idx < 0 or idx >= len(self._object_kind_keys):
-            return
-        self._selected_object_kind = self._object_kind_keys[idx]
+    def _refresh_object_kind_buttons(self) -> None:
+        label = dict(OBJECT_KIND_LABELS).get(self._selected_object_kind, "?")
+        if self._object_kind_label is not None:
+            self._object_kind_label.text = f"= {label}"
+        # 高亮当前选择（Isaac Button 无 checked，用 tooltip/text 前缀）
+        if self._btn_kind_paper is not None:
+            self._btn_kind_paper.text = (
+                "[Paper box]" if self._selected_object_kind == OBJECT_KIND_PAPER_BOX else "Paper box"
+            )
+        if self._btn_kind_cassette is not None:
+            self._btn_kind_cassette.text = (
+                "[Cassette]" if self._selected_object_kind == OBJECT_KIND_CASSETTE else "Cassette"
+            )
+
+    def _set_object_kind(self, kind: str) -> None:
+        self._selected_object_kind = kind if kind in self._object_kind_keys else OBJECT_KIND_PAPER_BOX
+        write_object_kind_pref(self._box_dir, self._selected_object_kind)
+        self._refresh_object_kind_buttons()
         print(
             f"UI: object kind -> {dict(OBJECT_KIND_LABELS).get(self._selected_object_kind)} "
             f"({self._selected_object_kind})"
@@ -547,30 +561,13 @@ class UIBuilder:
 
     def _read_object_kind(self) -> str:
         """从 Actions 面板读取当前物体类型。"""
-        # Prefer cached selection from ComboBox change callback.
         if getattr(self, "_selected_object_kind", None) in self._object_kind_keys:
             return self._selected_object_kind
-        combo = self._object_kind_combo
-        if combo is None:
-            return read_object_kind_pref(self._box_dir)
-        try:
-            idx = int(combo.model.get_item_value_model().as_int)
-        except Exception:
-            try:
-                idx = int(combo.model.get_item_value_model().get_value_as_int())
-            except Exception:
-                idx = 0
-        if idx < 0 or idx >= len(self._object_kind_keys):
-            idx = 0
-        self._selected_object_kind = self._object_kind_keys[idx]
-        return self._selected_object_kind
+        return read_object_kind_pref(self._box_dir)
 
     def _on_load(self):
         """Load scene 按钮：应用配置 → Load → Sync 位姿回 UI。"""
         print("UI: loading scene...")
-        # Re-sample ComboBox once more in case change callback missed the last click.
-        if self._object_kind_combo is not None:
-            self._on_object_kind_changed(self._object_kind_combo.model)
         kind = write_object_kind_pref(self._box_dir, self._read_object_kind())
         self.session.set_object_kind(kind)
         label = dict(OBJECT_KIND_LABELS).get(kind, kind)

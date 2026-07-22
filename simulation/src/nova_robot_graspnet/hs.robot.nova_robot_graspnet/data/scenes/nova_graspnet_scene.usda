@@ -209,6 +209,7 @@ def Xform "World"
                 over "RSD455"
                 {
                     bool physics:rigidBodyEnabled = 0
+                    token visibility = "invisible"
                 }
             }
         }
@@ -220,45 +221,14 @@ def Xform "World"
                 over "RSD455"
                 {
                     bool physics:rigidBodyEnabled = 0
+                    token visibility = "invisible"
                 }
             }
         }
     }
 
-    def Xform "grasp_box" (
-        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
-    )
-    {
-        bool physics:kinematicEnabled = 0
-        float physics:mass = 0.1
-        bool physics:rigidBodyEnabled = 1
-        float3 xformOp:rotateXYZ = (0, 90, 0)
-        double3 xformOp:translate = (-0.18, 0.18, 0.9)
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
-
-        def Xform "visual"
-        {
-            def Mesh "mesh" (
-                prepend apiSchemas = ["MaterialBindingAPI"]
-                prepend references = @../box/grasp_box_baked.usdc@
-            )
-            {
-            }
-        }
-
-        def Xform "collision_geo"
-        {
-            def Cube "mesh" (
-                prepend apiSchemas = ["PhysicsCollisionAPI"]
-            )
-            {
-                uniform token purpose = "guide"
-                double size = 1
-                float3 xformOp:scale = (0.17184706, 0.06992718, 0.21847042)
-                uniform token[] xformOpOrder = ["xformOp:scale"]
-            }
-        }
-    }
+    # grasp_box 由插件运行时按 UI（Paper box / Cassette）创建，勿写进 master scene，
+    # 否则 sublayer reference 与代码重建冲突，切换物体会失败。
 
     def Xform "Gemini335" (
         prepend references = @../sensors/orbbec_gemini_335.usd@

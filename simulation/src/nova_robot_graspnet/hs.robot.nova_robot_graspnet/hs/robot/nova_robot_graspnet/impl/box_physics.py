@@ -297,7 +297,12 @@ def _get_box_rb_view():
     global _box_rb_view
     if _box_rb_view is not None:
         try:
-            if int(getattr(_box_rb_view, "count", 0)) >= 1:
+            # soft reset 后旧 view 仍非 None，但已 invalidated
+            count = int(getattr(_box_rb_view, "count", 0))
+            if count >= 1:
+                # 轻量探测：失败则重建
+                if hasattr(_box_rb_view, "get_transforms"):
+                    _ = _box_rb_view.get_transforms()
                 return _box_rb_view
         except Exception:
             _box_rb_view = None

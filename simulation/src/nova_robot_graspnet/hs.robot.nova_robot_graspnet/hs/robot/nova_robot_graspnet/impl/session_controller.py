@@ -267,8 +267,10 @@ class SessionController:
             print("SessionController: robot runtime stale — rebinding")
             self.robot_runtime.shutdown()
         if not self.scene_loader.robot_articulation:
-            ok = self.scene_loader.register_physics_prims(kinematic_box=self._kinematic_object)
-            print(f"SessionController: register_physics_prims -> {ok}")
+            # 重力已释放后勿再按 UI kinematic 勾选把盒子钉死
+            kin = bool(self._kinematic_object) and not self._box_physics_released
+            ok = self.scene_loader.register_physics_prims(kinematic_box=kin)
+            print(f"SessionController: register_physics_prims -> {ok} (kinematic_box={kin})")
         art = self.scene_loader.robot_articulation
         if art is None:
             print("SessionController: robot articulation missing after register")
@@ -317,25 +319,30 @@ class SessionController:
         import omni.kit.app
 
         app = omni.kit.app.get_app()
-        for _ in range(15):
-            await app.next_update_async()
-
         import omni.usd
 
-        stage = omni.usd.get_context().get_stage()
-        if stage and self.scene_loader.is_loaded:
-            print("SessionController: deferred post-load (lighting / box visual / camera physics)")
-            self.scene_loader.apply_default_light_rig()
-            self.scene_loader.build_box_visual_if_needed(stage)
+        # payload 可能晚几帧才展开；多轮 strip，避免二次 Load 后腕部 RS 掉桌上
+        for i in range(3):
+            for _ in range(8):
+                await app.next_update_async()
+            stage = omni.usd.get_context().get_stage()
+            if not (stage and self.scene_loader.is_loaded):
+                return
             self.scene_loader.fix_camera_physics(stage)
-            self.scene_loader.fix_box_visual_material(stage)
-            # 画面不动；只把 TF cam0 对齐到 Gemini 出流（约 30°），消除图/TF 外参差。
-            try:
-                self.scene_loader.sync_cam0_tf_to_gemini_rgb(stage)
-            except Exception as exc:
-                print(f"SessionController: cam0 TF sync skipped: {exc}")
-            print("SessionController: deferred post-load done")
-            self._notify()
+            if i == 0:
+                print(
+                    "SessionController: deferred post-load "
+                    "(lighting / box visual / camera physics)"
+                )
+                self.scene_loader.apply_default_light_rig()
+                self.scene_loader.build_box_visual_if_needed(stage)
+                self.scene_loader.fix_box_visual_material(stage)
+                try:
+                    self.scene_loader.sync_cam0_tf_to_gemini_rgb(stage)
+                except Exception as exc:
+                    print(f"SessionController: cam0 TF sync skipped: {exc}")
+        print("SessionController: deferred post-load done")
+        self._notify()
 
     def apply_box_pose_from_ui(self, force: bool = True) -> bool:
         """将 UI 中 obj_tx/ty/tz/roll/pitch/yaw 写入 ``BOX_LINK_PATH``。
@@ -505,8 +512,13 @@ class SessionController:
         """Timeline Play → 立即 soft reset，再延迟启 ROS；Stop → 停出流。"""
         if event.type == int(omni.timeline.TimelineEventType.PLAY):
             if self.scene_loader.is_loaded:
-                if self.scene_loader.ensure_physics_on_play():
-                    self._box_physics_released = True
+                # force=True：二次 Load 后也完整走物理/重力
+                ok = self.scene_loader.ensure_physics_on_play(
+                    release_box=not self._kinematic_object,
+                    kinematic_box=self._kinematic_object,
+                    force=True,
+                )
+                self._box_physics_released = bool(ok) and (not self._kinematic_object)
                 asyncio.ensure_future(self._deferred_play_start())
         elif event.type == int(omni.timeline.TimelineEventType.STOP):
             # 先丢掉 PhysX view，避免 Stop 过程中再走 RigidPrim/orient 路径刷屏
@@ -514,12 +526,13 @@ class SessionController:
 
             invalidate_box_physx_view()
             self._collection_box_pose = None
+            self._box_physics_released = False
             self._stop_streaming()
             self.scene_loader.invalidate_physics()
             self.robot_runtime.shutdown()
 
     async def _deferred_play_start(self) -> None:
-        """等几帧 PhysX 稳定后再创建 OmniGraph（不再 reset / 写盒子位姿）。"""
+        """等几帧 PhysX 稳定后再创建 OmniGraph，并再次确认盒子重力。"""
         import omni.kit.app
 
         app = omni.kit.app.get_app()
@@ -529,8 +542,34 @@ class SessionController:
                 return
 
         if self.scene_loader.is_loaded and self._timeline.is_playing():
+            import omni.usd
+
+            stage = omni.usd.get_context().get_stage()
+            if stage:
+                # Play/soft-reset 后再钉一次，防止腕部 RSD455 被 PhysX 写成独立刚体
+                self.scene_loader.fix_camera_physics(stage)
+            # 延迟再放一次重力，防止 soft reset / 注册顺序把 kinematic 钉回去
+            if not self._kinematic_object:
+                try:
+                    from .box_physics import configure_box_usd_dynamic, release_box_for_gravity
+
+                    configure_box_usd_dynamic(kinematic=False)
+                    release_box_for_gravity(
+                        log=True,
+                        surface_z_world=self.scene_loader.workspace_surface_z_world,
+                    )
+                    self._box_physics_released = True
+                except Exception as exc:
+                    print(f"SessionController: deferred gravity release: {exc}")
             self._ensure_robot_runtime()
+            # soft reset 后强制重建 ROS/ArticulationController，避免 /joint_command 失效、臂不动
+            if self._state == SessionState.STREAMING:
+                self._stop_streaming()
             self._start_streaming()
+            if self.robot_ros_publisher.is_active:
+                self.joint_command_graph.stop()
+            elif self._timeline.is_playing():
+                self._start_joint_command_graph()
 
     def on_app_update(self) -> None:
         """每帧回调：仅在 live apply / GT 发布 / 抓取订阅活跃时工作。"""
@@ -573,6 +612,10 @@ class SessionController:
 
     def stop_all(self) -> None:
         """停止出流并 Unload 场景，状态回到 IDLE。"""
+        # 必须先 Stop：若 Timeline 仍在 Play，Unload/Load 不会再触发 PLAY 事件，
+        # 第二次场景会缺 ensure_physics_on_play（盒子无重力）。
+        if self._timeline.is_playing():
+            self._timeline.stop()
         self.stop_grasp_mode()
         self._stop_streaming()
         self.joint_command_graph.stop()
@@ -582,6 +625,9 @@ class SessionController:
         invalidate_box_pose_cache()
         self._pending_grasp_pose = None
         self._last_received_grasp_pose = None
+        from .box_physics import invalidate_box_physx_view
+
+        invalidate_box_physx_view()
         self.scene_loader.unload()
         self._state = SessionState.IDLE
         self._notify()

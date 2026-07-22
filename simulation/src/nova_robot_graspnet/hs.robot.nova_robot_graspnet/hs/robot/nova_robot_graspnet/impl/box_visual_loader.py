@@ -51,7 +51,26 @@ def _existing_baked(box_dir: str) -> Optional[str]:
 
 def clear_box_visual(stage) -> None:
     """清除 grasp_box 视觉/碰撞子树，便于切换纸盒↔料盒后重新构建。"""
-    # Remove visual children first (mesh references / live OBJ), then legacy paths.
+    for path in (
+        f"{BOX_VISUAL_PATH}/mesh",
+        f"{BOX_VISUAL_PATH}/placeholder",
+        BOX_COLLISION_GEO_ROOT,
+        BOX_COLLISION_PATH,
+        f"{BOX_LINK_PATH}/Looks",
+    ):
+        prim = stage.GetPrimAtPath(path)
+        if not prim or not prim.IsValid():
+            continue
+        try:
+            try:
+                prim.GetReferences().ClearReferences()
+            except Exception:
+                pass
+            stage.RemovePrim(path)
+        except Exception as exc:
+            print(f"box_visual_loader: remove {path} failed: {exc}")
+
+    # 清 visual 下其它残留子节点
     visual = stage.GetPrimAtPath(BOX_VISUAL_PATH)
     if visual and visual.IsValid():
         for child in list(visual.GetChildren()):
@@ -60,25 +79,6 @@ def clear_box_visual(stage) -> None:
                 stage.RemovePrim(path)
             except Exception as exc:
                 print(f"box_visual_loader: remove {path} failed: {exc}")
-    for path in (
-        f"{BOX_VISUAL_PATH}/mesh",
-        f"{BOX_VISUAL_PATH}/placeholder",
-        BOX_COLLISION_GEO_ROOT,
-        BOX_COLLISION_PATH,
-    ):
-        prim = stage.GetPrimAtPath(path)
-        if prim and prim.IsValid():
-            try:
-                stage.RemovePrim(path)
-            except Exception as exc:
-                print(f"box_visual_loader: remove {path} failed: {exc}")
-    # Drop Looks so previous OmniPBR / materials do not stick across kinds.
-    looks = stage.GetPrimAtPath(f"{BOX_LINK_PATH}/Looks")
-    if looks and looks.IsValid():
-        try:
-            stage.RemovePrim(f"{BOX_LINK_PATH}/Looks")
-        except Exception as exc:
-            print(f"box_visual_loader: remove Looks failed: {exc}")
 
 
 def _box_has_visible_mesh(stage, root_path: str) -> bool:
@@ -227,7 +227,18 @@ def load_box_visual(stage, box_dir: str, *, force: bool = False) -> bool:
     baked = _existing_baked(box_dir)
     if baked:
         mesh_ref = f"{BOX_VISUAL_PATH}/mesh"
-        if not _box_has_visible_mesh(stage, mesh_ref):
+        # force 时必须拆掉旧 reference，再挂当前物体的 baked
+        if force or not _box_has_visible_mesh(stage, mesh_ref):
+            existing = stage.GetPrimAtPath(mesh_ref)
+            if existing and existing.IsValid():
+                try:
+                    existing.GetReferences().ClearReferences()
+                except Exception:
+                    pass
+                try:
+                    stage.RemovePrim(mesh_ref)
+                except Exception:
+                    pass
             add_reference_to_stage(usd_path=baked, prim_path=mesh_ref)
             prim = stage.GetPrimAtPath(mesh_ref)
             if prim and prim.IsValid():
@@ -249,6 +260,13 @@ def load_box_visual(stage, box_dir: str, *, force: bool = False) -> bool:
 
     obj_path = find_box_obj_path(box_dir)
     if obj_path:
+        mesh_ref = f"{BOX_VISUAL_PATH}/mesh"
+        existing = stage.GetPrimAtPath(mesh_ref)
+        if existing and existing.IsValid():
+            try:
+                existing.GetReferences().ClearReferences()
+            except Exception:
+                pass
         print(
             f"box_visual_loader: building mesh from OBJ "
             f"({os.path.basename(obj_path)}; may take ~30-60s) ..."
