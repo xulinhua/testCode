@@ -1,0 +1,15 @@
+# 直角三面靶单帧 / 多帧内参（推荐 ChArUco）
+# squares_x/y = 每面内角点数（正方形）；CharucoBoard 方格 = n+1
+# 三面可为相同 ChArUco（同字典、同 ID）；套件按共面单应 + 位姿法向分面
+# 白边 ≈ 1 格（利于检测，不作分面标签）
+squares_x: 8
+squares_y: 8
+square_length: 0.025
+marker_length: 0.018
+border_m: 0.025
+angle_deg: 90.0
+dictionary: DICT_4X4_250
+target: trihedral_charuco
+min_views: 1
+min_faces: 2
+model: pinhole

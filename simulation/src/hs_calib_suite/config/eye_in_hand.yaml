@@ -1,0 +1,11 @@
+# eye_in_hand 默认参数
+base_frame: base
+gripper_frame: tool0
+parent_frame: gripper
+child_frame: camera
+method: tsai
+camera_yaml: ""
+squares_x: 9
+squares_y: 6
+square_length: 0.025
+target: chessboard

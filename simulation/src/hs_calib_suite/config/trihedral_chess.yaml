@@ -1,0 +1,12 @@
+# 直角三面棋盘格内参（仅角点，无 ArUco）
+# 每一面 = 一张带白边的 chessboard；检测靠「找网格→掩膜→再找」剥面，再贴到 XY/XZ/YZ
+# squares_x/y = 每面内角点数（正方形面取相同）；白边 ≈ 1 格（利于检测，不作分面标签）
+squares_x: 8
+squares_y: 8
+square_length: 0.025
+border_m: 0.025
+angle_deg: 90.0
+target: trihedral_chess
+min_views: 1
+min_faces: 2
+model: pinhole

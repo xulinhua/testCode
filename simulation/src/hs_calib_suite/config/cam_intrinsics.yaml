@@ -1,0 +1,19 @@
+# hs_calib_suite — cam_intrinsics 默认参数（离线 GUI / 节点共用键名）
+#
+# target:
+#   chessboard          — squares_x/y = 内角点列/行；square_length = 方格边长 (m)
+#   charuco             — squares_x/y = 方格数；square_length / marker_length (m)
+#   aruco_grid          — squares_x/y = 标记列/行；marker_length；间距≈square_length-marker_length
+#   circles_symmetric   — squares_x/y = 圆点列/行；square_length = 圆心距 (m)
+#   circles_asymmetric  — 同上，非对称圆点阵列
+#
+# model: pinhole | fisheye
+# dictionary: 仅 charuco / aruco_grid 使用
+
+squares_x: 9
+squares_y: 6
+square_length: 0.025
+marker_length: 0.018
+target: chessboard
+dictionary: DICT_4X4_50
+model: pinhole

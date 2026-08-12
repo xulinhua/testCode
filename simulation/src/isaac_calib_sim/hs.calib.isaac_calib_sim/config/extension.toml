@@ -1,0 +1,26 @@
+[core]
+reloadable = true
+order = 0
+
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "Hs Calib Isaac Calib Sim"
+description = "Single-camera calibration board simulation with animated viewpoints and switchable board types"
+authors = ["hs"]
+keywords = ["calibration", "chessboard", "camera", "ros2"]
+readme = "docs/README.md"
+changelog = "docs/CHANGELOG.md"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"isaacsim.gui.components" = {}
+"isaacsim.core.api" = {}
+"isaacsim.core.nodes" = {}
+"isaacsim.ros2.bridge" = {}
+
+[[python.module]]
+name = "hs.calib.isaac_calib_sim"
+
+[settings]
+exts."hs.calib.isaac_calib_sim".timeout = 5

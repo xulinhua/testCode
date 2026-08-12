@@ -1,0 +1,16 @@
+# hs_calib_suite — placeholder calibrator node params
+# Loaded automatically by: ros2 run hs_calib_suite placeholder_calibrator
+# Override:
+#   ros2 run hs_calib_suite placeholder_calibrator --ros-args \
+#     --params-file /path/to/your.yaml
+
+/**:
+  ros__parameters:
+    calibrator_id: "placeholder"
+    display_name: "Placeholder Calibrator"
+    category: "dev"
+    # Reserved for P1+ (topics / frames / board)
+    # image_topic: "/camera/image_raw"
+    # camera_info_topic: "/camera/camera_info"
+    # parent_frame: "base_link"
+    # child_frame: "camera_optical_frame"

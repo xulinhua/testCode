@@ -1,0 +1,10 @@
+# Discover calibrator capabilities for the Manager UI.
+string calibrator_id
+---
+bool success
+string message
+string calibrator_id
+string display_name
+string category
+string[] required_frames
+string[] supported_targets

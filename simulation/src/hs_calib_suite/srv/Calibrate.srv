@@ -1,0 +1,8 @@
+# Thin service facade: calibrator nodes ignore most request fields and use
+# node parameters / session state; request may carry an optional session id.
+string session_id
+string calibrator_id
+---
+bool success
+string message
+CalibrationResult[] results
