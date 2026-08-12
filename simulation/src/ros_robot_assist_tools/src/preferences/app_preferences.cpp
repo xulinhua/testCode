@@ -1,6 +1,5 @@
 #include "ros_robot_assist_tools/preferences/app_preferences.hpp"
 
-#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -83,30 +82,11 @@ std::string AppPreferencesFilePath()
   return (base / "preferences.yaml").string();
 }
 
-bool IsValidRosDomainId(const std::string & value)
-{
-  if (value.empty()) {
-    return true;
-  }
-  for (char c : value) {
-    if (!std::isdigit(static_cast<unsigned char>(c))) {
-      return false;
-    }
-  }
-  try {
-    const unsigned long v = std::stoul(value);
-    return v <= 232UL;
-  } catch (...) {
-    return false;
-  }
-}
-
 bool LoadAppPreferences(AppPreferences * out)
 {
   if (out == nullptr) {
     return false;
   }
-  out->ros_domain_id.clear();
   out->ros_localhost_only.clear();
   out->rmw_implementation.clear();
   out->ros_namespace.clear();
@@ -120,9 +100,6 @@ bool LoadAppPreferences(AppPreferences * out)
   }
   try {
     YAML::Node root = YAML::LoadFile(path);
-    if (root["ros_domain_id"]) {
-      out->ros_domain_id = root["ros_domain_id"].as<std::string>("");
-    }
     if (root["ros_localhost_only"]) {
       out->ros_localhost_only = NormalizeTriState01(root["ros_localhost_only"].as<std::string>(""));
     }
@@ -141,9 +118,6 @@ bool LoadAppPreferences(AppPreferences * out)
     }
     if (root["ui_theme"]) {
       out->ui_theme = NormalizeTheme(root["ui_theme"].as<std::string>("fusion"));
-    }
-    if (!IsValidRosDomainId(out->ros_domain_id)) {
-      out->ros_domain_id.clear();
     }
     return true;
   } catch (...) {
@@ -164,7 +138,6 @@ bool SaveAppPreferences(const AppPreferences & prefs)
   }
   try {
     YAML::Node root;
-    root["ros_domain_id"] = prefs.ros_domain_id;
     root["ros_localhost_only"] = NormalizeTriState01(prefs.ros_localhost_only);
     root["rmw_implementation"] = NormalizeRmwImplementation(prefs.rmw_implementation);
     root["ros_namespace"] = prefs.ros_namespace;
@@ -184,30 +157,15 @@ bool SaveAppPreferences(const AppPreferences & prefs)
   }
 }
 
-void ApplyRosDomainInProcess(const std::string & value)
-{
-  if (!IsValidRosDomainId(value)) {
-    return;
-  }
-#if defined(_WIN32)
-  SetEnvInProcess("ROS_DOMAIN_ID", value);
-#else
-  SetEnvInProcess("ROS_DOMAIN_ID", value);
-#endif
-}
-
 void ApplyRosEnvironmentInProcess(const AppPreferences & prefs)
 {
-  if (IsValidRosDomainId(prefs.ros_domain_id)) {
-    SetEnvInProcess("ROS_DOMAIN_ID", prefs.ros_domain_id);
-  }
   SetEnvInProcess("ROS_LOCALHOST_ONLY", NormalizeTriState01(prefs.ros_localhost_only));
   SetEnvInProcess("RMW_IMPLEMENTATION", NormalizeRmwImplementation(prefs.rmw_implementation));
   SetEnvInProcess("ROS_NAMESPACE", prefs.ros_namespace);
   SetEnvInProcess("RCUTILS_LOGGING_SEVERITY_THRESHOLD", NormalizeLogLevel(prefs.log_level_default));
 }
 
-void ApplyRosDomainFromSavedPreferences()
+void ApplyRosEnvironmentFromSavedPreferences()
 {
   const std::string path = AppPreferencesFilePath();
   if (path.empty() || !std::filesystem::exists(path)) {

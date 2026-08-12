@@ -17,7 +17,7 @@ void signalHandler(int /*signal*/) {
 }
 
 int main(int argc, char ** argv) {
-  ros_robot_assist_tools::ApplyRosDomainFromSavedPreferences();
+  ros_robot_assist_tools::ApplyRosEnvironmentFromSavedPreferences();
   // 初始化 ROS2
   rclcpp::init(argc, argv);
   

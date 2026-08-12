@@ -10,7 +10,6 @@ namespace ros_robot_assist_tools
 
 struct AppPreferences
 {
-  std::string ros_domain_id;
   std::string ros_localhost_only;       // "" | "1" | "0"
   std::string rmw_implementation;       // "" | rmw_fastrtps_cpp | rmw_cyclonedds_cpp
   std::string ros_namespace;
@@ -23,10 +22,8 @@ std::string AppPreferencesFilePath();
 bool LoadAppPreferences(AppPreferences * out);
 bool SaveAppPreferences(const AppPreferences & prefs);
 
-bool IsValidRosDomainId(const std::string & value);
-void ApplyRosDomainInProcess(const std::string & value);
 void ApplyRosEnvironmentInProcess(const AppPreferences & prefs);
-void ApplyRosDomainFromSavedPreferences();
+void ApplyRosEnvironmentFromSavedPreferences();
 void ApplyUiThemeToApplication(QApplication & app, const std::string & theme);
 
 }  // namespace ros_robot_assist_tools

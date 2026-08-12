@@ -63,14 +63,6 @@ void ShowPreferencesDialog(QWidget * parent)
   auto * root = new QVBoxLayout(&dlg);
   auto * form = new QFormLayout();
 
-  auto * ros_domain = new QLineEdit(QString::fromStdString(prefs.ros_domain_id));
-  ros_domain->setPlaceholderText(QStringLiteral("0~232，留空表示不覆盖启动环境"));
-  form->addRow(QStringLiteral("ROS_DOMAIN_ID:"), ros_domain);
-  auto * ros_domain_current = new QLabel();
-  form->addRow(QStringLiteral("当前终端值:"), ros_domain_current);
-  auto * ros_domain_system = new QLabel();
-  form->addRow(QStringLiteral("系统值(.bashrc):"), ros_domain_system);
-
   auto * localhost = new QComboBox();
   localhost->addItem(QStringLiteral("继承环境"), QStringLiteral(""));
   localhost->addItem(QStringLiteral("仅本机 (1)"), QStringLiteral("1"));
@@ -145,17 +137,12 @@ void ShowPreferencesDialog(QWidget * parent)
   auto bashrc_query_proc = std::make_shared<QPointer<QProcess>>(nullptr);
 
   auto refresh_current_values = [=]() {
-    const QString current_domain = EnvValueOrUnset("ROS_DOMAIN_ID");
     const QString current_localhost = EnvValueOrUnset("ROS_LOCALHOST_ONLY");
     const QString current_rmw = EnvValueOrUnset("RMW_IMPLEMENTATION");
     const QString current_ns = EnvValueOrUnset("ROS_NAMESPACE");
     const QString current_log = EnvValueOrUnset("RCUTILS_LOGGING_SEVERITY_THRESHOLD");
     const QString current_theme = theme->currentData().toString();
 
-    ros_domain_current->setText(
-      QStringLiteral("ROS_DOMAIN_ID=%1%2")
-      .arg(current_domain)
-      .arg(PendingMark(ros_domain->text().trimmed().isEmpty() ? QStringLiteral("(unset)") : ros_domain->text().trimmed(), current_domain)));
     localhost_current->setText(
       QStringLiteral("ROS_LOCALHOST_ONLY=%1%2")
       .arg(current_localhost)
@@ -175,7 +162,6 @@ void ShowPreferencesDialog(QWidget * parent)
     theme_current->setText(QStringLiteral("ui_theme=%1 (预览即时生效，未保存会恢复)").arg(current_theme));
 
     const bool has_pending =
-      ros_domain_current->text().contains(QStringLiteral("待生效")) ||
       localhost_current->text().contains(QStringLiteral("待生效")) ||
       rmw_current->text().contains(QStringLiteral("待生效")) ||
       ros_namespace_current->text().contains(QStringLiteral("待生效")) ||
@@ -191,7 +177,6 @@ void ShowPreferencesDialog(QWidget * parent)
       (*bashrc_query_proc)->deleteLater();
       *bashrc_query_proc = nullptr;
     }
-    ros_domain_system->setText(QStringLiteral("ROS_DOMAIN_ID=加载中..."));
     localhost_system->setText(QStringLiteral("ROS_LOCALHOST_ONLY=加载中..."));
     rmw_system->setText(QStringLiteral("RMW_IMPLEMENTATION=加载中..."));
     ros_namespace_system->setText(QStringLiteral("ROS_NAMESPACE=加载中..."));
@@ -199,7 +184,6 @@ void ShowPreferencesDialog(QWidget * parent)
 
     auto * p = new QProcess(&dlg);
     *bashrc_query_proc = p;
-    QPointer<QLabel> ros_domain_system_guard = ros_domain_system;
     QPointer<QLabel> localhost_system_guard = localhost_system;
     QPointer<QLabel> rmw_system_guard = rmw_system;
     QPointer<QLabel> ros_namespace_system_guard = ros_namespace_system;
@@ -224,9 +208,6 @@ void ShowPreferencesDialog(QWidget * parent)
         };
 
         if (status != QProcess::NormalExit || exit_code != 0) {
-          if (ros_domain_system_guard) {
-            ros_domain_system_guard->setText(QStringLiteral("ROS_DOMAIN_ID=(unknown)"));
-          }
           if (localhost_system_guard) {
             localhost_system_guard->setText(QStringLiteral("ROS_LOCALHOST_ONLY=(unknown)"));
           }
@@ -242,10 +223,6 @@ void ShowPreferencesDialog(QWidget * parent)
           return;
         }
         const QString out = QString::fromLocal8Bit(p->readAllStandardOutput());
-        if (ros_domain_system_guard) {
-          ros_domain_system_guard->setText(
-            QStringLiteral("ROS_DOMAIN_ID=%1").arg(parse_value(out, QStringLiteral("ROS_DOMAIN_ID"))));
-        }
         if (localhost_system_guard) {
           localhost_system_guard->setText(
             QStringLiteral("ROS_LOCALHOST_ONLY=%1")
@@ -267,7 +244,7 @@ void ShowPreferencesDialog(QWidget * parent)
         }
       });
     const QString cmd = QStringLiteral(
-      "for k in ROS_DOMAIN_ID ROS_LOCALHOST_ONLY RMW_IMPLEMENTATION ROS_NAMESPACE "
+      "for k in ROS_LOCALHOST_ONLY RMW_IMPLEMENTATION ROS_NAMESPACE "
       "RCUTILS_LOGGING_SEVERITY_THRESHOLD; do "
       "v=\"${!k}\"; printf \"%s=%s\\n\" \"$k\" \"$v\"; done");
     p->start(QStringLiteral("/bin/bash"), {QStringLiteral("-ic"), cmd});
@@ -284,7 +261,6 @@ void ShowPreferencesDialog(QWidget * parent)
     refresh_current_values();
     refresh_bashrc_values_async();
   });
-  QObject::connect(ros_domain, &QLineEdit::textChanged, refresh_current_values);
   QObject::connect(localhost, QOverload<int>::of(&QComboBox::currentIndexChanged), refresh_current_values);
   QObject::connect(rmw, QOverload<int>::of(&QComboBox::currentIndexChanged), refresh_current_values);
   QObject::connect(ros_namespace, &QLineEdit::textChanged, refresh_current_values);
@@ -316,13 +292,7 @@ void ShowPreferencesDialog(QWidget * parent)
     }
   });
   QObject::connect(buttons, &QDialogButtonBox::accepted, [&]() {
-    const QString domain = ros_domain->text().trimmed();
-    if (!IsValidRosDomainId(domain.toStdString())) {
-      QMessageBox::warning(&dlg, QStringLiteral("首选项"), QStringLiteral("ROS_DOMAIN_ID 必须是 0~232 的整数或留空。"));
-      return;
-    }
     AppPreferences out;
-    out.ros_domain_id = domain.toStdString();
     out.ros_localhost_only = localhost->currentData().toString().toStdString();
     out.rmw_implementation = rmw->currentData().toString().toStdString();
     out.ros_namespace = ros_namespace->text().trimmed().toStdString();
@@ -345,7 +315,6 @@ void ShowPreferencesDialog(QWidget * parent)
     dlg.accept();
   });
 
-  ros_domain_system->setText(QStringLiteral("ROS_DOMAIN_ID=加载中..."));
   localhost_system->setText(QStringLiteral("ROS_LOCALHOST_ONLY=加载中..."));
   rmw_system->setText(QStringLiteral("RMW_IMPLEMENTATION=加载中..."));
   ros_namespace_system->setText(QStringLiteral("ROS_NAMESPACE=加载中..."));

@@ -17,7 +17,8 @@ def generate_launch_description():
     pkg = get_package_share_directory("gazebo_robot_had2503_demo")
 
     gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(pkg, "launch", "gazebo.launch.py")),
+        PythonLaunchDescriptionSource(
+		os.path.join(pkg, "launch", "gazebo.launch.py")),
         launch_arguments={
             "spawn_z": LaunchConfiguration("spawn_z"),
         }.items(),

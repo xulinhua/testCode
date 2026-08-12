@@ -1,0 +1,23 @@
+[core]
+reloadable = true
+order = 0
+
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "Hs Robot Spot Room Sim"
+description = "Spot in Isaac Simple Room: cmd_vel locomotion + front RGB-D/pointcloud for obstacle mapping"
+authors = ["hs"]
+keywords = ["spot", "quadruped", "simple_room", "ros2", "depth", "mapping"]
+readme = "docs/README.md"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"isaacsim.gui.components" = {}
+# core.api / ros2.bridge / policy.examples 在 Load / Play 时按需启用
+
+[[python.module]]
+name = "hs.robot.spot_room_sim"
+
+[settings]
+exts."hs.robot.spot_room_sim".timeout = 5
