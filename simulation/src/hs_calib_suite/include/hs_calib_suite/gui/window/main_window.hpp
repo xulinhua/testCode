@@ -9,6 +9,8 @@
 #include "hs_calib_suite/gui/log/log_level.hpp"
 #include "hs_calib_suite/gui/theme/app_style.hpp"
 #include "hs_calib_suite/gui/session/session_controller.hpp"
+#include "hs_calib_suite/gui/projects/project_catalog.hpp"
+#include "hs_calib_suite/gui/projects/project_workspace.hpp"
 
 class QAction;
 class QActionGroup;
@@ -34,6 +36,8 @@ class RosImageBridge;
 class TfPoseBridge;
 class LauncherConfigPanel;
 class ImageViewWidget;
+class ResidualBarWidget;
+class CoverageMapWidget;
 
 /// \brief 标定管理主窗口（单目内参 / 直角三面 / 手眼）
 class MainWindow : public QMainWindow {
@@ -50,7 +54,8 @@ private:
     Home = 0,
     Setup = 1,
     Workbench = 2,
-    Review = 3
+    Review = 3,
+    DetectLab = 4,  ///< 局部角点 / ArUco / 圆点检测调试台
   };
 
   // —— 窗口壳：菜单 / 工具栏 / 主题 / 导航 ——
@@ -68,15 +73,27 @@ private:
   void set_online_mode(bool online);
   void append_log(LogLevel level, const QString &line);
   void select_calib_tile(QFrame *tile);
+  void refresh_project_list();
+  void on_project_selection_changed();
+  void on_new_project();
+  void on_import_project_images();
+  bool ensure_project_workspace_open(QString *error_out = nullptr);
+  void apply_selected_project_to_setup();
+  void update_home_selection_label();
+  QString selected_project_display_name() const;
 
   // —— 设置页 / 源 / 手眼 ——
   void refresh_setup_readiness();
   void refresh_setup_source_ui();
+  void update_workbench_mode_actions();
+  void set_workbench_path_text(const QString &text);
   void refresh_handeye_ui();
   void refresh_topic_list();
   void on_source_mode_changed(int index);
   void on_topic_changed(const QString &topic);
+  void on_camera_info_topic_changed(const QString &topic);
   void on_ros_frame();
+  void sync_detect_intrinsics_from_sources();
 
   // —— 工作台：预览 / 检测 / 采集 / 求解 ——
   void refresh_workbench_view(bool update_preview = true);
@@ -90,6 +107,8 @@ private:
   void update_detect_status_ui();
   void on_browse_image_dir();
   void on_browse_camera_yaml();
+  void on_browse_left_camera_yaml();
+  void on_browse_right_camera_yaml();
   void on_browse_pose_csv();
   void on_start_session();
   void on_detect_and_preview();
@@ -107,21 +126,27 @@ private:
   void refresh_home_calibrator_grid();
   void on_home_category_changed(int category);
 
+  // —— 检测调试台 ——
+  void apply_lab_params_to_session();
+  void refresh_detect_lab_view(bool prefer_preview = true);
+  void refresh_lab_mode_ui();
+  bool is_detect_lab_full_mode() const;
+  void on_lab_browse_images();
+  void on_lab_detect(bool fast);
+  void sync_lab_target_defaults();
+
   // —— 页面工厂 / 小组件 ——
   QWidget *build_home_page();
   QWidget *build_setup_page();
   QWidget *build_workbench_page();
   QWidget *build_review_page();
+  QWidget *build_detect_lab_page();
 
   QWidget *make_panel(const QString &title, QWidget *body);
   QFrame *make_metric_card(const QString &name, const QString &value);
   QFrame *make_compact_metric_card(const QString &name, const QString &value);
   QFrame *make_calib_tile(
-      const QString &title,
-      const QString &subtitle,
-      const QString &id,
-      bool implemented,
-      const QString &prerequisite = QString());
+      const QString &title, const QString &id, bool implemented);
 
   QStackedWidget *stack_ = nullptr;
   QTextEdit *log_ = nullptr;
@@ -129,10 +154,15 @@ private:
   QFrame *selected_tile_ = nullptr;
   QLabel *home_selection_ = nullptr;
   QString selected_calibrator_id_;
-  int home_category_ = 0;  // 0内参 1手眼 2外参 3多传感器
+  QString selected_project_id_ = QStringLiteral("default_robot");
+  ProjectCatalog project_catalog_;
+  ProjectWorkspace project_workspace_;
+  QListWidget *project_list_ = nullptr;
+  int home_category_ = 0;  // 0内参 1手眼 2外参 3多传感器 4检测调试
   QWidget *home_tile_host_ = nullptr;
   QGridLayout *home_tile_grid_ = nullptr;
   QButtonGroup *home_category_group_ = nullptr;
+  QPushButton *btn_home_next_ = nullptr;
   LauncherConfigPanel *launcher_panel_ = nullptr;
   std::unique_ptr<SessionController> session_;
   std::unique_ptr<RosImageBridge> ros_bridge_;
@@ -147,6 +177,7 @@ private:
   QWidget *topic_row_ = nullptr;
   QWidget *handeye_block_ = nullptr;
   QComboBox *combo_image_topic_ = nullptr;
+  QComboBox *combo_camera_info_topic_ = nullptr;
   QComboBox *combo_pose_source_ = nullptr;
   QComboBox *combo_handeye_method_ = nullptr;
   QPushButton *btn_refresh_topics_ = nullptr;
@@ -161,7 +192,7 @@ private:
   QLineEdit *edit_base_frame_ = nullptr;
   QLineEdit *edit_gripper_frame_ = nullptr;
   QLineEdit *edit_config_path_ = nullptr;
-  QListWidget *setup_check_list_ = nullptr;
+  QLabel *setup_ready_label_ = nullptr;
   QPushButton *btn_start_session_ = nullptr;
 
   // ===== Workbench =====
@@ -173,6 +204,7 @@ private:
   QListWidget *obs_list_ = nullptr;
   QLabel *metric_frames_ = nullptr;
   QLabel *metric_detect_ = nullptr;
+  QLabel *metric_reproj_ = nullptr;
   QLabel *metric_coverage_ = nullptr;
   QLabel *workbench_path_label_ = nullptr;
   QPushButton *btn_prev_ = nullptr;
@@ -197,6 +229,31 @@ private:
   QLabel *review_rmse_ = nullptr;
   QLabel *review_views_ = nullptr;
   QLabel *review_size_ = nullptr;
+  QListWidget *review_obs_list_ = nullptr;
+  ResidualBarWidget *review_residual_bars_ = nullptr;
+  CoverageMapWidget *review_coverage_map_ = nullptr;
+  QLabel *review_diag_label_ = nullptr;
+  void on_review_obs_selected();
+  void on_review_bar_clicked(int view_index);
+
+  // ===== Detect Lab =====
+  ImageViewWidget *lab_preview_ = nullptr;
+  QLabel *lab_title_label_ = nullptr;
+  QLabel *lab_subtitle_label_ = nullptr;
+  QComboBox *combo_lab_target_ = nullptr;
+  QComboBox *combo_lab_dictionary_ = nullptr;
+  QSpinBox *spin_lab_squares_x_ = nullptr;
+  QSpinBox *spin_lab_squares_y_ = nullptr;
+  QDoubleSpinBox *spin_lab_square_len_ = nullptr;
+  QDoubleSpinBox *spin_lab_marker_len_ = nullptr;
+  QLineEdit *edit_lab_image_dir_ = nullptr;
+  QLabel *lab_path_label_ = nullptr;
+  QLabel *lab_stats_ = nullptr;
+  QPushButton *btn_lab_prev_ = nullptr;
+  QPushButton *btn_lab_next_ = nullptr;
+  QPushButton *btn_lab_detect_ = nullptr;
+  QPushButton *btn_lab_detect_fast_ = nullptr;
+  bool lab_pending_log_ = false;
 
   QAction *act_home_ = nullptr;
   QAction *act_setup_ = nullptr;

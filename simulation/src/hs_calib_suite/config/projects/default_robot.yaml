@@ -1,0 +1,17 @@
+# hs_calib_suite project — Default Robot
+id: default_robot
+display_name: Default Robot
+description: |
+  通用机械臂 + 相机场景。建议流程：单目内参 → 眼在手上。
+notes: |
+  TF：base / tool0 / camera_link / camera_optical_frame
+parent_frame: camera_link
+child_frame: camera_optical_frame
+base_frame: base
+gripper_frame: tool0
+image_frame: camera_optical_frame
+camera_link_frame: camera_link
+recommended_calibrators:
+  - cam_intrinsics
+  - eye_in_hand
+  - trihedral_oneshot

@@ -30,7 +30,11 @@ std::vector<Correspondence> ArucoGridDetector::detect(
 
   std::vector<std::vector<cv::Point2f>> marker_corners;
   std::vector<int> marker_ids;
-  cv::aruco::detectMarkers(mat, target_.dictionary_ptr(), marker_corners, marker_ids);
+  auto params = cv::aruco::DetectorParameters::create();
+  params->cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
+  params->minMarkerPerimeterRate = 0.01;
+  params->maxErroneousBitsInBorderRate = 0.4;
+  cv::aruco::detectMarkers(mat, target_.dictionary_ptr(), marker_corners, marker_ids, params);
   if (markers) {
     markers->corners = marker_corners;
     markers->ids = marker_ids;

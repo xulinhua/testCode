@@ -17,6 +17,8 @@ class BoardSpec:
     squares_y: int
     square_length_m: float
     marker_length_m: float = 0.018
+    dictionary: str = "DICT_4X4_250"
+    marker_id: int = 0  # single ArUco id, or first id for grid/ChArUco
 
     @property
     def is_trihedral(self) -> bool:
@@ -28,6 +30,17 @@ class BoardSpec:
         if self.board_type.startswith("trihedral_"):
             return self.board_type[len("trihedral_") :]
         return self.board_type
+
+    @property
+    def needs_dictionary(self) -> bool:
+        t = self.board_type
+        return t in (
+            "charuco",
+            "aruco",
+            "aruco_grid",
+            "trihedral_charuco",
+            "trihedral_aruco",
+        )
 
     @property
     def physical_size_xy(self) -> Tuple[float, float]:
@@ -45,6 +58,12 @@ class BoardSpec:
             w = self.squares_x * self.square_length_m
             h = (self.squares_y * 0.5 + 0.5) * self.square_length_m
             return (w + self.square_length_m, h + self.square_length_m)
+        if self.board_type == "aruco":
+            # 单码：边长 = marker_length；四周留白边
+            L = max(float(self.marker_length_m), 0.01)
+            margin = max(L * 0.35, 0.01)
+            side = L + 2.0 * margin
+            return (side, side)
         nx = self.squares_x + 1
         ny = self.squares_y + 1
         if self.board_type in ("circles_symmetric", "aruco_grid"):
@@ -101,26 +120,16 @@ def _save_gray_png(path: str, img: np.ndarray) -> str:
     return _save_rgb_png(path, img)
 
 
-def _make_aruco_4x4(block: int, marker_id: int) -> np.ndarray:
-    """OpenCV DICT_4X4_250 marker as a square grayscale patch (row 0 = top)."""
-    from .aruco_dict_4x4_250 import marker_bits_4x4
+def _make_aruco_patch(block: int, marker_id: int, dictionary: str = "DICT_4X4_250") -> np.ndarray:
+    """OpenCV dictionary marker as square grayscale patch (row 0 = top)."""
+    from .aruco_markers import make_marker_patch
 
-    bits = marker_bits_4x4(int(marker_id))
-    n = 4
-    grid = n + 2
-    block = max(grid, int(block))
-    canvas = np.zeros((block, block), dtype=np.uint8)
-    for gy in range(grid):
-        for gx in range(grid):
-            y0 = gy * block // grid
-            y1 = (gy + 1) * block // grid
-            x0 = gx * block // grid
-            x1 = (gx + 1) * block // grid
-            if gy == 0 or gy == grid - 1 or gx == 0 or gx == grid - 1:
-                continue  # black border
-            if bits[gy - 1][gx - 1]:
-                canvas[y0:y1, x0:x1] = 255
-    return canvas
+    return make_marker_patch(dictionary, marker_id, block)
+
+
+def _make_aruco_4x4(block: int, marker_id: int) -> np.ndarray:
+    """Backward-compatible wrapper (DICT_4X4_250)."""
+    return _make_aruco_patch(block, marker_id, "DICT_4X4_250")
 
 
 def generate_trihedral_face_texture(
@@ -146,6 +155,7 @@ def generate_trihedral_face_texture(
     img = np.ones((side, side), dtype=np.uint8) * 255
     mid = int(marker_id0)
     marker_frac = min(0.95, max(0.4, mk / max(s, 1e-6)))
+    dictionary = getattr(spec, "dictionary", "DICT_4X4_250") or "DICT_4X4_250"
 
     if pattern in ("chess", "charuco"):
         origin_black = pattern == "charuco"
@@ -162,7 +172,7 @@ def generate_trihedral_face_texture(
                 img[y0 : y0 + px, x0 : x0 + px] = cell
                 if pattern == "charuco" and not black:
                     msz = max(16, int(round(px * marker_frac)))
-                    m = _make_aruco_4x4(msz, mid)
+                    m = _make_aruco_patch(msz, mid, dictionary)
                     yo = y0 + (px - msz) // 2
                     xo = x0 + (px - msz) // 2
                     img[yo : yo + msz, xo : xo + msz] = m
@@ -174,7 +184,7 @@ def generate_trihedral_face_texture(
                 y0 = margin_px + r * px
                 x0 = margin_px + c_draw * px
                 msz = max(16, int(round(px * 0.90)))
-                m = _make_aruco_4x4(msz, mid)
+                m = _make_aruco_patch(msz, mid, dictionary)
                 yo = y0 + (px - msz) // 2
                 xo = x0 + (px - msz) // 2
                 img[yo : yo + msz, xo : xo + msz] = m
@@ -201,7 +211,8 @@ def generate_board_texture(spec: BoardSpec, out_path: str, px_per_square: int = 
     if t == "charuco":
         cols, rows = sx, sy  # OpenCV CharucoBoard cell count; (0,0) black
         img = np.zeros((rows * px, cols * px), dtype=np.uint8)
-        marker_id = 0
+        marker_id = int(getattr(spec, "marker_id", 0) or 0)
+        dictionary = getattr(spec, "dictionary", "DICT_4X4_250") or "DICT_4X4_250"
         for r in range(rows):
             for c in range(cols):
                 y0, y1 = r * px, (r + 1) * px
@@ -210,7 +221,7 @@ def generate_board_texture(spec: BoardSpec, out_path: str, px_per_square: int = 
                     img[y0:y1, x0:x1] = 0
                 else:
                     img[y0:y1, x0:x1] = 255
-                    m = _make_aruco_4x4(px, marker_id)
+                    m = _make_aruco_patch(px, marker_id, dictionary)
                     img[y0:y1, x0:x1] = m
                     marker_id += 1
         return _save_gray_png(out_path, img)
@@ -248,11 +259,25 @@ def generate_board_texture(spec: BoardSpec, out_path: str, px_per_square: int = 
                 img[mask] = 0
         return _save_gray_png(out_path, img)
 
+    if t == "aruco":
+        from .aruco_markers import clamp_marker_id
+
+        L_px = max(64, int(px * 4))
+        margin = max(16, L_px // 3)
+        side = L_px + 2 * margin
+        img = np.ones((side, side), dtype=np.uint8) * 255
+        dictionary = getattr(spec, "dictionary", "DICT_4X4_250") or "DICT_4X4_250"
+        mid = clamp_marker_id(dictionary, int(getattr(spec, "marker_id", sx) or 0))
+        marker = _make_aruco_patch(L_px, mid, dictionary)
+        img[margin : margin + L_px, margin : margin + L_px] = marker
+        return _save_gray_png(out_path, img)
+
     if t == "aruco_grid":
         margin = px // 2
         img = np.ones((sy * px + 2 * margin, sx * px + 2 * margin), dtype=np.uint8) * 255
         pad = max(2, px // 10)
-        mid = 0
+        dictionary = getattr(spec, "dictionary", "DICT_4X4_250") or "DICT_4X4_250"
+        mid = int(getattr(spec, "marker_id", 0) or 0)
         for r in range(sy):
             for c in range(sx):
                 y0 = margin + r * px + pad
@@ -260,7 +285,7 @@ def generate_board_texture(spec: BoardSpec, out_path: str, px_per_square: int = 
                 size = px - 2 * pad
                 if size < 8:
                     continue
-                marker = _make_aruco_4x4(size, mid)
+                marker = _make_aruco_patch(size, mid, dictionary)
                 img[y0 : y0 + size, x0 : x0 + size] = marker
                 mid += 1
         return _save_gray_png(out_path, img)

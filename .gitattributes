@@ -4,5 +4,6 @@ simulation/src/nova_robot_graspnet/hs.robot.nova_robot_graspnet/data/box/model/*
 simulation/src/isaac_box_grasp/**/data/**/*.usd filter=lfs diff=lfs merge=lfs -text
 simulation/src/data_collect_isaac/**/data/**/*.usd filter=lfs diff=lfs merge=lfs -text
 simulation/src/isaac_table_scene/**/data/**/*.usd filter=lfs diff=lfs merge=lfs -text
+simulation/src/spot_factory_sim/**/data/**/*.usd filter=lfs diff=lfs merge=lfs -text
 simulation/src/nova_robot_graspnet/hs.robot.nova_robot_graspnet/data/box/cassette/mesh/*.obj filter=lfs diff=lfs merge=lfs -text
 simulation/src/nova_robot_graspnet/hs.robot.nova_robot_graspnet/data/box/cassette/mesh/*.png filter=lfs diff=lfs merge=lfs -text

@@ -49,9 +49,6 @@ inline QLabel *make_label(const QString &text, const QString &object_name, QWidg
   } else if (object_name == QStringLiteral("CalibTileTitle")) {
     f.setPointSize(15);
     f.setWeight(QFont::Bold);
-  } else if (object_name == QStringLiteral("CalibTileSub")) {
-    f.setPointSize(12);
-    f.setWeight(QFont::Normal);
   } else if (object_name == QStringLiteral("MetricValue")) {
     f.setFamily(QStringLiteral("Noto Sans Mono"));
     f.setStyleHint(QFont::Monospace);

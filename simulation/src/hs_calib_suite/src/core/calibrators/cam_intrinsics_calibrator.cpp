@@ -5,7 +5,18 @@
 
 #include <opencv2/calib3d.hpp>
 
+#if defined(__has_include)
+#  if __has_include(<opencv2/ccalib/omnidir.hpp>)
+#    include <opencv2/ccalib/omnidir.hpp>
+#    define HS_CALIB_HAS_OMNIDIR 1
+#  endif
+#endif
+#ifndef HS_CALIB_HAS_OMNIDIR
+#  define HS_CALIB_HAS_OMNIDIR 0
+#endif
+
 #include "hs_calib_suite/core/registry/registry.hpp"
+#include "hs_calib_suite/core/util/camera_models.hpp"
 
 namespace hs_calib {
 namespace core {
@@ -47,6 +58,17 @@ std::string to_str(double v) {
   return oss.str();
 }
 
+double d_at(const cv::Mat &D, int i) {
+  if (D.empty() || i < 0) {
+    return 0.0;
+  }
+  const int n = D.rows * D.cols;
+  if (i >= n) {
+    return 0.0;
+  }
+  return D.at<double>(i);
+}
+
 }  // namespace
 
 /// \brief 返回标定器元信息（ID、显示名、支持靶标）
@@ -60,7 +82,7 @@ CalibratorInfo CamIntrinsicsCalibrator::calibrator_info() const {
   return info;
 }
 
-/// \brief 多帧观测 → OpenCV calibrateCamera / fisheye 标定内参
+/// \brief 多帧观测 → Brown / Kannala–Brandt / CMei 内参标定
 CalibrationResult CamIntrinsicsCalibrator::calibrate(
     const ObservationBatch &observations,
     const std::map<std::string, std::string> &config) const {
@@ -133,10 +155,11 @@ CalibrationResult CamIntrinsicsCalibrator::calibrate(
 
   cv::Mat K = cv::Mat::eye(3, 3, CV_64F);
   cv::Mat D = cv::Mat::zeros(8, 1, CV_64F);
+  double xi = 0.0;
   std::vector<cv::Mat> rvecs;
   std::vector<cv::Mat> tvecs;
 
-  // —— 解析标定标志位 ——
+  // —— 解析标定标志位（主要用于 Brown） ——
   auto flag_on = [&](const char *key) {
     const auto it = config.find(key);
     return it != config.end() && (it->second == "1" || it->second == "true");
@@ -158,7 +181,6 @@ CalibrationResult CamIntrinsicsCalibrator::calibrate(
     flags |= cv::CALIB_FIX_K2;
   }
   if (flag_on("fix_k3") || config.find("fix_k3") == config.end()) {
-    // default FIX_K3 when unset (legacy behavior)
     flags |= cv::CALIB_FIX_K3;
   }
   if (flag_on("rational_model")) {
@@ -171,31 +193,58 @@ CalibrationResult CamIntrinsicsCalibrator::calibrate(
     flags |= cv::CALIB_USE_INTRINSIC_GUESS;
   }
 
-  const std::string model =
-      config.count("model") ? config.at("model") : std::string("pinhole");
+  const std::string model_raw =
+      config.count("model") ? config.at("model") : std::string("brown_conrady");
+  const CameraModelId model_id = parse_camera_model(model_raw);
+  const std::string model = camera_model_to_string(model_id);
   double rms = 0.0;
-  // —— 执行 pinhole 或 fisheye 标定 ——
-  if (model == "fisheye") {
-    cv::Mat Kf = cv::Mat::eye(3, 3, CV_64F);
-    cv::Mat Df = cv::Mat::zeros(4, 1, CV_64F);
-    rms = cv::fisheye::calibrate(
-        obj_pts, img_pts, cv::Size(image_width, image_height), Kf, Df, rvecs, tvecs,
-        cv::fisheye::CALIB_RECOMPUTE_EXTRINSIC | cv::fisheye::CALIB_CHECK_COND |
-            cv::fisheye::CALIB_FIX_SKEW);
-    K = Kf;
-    D = cv::Mat::zeros(8, 1, CV_64F);
-    for (int i = 0; i < 4; ++i) {
-      D.at<double>(i, 0) = Df.at<double>(i, 0);
+
+  try {
+    if (model_id == CameraModelId::KannalaBrandt) {
+      cv::Mat Kf = cv::Mat::eye(3, 3, CV_64F);
+      cv::Mat Df = cv::Mat::zeros(4, 1, CV_64F);
+      rms = cv::fisheye::calibrate(
+          obj_pts, img_pts, cv::Size(image_width, image_height), Kf, Df, rvecs, tvecs,
+          cv::fisheye::CALIB_RECOMPUTE_EXTRINSIC | cv::fisheye::CALIB_CHECK_COND |
+              cv::fisheye::CALIB_FIX_SKEW);
+      K = Kf;
+      D = Df.clone();
+      result.message = "fisheye::calibrate (Kannala-Brandt) ok";
+    } else if (model_id == CameraModelId::CMei) {
+#if HS_CALIB_HAS_OMNIDIR
+      cv::Mat Ko = cv::Mat::eye(3, 3, CV_64F);
+      cv::Mat Do = cv::Mat::zeros(4, 1, CV_64F);
+      cv::Mat xi_m = cv::Mat::zeros(1, 1, CV_64F);
+      int omni_flags = 0;
+      if (flag_on("use_intrinsic_guess")) {
+        omni_flags |= cv::omnidir::CALIB_USE_GUESS;
+      }
+      rms = cv::omnidir::calibrate(
+          obj_pts, img_pts, cv::Size(image_width, image_height), Ko, xi_m, Do, rvecs, tvecs,
+          omni_flags,
+          cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 200, 1e-8));
+      K = Ko;
+      D = Do.clone();
+      xi = xi_m.at<double>(0, 0);
+      result.message = "omnidir::calibrate (CMei) ok";
+#else
+      result.success = false;
+      result.message = "本机构建未包含 OpenCV omnidir（ccalib），无法标定 CMei";
+      return result;
+#endif
+    } else {
+      rms = cv::calibrateCamera(
+          obj_pts, img_pts, cv::Size(image_width, image_height), K, D, rvecs, tvecs, flags);
+      result.message = "calibrateCamera (Brown-Conrady) ok";
     }
-  } else {
-    rms = cv::calibrateCamera(
-        obj_pts, img_pts, cv::Size(image_width, image_height), K, D, rvecs, tvecs,
-        flags);
+  } catch (const cv::Exception &ex) {
+    result.success = false;
+    result.message = std::string("标定失败: ") + ex.what();
+    return result;
   }
 
   result.success = true;
   result.score = static_cast<float>(1.0 / (1.0 + rms));
-  result.message = "calibrateCamera ok";
   result.metrics["reprojection_rmse"] = rms;
   result.metrics["num_views"] = static_cast<double>(obj_pts.size());
 
@@ -204,15 +253,39 @@ CalibrationResult CamIntrinsicsCalibrator::calibrate(
   result.intrinsics_meta["fy"] = to_str(K.at<double>(1, 1));
   result.intrinsics_meta["cx"] = to_str(K.at<double>(0, 2));
   result.intrinsics_meta["cy"] = to_str(K.at<double>(1, 2));
-  result.intrinsics_meta["k1"] = to_str(D.at<double>(0, 0));
-  result.intrinsics_meta["k2"] = to_str(D.at<double>(1, 0));
-  result.intrinsics_meta["p1"] = to_str(D.at<double>(2, 0));
-  result.intrinsics_meta["p2"] = to_str(D.at<double>(3, 0));
-  result.intrinsics_meta["k3"] = to_str(D.rows > 4 ? D.at<double>(4, 0) : 0.0);
+  result.intrinsics_meta["xi"] = to_str(xi);
+  result.intrinsics_meta["model"] = model;
   result.intrinsics_meta["image_width"] = std::to_string(image_width);
   result.intrinsics_meta["image_height"] = std::to_string(image_height);
   result.intrinsics_meta["rms"] = to_str(rms);
-  result.intrinsics_meta["model"] = model;
+
+  if (model_id == CameraModelId::KannalaBrandt) {
+    // fisheye: k1..k4
+    result.intrinsics_meta["k1"] = to_str(d_at(D, 0));
+    result.intrinsics_meta["k2"] = to_str(d_at(D, 1));
+    result.intrinsics_meta["k3"] = to_str(d_at(D, 2));
+    result.intrinsics_meta["k4"] = to_str(d_at(D, 3));
+    result.intrinsics_meta["p1"] = "0";
+    result.intrinsics_meta["p2"] = "0";
+    result.intrinsics_meta["dist_n"] = "4";
+  } else if (model_id == CameraModelId::CMei) {
+    // omnidir: k1,k2,p1,p2
+    result.intrinsics_meta["k1"] = to_str(d_at(D, 0));
+    result.intrinsics_meta["k2"] = to_str(d_at(D, 1));
+    result.intrinsics_meta["p1"] = to_str(d_at(D, 2));
+    result.intrinsics_meta["p2"] = to_str(d_at(D, 3));
+    result.intrinsics_meta["k3"] = "0";
+    result.intrinsics_meta["k4"] = "0";
+    result.intrinsics_meta["dist_n"] = "4";
+  } else {
+    result.intrinsics_meta["k1"] = to_str(d_at(D, 0));
+    result.intrinsics_meta["k2"] = to_str(d_at(D, 1));
+    result.intrinsics_meta["p1"] = to_str(d_at(D, 2));
+    result.intrinsics_meta["p2"] = to_str(d_at(D, 3));
+    result.intrinsics_meta["k3"] = to_str(d_at(D, 4));
+    result.intrinsics_meta["k4"] = "0";
+    result.intrinsics_meta["dist_n"] = "5";
+  }
   return result;
 }
 

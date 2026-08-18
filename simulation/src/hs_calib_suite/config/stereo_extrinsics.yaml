@@ -1,0 +1,19 @@
+# hs_calib_suite — stereo_extrinsics（双目相对外参 + 立体校正）
+#
+# 前置：已有 camera_left.yaml / camera_right.yaml（可用 stereo_intrinsics 导出）
+# 流程：stereo_side=left 采 ≥3 → 切 right 再采（尽量同姿态成对）→ Solve
+# 导出：stereo_extrinsics.yaml（含 R/T 与 R1/R2/P1/P2/Q）
+
+squares_x: 9
+squares_y: 6
+square_length: 0.025
+marker_length: 0.018
+target: chessboard
+dictionary: DICT_4X4_50
+model: brown_conrady
+min_views: 6
+stereo_side: left
+parent_frame: left
+child_frame: right
+left_camera_yaml: ""
+right_camera_yaml: ""

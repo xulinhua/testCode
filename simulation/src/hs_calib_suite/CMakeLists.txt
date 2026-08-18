@@ -45,6 +45,7 @@ add_library(hs_calib_core SHARED
   src/core/types/types.cpp
   # util/（与解码无关的通用图像工具）
   src/core/util/cv_image_ops.cpp
+  src/core/util/camera_models.cpp
   # targets/
   src/core/targets/chessboard_target.cpp
   src/core/targets/charuco_target.cpp
@@ -56,11 +57,14 @@ add_library(hs_calib_core SHARED
   src/core/detectors/chessboard_detector.cpp
   src/core/detectors/charuco_detector.cpp
   src/core/detectors/aruco_grid_detector.cpp
+  src/core/detectors/aruco_marker_detector.cpp
   src/core/detectors/circle_grid_detector.cpp
   src/core/detectors/trihedral_chess_detector.cpp
   src/core/detectors/trihedral_charuco_detector.cpp
   # calibrators/
   src/core/calibrators/cam_intrinsics_calibrator.cpp
+  src/core/calibrators/stereo_intrinsics_calibrator.cpp
+  src/core/calibrators/stereo_extrinsics_calibrator.cpp
   src/core/calibrators/trihedral_oneshot_calibrator.cpp
   src/core/calibrators/eye_in_hand_calibrator.cpp
   src/core/calibrators/eye_to_hand_calibrator.cpp
@@ -68,6 +72,7 @@ add_library(hs_calib_core SHARED
   src/core/io/board_pose.cpp
   src/core/io/board_config_yaml.cpp
   src/core/io/export_camera_yaml.cpp
+  src/core/review/review_diagnostics.cpp
 )
 target_include_directories(hs_calib_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -75,6 +80,12 @@ target_include_directories(hs_calib_core PUBLIC
   ${OpenCV_INCLUDE_DIRS}
 )
 target_link_libraries(hs_calib_core PUBLIC Eigen3::Eigen ${OpenCV_LIBS})
+# omnidir (CMei) lives in opencv_ccalib; may be missing from OpenCV_LIBS depending on find_package
+find_library(OPENCV_CCALIB_LIB NAMES opencv_ccalib opencv_ccalib.so.4.5d opencv_ccalib.so.4.5
+  PATHS ${OpenCV_LIB_DIRS} /usr/lib/x86_64-linux-gnu /usr/local/lib)
+if(OPENCV_CCALIB_LIB)
+  target_link_libraries(hs_calib_core PUBLIC ${OPENCV_CCALIB_LIB})
+endif()
 ament_target_dependencies(hs_calib_core PUBLIC ament_index_cpp)
 target_compile_features(hs_calib_core PUBLIC cxx_std_17)
 
@@ -135,23 +146,30 @@ add_executable(hs_calib_gui
   src/gui/window/main_window.cpp
   src/gui/window/main_window_pages.cpp
   src/gui/window/main_window_workbench.cpp
+  src/gui/window/main_window_detect_lab.cpp
   src/gui/theme/app_style.cpp
   src/gui/log/app_logger.cpp
   src/gui/widgets/image_view_widget.cpp
+  src/gui/widgets/review_charts_widget.cpp
   src/gui/panels/launcher_config_panel.cpp
   src/gui/session/session_controller.cpp
   src/gui/bridges/ros_image_bridge.cpp
   src/gui/bridges/tf_pose_bridge.cpp
   src/gui/data/pose_csv_store.cpp
+  src/gui/projects/project_catalog.cpp
+  src/gui/projects/project_workspace.cpp
   include/hs_calib_suite/gui/window/main_window.hpp
   include/hs_calib_suite/gui/theme/app_style.hpp
   include/hs_calib_suite/gui/log/app_logger.hpp
   include/hs_calib_suite/gui/widgets/image_view_widget.hpp
+  include/hs_calib_suite/gui/widgets/review_charts_widget.hpp
   include/hs_calib_suite/gui/panels/launcher_config_panel.hpp
   include/hs_calib_suite/gui/session/session_controller.hpp
   include/hs_calib_suite/gui/bridges/ros_image_bridge.hpp
   include/hs_calib_suite/gui/bridges/tf_pose_bridge.hpp
   include/hs_calib_suite/gui/data/pose_csv_store.hpp
+  include/hs_calib_suite/gui/projects/project_catalog.hpp
+  include/hs_calib_suite/gui/projects/project_workspace.hpp
 )
 set_target_properties(hs_calib_gui PROPERTIES
   AUTOMOC ON

@@ -6,6 +6,8 @@
 
 #include <opencv2/calib3d.hpp>
 
+#include "hs_calib_suite/core/util/camera_models.hpp"
+
 namespace hs_calib {
 namespace core {
 
@@ -91,17 +93,31 @@ bool camera_intrinsics_from_result(const CalibrationResult &result, CameraIntrin
   if (out == nullptr || !result.success) {
     return false;
   }
+  const CameraModelId mid = parse_camera_model(meta(result, "model", "brown_conrady"));
+  out->model = camera_model_to_string(mid);
+  out->xi = meta_d(result, "xi", 0.0);
   out->K = cv::Mat::eye(3, 3, CV_64F);
-  out->D = cv::Mat::zeros(5, 1, CV_64F);
   out->K.at<double>(0, 0) = meta_d(result, "fx");
   out->K.at<double>(1, 1) = meta_d(result, "fy");
   out->K.at<double>(0, 2) = meta_d(result, "cx");
   out->K.at<double>(1, 2) = meta_d(result, "cy");
-  out->D.at<double>(0, 0) = meta_d(result, "k1");
-  out->D.at<double>(1, 0) = meta_d(result, "k2");
-  out->D.at<double>(2, 0) = meta_d(result, "p1");
-  out->D.at<double>(3, 0) = meta_d(result, "p2");
-  out->D.at<double>(4, 0) = meta_d(result, "k3");
+  const int dist_n = static_cast<int>(
+      meta_d(result, "dist_n", mid == CameraModelId::BrownConrady ? 5.0 : 4.0));
+  out->D = cv::Mat::zeros(std::max(4, dist_n), 1, CV_64F);
+  if (mid == CameraModelId::KannalaBrandt) {
+    out->D.at<double>(0, 0) = meta_d(result, "k1");
+    out->D.at<double>(1, 0) = meta_d(result, "k2");
+    out->D.at<double>(2, 0) = meta_d(result, "k3");
+    out->D.at<double>(3, 0) = meta_d(result, "k4");
+  } else {
+    out->D.at<double>(0, 0) = meta_d(result, "k1");
+    out->D.at<double>(1, 0) = meta_d(result, "k2");
+    out->D.at<double>(2, 0) = meta_d(result, "p1");
+    out->D.at<double>(3, 0) = meta_d(result, "p2");
+    if (out->D.rows > 4) {
+      out->D.at<double>(4, 0) = meta_d(result, "k3");
+    }
+  }
   out->image_width = static_cast<int>(meta_d(result, "image_width"));
   out->image_height = static_cast<int>(meta_d(result, "image_height"));
   out->valid = out->K.at<double>(0, 0) > 0.0;
@@ -121,9 +137,10 @@ bool load_camera_yaml(const std::string &path, CameraIntrinsics *out) {
     return false;
   }
 
-  // —— 逐行解析 image_width/height 与 K/D data ——
   int width = 0;
   int height = 0;
+  double xi = 0.0;
+  std::string model = "brown_conrady";
   std::vector<double> Kdata;
   std::vector<double> Ddata;
   std::string line;
@@ -136,8 +153,11 @@ bool load_camera_yaml(const std::string &path, CameraIntrinsics *out) {
       width = std::stoi(trim(line.substr(12)));
     } else if (line.rfind("image_height:", 0) == 0) {
       height = std::stoi(trim(line.substr(13)));
+    } else if (line.rfind("camera_model:", 0) == 0) {
+      model = trim(line.substr(13));
+    } else if (line.rfind("xi:", 0) == 0) {
+      xi = std::stod(trim(line.substr(3)));
     } else if (line.find("data:") != std::string::npos && Kdata.empty()) {
-      // first data: camera_matrix
       if (parse_bracket_list(line, &Kdata) && Kdata.size() == 9) {
         continue;
       }
@@ -151,12 +171,16 @@ bool load_camera_yaml(const std::string &path, CameraIntrinsics *out) {
     out->message = "camera_matrix data missing";
     return false;
   }
+  const CameraModelId mid = parse_camera_model(model);
+  out->model = camera_model_to_string(mid);
+  out->xi = xi;
   out->K = cv::Mat(3, 3, CV_64F);
   for (int i = 0; i < 9; ++i) {
     out->K.at<double>(i / 3, i % 3) = Kdata[static_cast<size_t>(i)];
   }
-  out->D = cv::Mat::zeros(5, 1, CV_64F);
-  for (size_t i = 0; i < Ddata.size() && i < 5; ++i) {
+  const int n_d = mid == CameraModelId::BrownConrady ? 5 : 4;
+  out->D = cv::Mat::zeros(n_d, 1, CV_64F);
+  for (size_t i = 0; i < Ddata.size() && static_cast<int>(i) < n_d; ++i) {
     out->D.at<double>(static_cast<int>(i), 0) = Ddata[i];
   }
   out->image_width = width;
@@ -175,23 +199,24 @@ bool export_camera_yaml(const CalibrationResult &result, const std::string &path
   if (!ofs) {
     return false;
   }
+  const CameraModelId mid = parse_camera_model(meta(result, "model", "brown_conrady"));
+  const std::string model = camera_model_to_string(mid);
   const std::string w = meta(result, "image_width", "0");
   const std::string h = meta(result, "image_height", "0");
   const std::string fx = meta(result, "fx");
   const std::string fy = meta(result, "fy");
   const std::string cx = meta(result, "cx");
   const std::string cy = meta(result, "cy");
-  const std::string k1 = meta(result, "k1");
-  const std::string k2 = meta(result, "k2");
-  const std::string p1 = meta(result, "p1");
-  const std::string p2 = meta(result, "p2");
-  const std::string k3 = meta(result, "k3");
   const std::string rms = meta(result, "rms");
+  const std::string xi = meta(result, "xi", "0");
 
   ofs << "# hs_calib_suite camera intrinsics\n";
   ofs << "image_width: " << w << "\n";
   ofs << "image_height: " << h << "\n";
-  ofs << "camera_model: plumb_bob\n";
+  ofs << "camera_model: " << model << "\n";
+  if (mid == CameraModelId::CMei) {
+    ofs << "xi: " << xi << "\n";
+  }
   ofs << "reprojection_rmse: " << rms << "\n";
   ofs << "camera_matrix:\n";
   ofs << "  rows: 3\n";
@@ -199,11 +224,59 @@ bool export_camera_yaml(const CalibrationResult &result, const std::string &path
   ofs << "  data: [" << fx << ", 0.0, " << cx << ", 0.0, " << fy << ", " << cy
       << ", 0.0, 0.0, 1.0]\n";
   ofs << "distortion_coefficients:\n";
-  ofs << "  rows: 1\n";
-  ofs << "  cols: 5\n";
-  ofs << "  data: [" << k1 << ", " << k2 << ", " << p1 << ", " << p2 << ", " << k3
-      << "]\n";
+  if (mid == CameraModelId::KannalaBrandt) {
+    ofs << "  rows: 1\n";
+    ofs << "  cols: 4\n";
+    ofs << "  data: [" << meta(result, "k1") << ", " << meta(result, "k2") << ", "
+        << meta(result, "k3") << ", " << meta(result, "k4") << "]\n";
+  } else if (mid == CameraModelId::CMei) {
+    ofs << "  rows: 1\n";
+    ofs << "  cols: 4\n";
+    ofs << "  data: [" << meta(result, "k1") << ", " << meta(result, "k2") << ", "
+        << meta(result, "p1") << ", " << meta(result, "p2") << "]\n";
+  } else {
+    ofs << "  rows: 1\n";
+    ofs << "  cols: 5\n";
+    ofs << "  data: [" << meta(result, "k1") << ", " << meta(result, "k2") << ", "
+        << meta(result, "p1") << ", " << meta(result, "p2") << ", " << meta(result, "k3")
+        << "]\n";
+  }
   return static_cast<bool>(ofs);
+}
+
+/// \brief 从带前缀的 meta 导出单侧内参 YAML
+bool export_camera_yaml_prefixed(
+    const CalibrationResult &result, const std::string &prefix, const std::string &path) {
+  if (!result.success) {
+    return false;
+  }
+  CalibrationResult side = result;
+  side.intrinsics_meta.clear();
+  const std::string pfx = prefix;
+  for (const auto &kv : result.intrinsics_meta) {
+    if (kv.first.rfind(pfx, 0) == 0) {
+      side.intrinsics_meta[kv.first.substr(pfx.size())] = kv.second;
+    }
+  }
+  // 需要 fx 等关键字段
+  if (!side.intrinsics_meta.count("fx") || !side.intrinsics_meta.count("fy")) {
+    return false;
+  }
+  if (!side.intrinsics_meta.count("model") && result.intrinsics_meta.count("model")) {
+    side.intrinsics_meta["model"] = result.intrinsics_meta.at("model");
+  }
+  if (!side.intrinsics_meta.count("rms") && side.intrinsics_meta.count("reprojection_rmse")) {
+    side.intrinsics_meta["rms"] = side.intrinsics_meta.at("reprojection_rmse");
+  }
+  // CamIntrinsics stores rms in meta; calibrator uses "rms"
+  if (!side.intrinsics_meta.count("rms") && result.metrics.count(pfx + "reprojection_rmse")) {
+    std::ostringstream oss;
+    oss.precision(12);
+    oss << result.metrics.at(pfx + "reprojection_rmse");
+    side.intrinsics_meta["rms"] = oss.str();
+  }
+  side.success = true;
+  return export_camera_yaml(side, path);
 }
 
 /// \brief 格式化内参标定结果为可读文本
@@ -213,6 +286,58 @@ std::string format_intrinsics_text(const CalibrationResult &result) {
     oss << "标定失败：" << result.message << "\n";
     return oss.str();
   }
+  const bool stereo =
+      result.intrinsics_meta.count("stereo_mode") &&
+      result.intrinsics_meta.at("stereo_mode") == "separate";
+  if (stereo) {
+    oss << "stereo_intrinsics (left/right separate)\n";
+    oss << "message: " << result.message << "\n";
+    if (result.metrics.count("num_views_left")) {
+      oss << "num_views_left: " << static_cast<int>(result.metrics.at("num_views_left"))
+          << "\n";
+    }
+    if (result.metrics.count("num_views_right")) {
+      oss << "num_views_right: " << static_cast<int>(result.metrics.at("num_views_right"))
+          << "\n";
+    }
+    auto dump_side = [&](const char *side, const char *pfx) {
+      if (!result.intrinsics_meta.count(std::string(pfx) + "fx")) {
+        oss << "\n[" << side << "] — 无结果\n";
+        return;
+      }
+      const CameraModelId mid = parse_camera_model(
+          result.intrinsics_meta.count(std::string(pfx) + "model")
+              ? result.intrinsics_meta.at(std::string(pfx) + "model")
+              : meta(result, "model", "brown_conrady"));
+      oss << "\n[" << side << "] " << camera_model_to_string(mid) << "\n";
+      auto g = [&](const char *k) {
+        const std::string key = std::string(pfx) + k;
+        return result.intrinsics_meta.count(key) ? result.intrinsics_meta.at(key)
+                                                 : std::string("0");
+      };
+      oss << "  rms: " << g("rms") << "\n";
+      oss << "  size: " << g("image_width") << " x " << g("image_height") << "\n";
+      oss << "  K: fx=" << g("fx") << " fy=" << g("fy") << " cx=" << g("cx")
+          << " cy=" << g("cy") << "\n";
+      if (mid == CameraModelId::KannalaBrandt) {
+        oss << "  D[k1..k4]: " << g("k1") << ", " << g("k2") << ", " << g("k3") << ", "
+            << g("k4") << "\n";
+      } else if (mid == CameraModelId::CMei) {
+        oss << "  xi: " << g("xi") << "\n";
+        oss << "  D[k1,k2,p1,p2]: " << g("k1") << ", " << g("k2") << ", " << g("p1")
+            << ", " << g("p2") << "\n";
+      } else {
+        oss << "  D[k1,k2,p1,p2,k3]: " << g("k1") << ", " << g("k2") << ", " << g("p1")
+            << ", " << g("p2") << ", " << g("k3") << "\n";
+      }
+    };
+    dump_side("left", "left_");
+    dump_side("right", "right_");
+    return oss.str();
+  }
+  const CameraModelId mid = parse_camera_model(meta(result, "model", "brown_conrady"));
+  oss << "camera_model: " << camera_model_to_string(mid) << " ("
+      << camera_model_display_name(mid) << ")\n";
   oss << "reprojection_rmse: " << meta(result, "rms") << "\n";
   if (result.metrics.count("num_views")) {
     oss << "num_views: " << static_cast<int>(result.metrics.at("num_views")) << "\n";
@@ -223,10 +348,23 @@ std::string format_intrinsics_text(const CalibrationResult &result) {
   oss << "  [" << meta(result, "fx") << ", 0, " << meta(result, "cx") << "]\n";
   oss << "  [0, " << meta(result, "fy") << ", " << meta(result, "cy") << "]\n";
   oss << "  [0, 0, 1]\n";
-  oss << "distortion [k1,k2,p1,p2,k3]:\n";
-  oss << "  [" << meta(result, "k1") << ", " << meta(result, "k2") << ", "
-      << meta(result, "p1") << ", " << meta(result, "p2") << ", " << meta(result, "k3")
-      << "]\n";
+  if (mid == CameraModelId::CMei) {
+    oss << "xi: " << meta(result, "xi", "0") << "\n";
+  }
+  if (mid == CameraModelId::KannalaBrandt) {
+    oss << "distortion [k1,k2,k3,k4]:\n";
+    oss << "  [" << meta(result, "k1") << ", " << meta(result, "k2") << ", "
+        << meta(result, "k3") << ", " << meta(result, "k4") << "]\n";
+  } else if (mid == CameraModelId::CMei) {
+    oss << "distortion [k1,k2,p1,p2]:\n";
+    oss << "  [" << meta(result, "k1") << ", " << meta(result, "k2") << ", "
+        << meta(result, "p1") << ", " << meta(result, "p2") << "]\n";
+  } else {
+    oss << "distortion [k1,k2,p1,p2,k3]:\n";
+    oss << "  [" << meta(result, "k1") << ", " << meta(result, "k2") << ", "
+        << meta(result, "p1") << ", " << meta(result, "p2") << ", " << meta(result, "k3")
+        << "]\n";
+  }
   oss << "message: " << result.message << "\n";
   return oss.str();
 }
@@ -259,6 +397,15 @@ bool export_extrinsics_yaml(
   if (result.metrics.count("handeye_rmse")) {
     ofs << "handeye_rmse: " << result.metrics.at("handeye_rmse") << "\n";
   }
+  if (result.metrics.count("stereo_rms")) {
+    ofs << "stereo_rms: " << result.metrics.at("stereo_rms") << "\n";
+  }
+  if (result.metrics.count("baseline_m")) {
+    ofs << "baseline_m: " << result.metrics.at("baseline_m") << "\n";
+  }
+  if (result.metrics.count("num_pairs")) {
+    ofs << "num_pairs: " << static_cast<int>(result.metrics.at("num_pairs")) << "\n";
+  }
   ofs << "transform:\n";
   ofs << "  rows: 4\n";
   ofs << "  cols: 4\n";
@@ -271,6 +418,27 @@ bool export_extrinsics_yaml(
     ofs << T(i / 4, i % 4);
   }
   ofs << "]\n";
+  // 立体校正矩阵（若标定器写入 meta）
+  auto dump_mat = [&](const char *key) {
+    if (!result.intrinsics_meta.count(key)) {
+      return;
+    }
+    ofs << key << ": " << result.intrinsics_meta.at(key) << "\n";
+  };
+  if (result.intrinsics_meta.count("mode") &&
+      result.intrinsics_meta.at("mode") == "stereo_extrinsics") {
+    dump_mat("R");
+    dump_mat("T");
+    dump_mat("R1");
+    dump_mat("R2");
+    dump_mat("P1");
+    dump_mat("P2");
+    dump_mat("Q");
+    if (result.intrinsics_meta.count("image_width")) {
+      ofs << "image_width: " << result.intrinsics_meta.at("image_width") << "\n";
+      ofs << "image_height: " << result.intrinsics_meta.at("image_height") << "\n";
+    }
+  }
   return static_cast<bool>(ofs);
 }
 
@@ -290,6 +458,12 @@ std::string format_extrinsics_text(
   }
   if (result.metrics.count("handeye_rmse")) {
     oss << "handeye_rmse: " << result.metrics.at("handeye_rmse") << "\n";
+  }
+  if (result.metrics.count("stereo_rms")) {
+    oss << "stereo_rms: " << result.metrics.at("stereo_rms") << "\n";
+  }
+  if (result.metrics.count("baseline_m")) {
+    oss << "baseline_m: " << result.metrics.at("baseline_m") << " m\n";
   }
   const auto pit = result.transforms.find(parent_frame);
   if (pit == result.transforms.end() || !pit->second.count(child_frame)) {

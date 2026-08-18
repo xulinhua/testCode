@@ -30,7 +30,7 @@
 | `stereo_intrinsics` | 左右目各自内参 | 双目相机 | P1 |
 | `imu_intrinsics` | IMU 内参（偏置、尺度等） | IMU | P3 |
 
-相机投影模型可选：`pinhole`（针孔）、`fisheye`（鱼眼）。
+相机投影模型可选：`brown_conrady`（Brown-Conrady / pinhole）、`kannala_brandt`（Kannala–Brandt / fisheye）、`cmei`（CMei / omnidir）。兼容旧别名 `pinhole`、`fisheye`。
 
 ### B. 外参
 
@@ -67,8 +67,8 @@
 |  | chessboard | charuco | aruco_* | circles_* | trihedral_* |
 |--|:---:|:---:|:---:|:---:|:---:|
 | `cam_intrinsics` | **已实现** | **已实现** | **已实现** | **已实现** | 用 `trihedral_oneshot` |
-| `stereo_intrinsics` | 支持 | 支持 | 支持 | 支持 | 支持 |
-| `stereo_extrinsics` | 支持 | 支持 | 支持 | 支持 | 支持（可单组左右图） |
+| `stereo_intrinsics` | **已实现** | **已实现** | **已实现** | **已实现** | 用 `trihedral_oneshot` |
+| `stereo_extrinsics` | **已实现** | **已实现** | **已实现** | **已实现** | 可选 |
 | `trihedral_oneshot` | — | — | — | — | **已实现（ChArUco 推荐 / 棋盘可用）** |
 | 手眼标定 | **已实现** | 可用 | **优先** | 可选 | 可选 |
 | `cam_lidar` | 较少使用 | 可用 | **优先** | 较少使用 | 可选 |

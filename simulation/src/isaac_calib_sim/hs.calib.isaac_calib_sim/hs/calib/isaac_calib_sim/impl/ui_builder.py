@@ -10,6 +10,7 @@ from isaacsim.gui.components.ui_utils import btn_builder, get_style
 from ..global_variables import (
     BOARD_TYPE_LABELS,
     DEFAULT_AZIM_RATE_DEG,
+    DEFAULT_ARUCO_DICTIONARY,
     DEFAULT_BOARD_TYPE,
     DEFAULT_DIST_MAX,
     DEFAULT_DIST_MIN,
@@ -22,6 +23,7 @@ from ..global_variables import (
     DEFAULT_IMAGE_WIDTH,
     DEFAULT_LOOKAT_OFFSET_M,
     DEFAULT_LOOKAT_PERIOD_S,
+    DEFAULT_MARKER_ID,
     DEFAULT_MARKER_LENGTH_M,
     DEFAULT_ROLL_AMP_DEG,
     DEFAULT_ROLL_PERIOD_S,
@@ -31,6 +33,7 @@ from ..global_variables import (
     DEFAULT_STREAM_FPS,
 )
 from ..paths import get_extension_paths
+from .aruco_markers import ARUCO_DICTIONARY_NAMES, clamp_marker_id, normalize_dictionary_name
 from .board_factory import BoardSpec
 from .camera_motion import OrbitParams
 from .scene_loader import SceneLoader
@@ -38,7 +41,6 @@ from .session_controller import SessionController, default_orbit_params, orbit_p
 from .topic_config import TOPIC_FIELD_SPECS, TopicConfig, topic_config_from_ui
 from .ui_numeric import (
     add_float_param,
-    add_int_param,
     read_entry_as_float,
     read_entry_as_int,
     write_entry_float,
@@ -53,7 +55,11 @@ class UIBuilder:
         self._buttons = {}
         self._status_label = None
         self._board_combo = None
+        self._dict_combo = None
         self._board_type_ids = [k for k, _ in BOARD_TYPE_LABELS]
+        self._dict_names = list(ARUCO_DICTIONARY_NAMES)
+        self._param_rows = {}  # name -> ui.Widget with .visible
+        self._hint_label = None
         self._motion_enabled_model = None
         self._enable_color_model = None
         self._enable_info_model = None
@@ -88,8 +94,8 @@ class UIBuilder:
         board_frame = CollapsableFrame("Calibration Board", collapsed=False)
         with board_frame:
             with ui.VStack(style=ui_style, spacing=5, height=0):
-                ui.Label(
-                    "Pick a board type; change grid size then Apply.",
+                self._hint_label = ui.Label(
+                    "Pick a board type; relevant params appear below. Then Apply.",
                     height=0,
                     word_wrap=True,
                 )
@@ -104,34 +110,79 @@ class UIBuilder:
                         )
                     except Exception:
                         pass
-                self._line_edit["squares_x"] = add_int_param(
-                    "Squares X (inner corners; ChArUco cells=n+1)",
-                    DEFAULT_SQUARES_X,
-                    min_val=2,
-                    max_val=40,
-                )
-                self._line_edit["squares_y"] = add_int_param(
-                    "Squares Y (inner corners; ChArUco cells=n+1)",
-                    DEFAULT_SQUARES_Y,
-                    min_val=2,
-                    max_val=40,
-                )
-                self._line_edit["square_length"] = add_float_param(
-                    "Square / spacing (m)",
-                    DEFAULT_SQUARE_LENGTH_M,
-                    step=0.001,
-                    fmt="%.4f",
-                    min_val=0.005,
-                    max_val=0.2,
-                )
-                self._line_edit["marker_length"] = add_float_param(
-                    "Marker length (m, ChArUco)",
-                    DEFAULT_MARKER_LENGTH_M,
-                    step=0.001,
-                    fmt="%.4f",
-                    min_val=0.005,
-                    max_val=0.2,
-                )
+
+                # Dictionary (ArUco / ChArUco)
+                dict_row = ui.HStack(height=24)
+                self._param_rows["dictionary"] = dict_row
+                with dict_row:
+                    ui.Label("ArUco dictionary", width=ui.Fraction(0.45), height=0)
+                    dict_idx = (
+                        self._dict_names.index(DEFAULT_ARUCO_DICTIONARY)
+                        if DEFAULT_ARUCO_DICTIONARY in self._dict_names
+                        else 0
+                    )
+                    self._dict_combo = ui.ComboBox(dict_idx, *self._dict_names)
+
+                # Marker ID (single) / first ID (grid / ChArUco)
+                mid_row = ui.HStack(height=24)
+                self._param_rows["marker_id"] = mid_row
+                with mid_row:
+                    ui.Label("Marker ID / first ID", width=ui.Fraction(0.45), height=0)
+                    mid_model = ui.SimpleIntModel(int(DEFAULT_MARKER_ID))
+                    with ui.Frame(width=ui.Fraction(0.55), height=0):
+                        ui.IntDrag(model=mid_model, min=0, max=1023, step=1, height=0)
+                    self._line_edit["marker_id"] = (mid_model, mid_row, 1.0, 0.0, 1023.0)
+
+                sx_row = ui.HStack(height=24)
+                self._param_rows["squares_x"] = sx_row
+                with sx_row:
+                    ui.Label("Squares / cols X", width=ui.Fraction(0.45), height=0)
+                    sx_model = ui.SimpleIntModel(int(DEFAULT_SQUARES_X))
+                    with ui.Frame(width=ui.Fraction(0.55), height=0):
+                        ui.IntDrag(model=sx_model, min=1, max=40, step=1, height=0)
+                    self._line_edit["squares_x"] = (sx_model, sx_row, 1.0, 1.0, 40.0)
+
+                sy_row = ui.HStack(height=24)
+                self._param_rows["squares_y"] = sy_row
+                with sy_row:
+                    ui.Label("Squares / rows Y", width=ui.Fraction(0.45), height=0)
+                    sy_model = ui.SimpleIntModel(int(DEFAULT_SQUARES_Y))
+                    with ui.Frame(width=ui.Fraction(0.55), height=0):
+                        ui.IntDrag(model=sy_model, min=1, max=40, step=1, height=0)
+                    self._line_edit["squares_y"] = (sy_model, sy_row, 1.0, 1.0, 40.0)
+
+                sq_row = ui.HStack(height=24)
+                self._param_rows["square_length"] = sq_row
+                with sq_row:
+                    ui.Label("Square / spacing (m)", width=ui.Fraction(0.45), height=0)
+                    sq_model = ui.SimpleFloatModel(float(DEFAULT_SQUARE_LENGTH_M))
+                    with ui.Frame(width=ui.Fraction(0.55), height=0):
+                        ui.FloatDrag(
+                            model=sq_model,
+                            min=0.005,
+                            max=0.5,
+                            step=0.001,
+                            format="%.4f",
+                            height=0,
+                        )
+                    self._line_edit["square_length"] = (sq_model, sq_row, 0.001, 0.005, 0.5)
+
+                mk_row = ui.HStack(height=24)
+                self._param_rows["marker_length"] = mk_row
+                with mk_row:
+                    ui.Label("Marker length (m)", width=ui.Fraction(0.45), height=0)
+                    mk_model = ui.SimpleFloatModel(float(DEFAULT_MARKER_LENGTH_M))
+                    with ui.Frame(width=ui.Fraction(0.55), height=0):
+                        ui.FloatDrag(
+                            model=mk_model,
+                            min=0.005,
+                            max=0.5,
+                            step=0.001,
+                            format="%.4f",
+                            height=0,
+                        )
+                    self._line_edit["marker_length"] = (mk_model, mk_row, 0.001, 0.005, 0.5)
+
                 self._buttons["apply_board"] = btn_builder(
                     label="apply_board",
                     type="button",
@@ -139,6 +190,7 @@ class UIBuilder:
                     tooltip="Rebuild board with current params (no unload)",
                     on_clicked_fn=self._on_apply_board,
                 )
+                self._on_board_type_changed()
 
         cam_frame = CollapsableFrame("Camera", collapsed=False)
         with cam_frame:
@@ -276,9 +328,97 @@ class UIBuilder:
             idx = 0
         return self._board_type_ids[idx]
 
+    def _set_row_visible(self, key: str, visible: bool) -> None:
+        row = self._param_rows.get(key)
+        if row is None:
+            return
+        try:
+            row.visible = bool(visible)
+        except Exception:
+            pass
+
+    def _selected_dictionary(self) -> str:
+        if self._dict_combo is None:
+            return DEFAULT_ARUCO_DICTIONARY
+        try:
+            idx = self._dict_combo.model.get_item_value_model().as_int
+        except Exception:
+            idx = 0
+        if idx < 0 or idx >= len(self._dict_names):
+            idx = 0
+        return normalize_dictionary_name(self._dict_names[idx])
+
+    def _refresh_board_param_visibility(self, board_type: str) -> None:
+        """Show only params that matter for the selected board."""
+        needs_dict = board_type in (
+            "charuco",
+            "aruco",
+            "aruco_grid",
+            "trihedral_charuco",
+            "trihedral_aruco",
+        )
+        needs_marker_id = board_type in (
+            "aruco",
+            "aruco_grid",
+            "charuco",
+            "trihedral_charuco",
+            "trihedral_aruco",
+        )
+        needs_grid = board_type != "aruco"
+        needs_square = board_type != "aruco"
+        needs_marker_len = board_type in (
+            "aruco",
+            "charuco",
+            "trihedral_charuco",
+        )
+        self._set_row_visible("dictionary", needs_dict)
+        self._set_row_visible("marker_id", needs_marker_id)
+        self._set_row_visible("squares_x", needs_grid)
+        self._set_row_visible("squares_y", needs_grid)
+        self._set_row_visible("square_length", needs_square)
+        self._set_row_visible("marker_length", needs_marker_len)
+
+        hints = {
+            "chessboard": "Chessboard: Squares X/Y = inner corners; Square = cell size.",
+            "circles_symmetric": "Circles: cols×rows + spacing (center distance).",
+            "circles_asymmetric": "Asymmetric circles: cols×rows + spacing.",
+            "charuco": "ChArUco: cells X/Y, square, marker length, dictionary, first marker ID.",
+            "aruco": "Single ArUco: dictionary + Marker ID + Marker length (m).",
+            "aruco_grid": "ArUco grid: cols×rows, spacing≈pitch, dictionary, first marker ID.",
+            "trihedral_chess": "Trihedral chess: inner corners n×n (uses max X/Y), square size.",
+            "trihedral_charuco": "Trihedral ChArUco: n×n, square, marker length, dictionary.",
+            "trihedral_aruco": "Trihedral ArUco: n×n markers, spacing, dictionary, first ID.",
+        }
+        if self._hint_label is not None:
+            try:
+                self._hint_label.text = hints.get(
+                    board_type, "Pick a board type; then Apply."
+                )
+            except Exception:
+                pass
+
     def _on_board_type_changed(self) -> None:
         """Auto-narrow camera motion when switching to trihedral boards."""
-        self._apply_orbit_preset_to_ui(self._selected_board_type())
+        board_type = self._selected_board_type()
+        self._apply_orbit_preset_to_ui(board_type)
+        self._refresh_board_param_visibility(board_type)
+        # Sensible defaults when switching to single ArUco
+        if board_type == "aruco":
+            entry = self._line_edit.get("marker_length")
+            if entry is not None:
+                model = entry[0] if isinstance(entry, tuple) else entry
+                try:
+                    if float(model.get_value_as_float()) < 0.03:
+                        model.set_value(0.05)
+                except Exception:
+                    pass
+            mid = self._line_edit.get("marker_id")
+            if mid is not None:
+                model = mid[0] if isinstance(mid, tuple) else mid
+                try:
+                    model.set_value(int(DEFAULT_MARKER_ID))
+                except Exception:
+                    pass
 
     def _apply_orbit_preset_to_ui(self, board_type: str) -> None:
         enabled = True
@@ -299,6 +439,9 @@ class UIBuilder:
 
     def _read_board_spec(self) -> BoardSpec:
         board_type = self._selected_board_type()
+        dictionary = self._selected_dictionary()
+        marker_id = read_entry_as_int(self._line_edit.get("marker_id"), DEFAULT_MARKER_ID)
+        marker_id = clamp_marker_id(dictionary, marker_id)
         sx = read_entry_as_int(self._line_edit.get("squares_x"), DEFAULT_SQUARES_X)
         sy = read_entry_as_int(self._line_edit.get("squares_y"), DEFAULT_SQUARES_Y)
         # Trihedral faces are square plates: force n×n inner corners (match suite).
@@ -316,6 +459,12 @@ class UIBuilder:
                         model.set_value(int(val))
                     except Exception:
                         pass
+        elif board_type == "aruco":
+            sx = max(int(sx), 1)
+            sy = max(int(sy), 1)
+        else:
+            sx = max(int(sx), 2)
+            sy = max(int(sy), 2)
         return BoardSpec(
             board_type=board_type,
             squares_x=sx,
@@ -326,6 +475,8 @@ class UIBuilder:
             marker_length_m=read_entry_as_float(
                 self._line_edit.get("marker_length"), DEFAULT_MARKER_LENGTH_M
             ),
+            dictionary=dictionary,
+            marker_id=marker_id,
         )
 
     def _read_orbit(self) -> OrbitParams:

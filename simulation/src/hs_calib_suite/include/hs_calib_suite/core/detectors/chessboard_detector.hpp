@@ -16,6 +16,8 @@ struct ChessboardDetectOptions {
   bool filter_quads = false;     ///< 过滤四边形
   bool fast_check = true;        ///< 快速预检
   int subpix_win = 11;           ///< cornerSubPix 窗口边长（像素）
+  bool allow_partial = false;    ///< 允许子网格 / SB LARGER（非完整板）
+  bool thorough = true;          ///< 局部模式下更慢更全；完整模式可关
 };
 
 /// \brief 棋盘格角点检测器（OpenCV findChessboardCorners + cornerSubPix）

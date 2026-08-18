@@ -16,7 +16,9 @@ struct CameraIntrinsics {
   int image_width = 0;
   int image_height = 0;
   cv::Mat K;   ///< 3x3 CV_64F
-  cv::Mat D;   ///< 1x5 或 5x1 CV_64F
+  cv::Mat D;   ///< Nx1 或 1xN CV_64F（Brown=5，fisheye/CMei=4）
+  double xi = 0.0;  ///< CMei 参数；其它模型为 0
+  std::string model = "brown_conrady";  ///< brown_conrady | kannala_brandt | cmei
   std::string message;
 };
 
@@ -28,6 +30,10 @@ bool camera_intrinsics_from_result(const CalibrationResult &result, CameraIntrin
 
 /// \brief 导出相机内参 YAML
 bool export_camera_yaml(const CalibrationResult &result, const std::string &path);
+
+/// \brief 从 result.intrinsics_meta 的 prefix 字段导出（如 left_ / right_）
+bool export_camera_yaml_prefixed(
+    const CalibrationResult &result, const std::string &prefix, const std::string &path);
 
 /// \brief 格式化内参结果为文本
 std::string format_intrinsics_text(const CalibrationResult &result);

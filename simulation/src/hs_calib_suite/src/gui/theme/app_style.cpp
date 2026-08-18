@@ -344,12 +344,6 @@ QLabel#CalibTileTitle {
   font-weight: 700;
 }
 
-QLabel#CalibTileSub {
-  color: __FG_MUTED__;
-  font-size: 12px;
-  padding-top: 0px;
-}
-
 QFrame#CalibTile {
   background-color: __BG_TILE__;
   border: 1px solid __BORDER__;
@@ -389,11 +383,6 @@ QFrame#CalibTile[selected="true"] QFrame#CalibTileAccent {
 
 QFrame#CalibTile[planned="true"] QFrame#CalibTileAccent {
   background-color: __FG_DISABLED__;
-}
-
-QLabel#CalibTilePre {
-  color: __FG_MUTED__;
-  font-size: 11px;
 }
 
 QPushButton#CategoryChip {
@@ -625,8 +614,12 @@ QListWidget#ReadyCheckList::item:selected {
 QFrame#ReadyStrip {
   background-color: __BG_PANEL__;
   border: 1px solid __BORDER__;
-  border-radius: 10px;
-  max-height: 168px;
+  border-radius: 8px;
+}
+
+QLabel#ReadyCheckLine {
+  color: __FG_MUTED__;
+  font-size: 12px;
 }
 
 /* Tier4 Launcher configuration groups — dense form sections */

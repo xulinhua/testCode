@@ -29,7 +29,7 @@ from ..global_variables import (
     TABLE_THICKNESS,
     TABLE_TOP_Z,
 )
-from .aruco_dict_4x4_250 import marker_bits_4x4
+from .aruco_markers import clamp_marker_id, marker_bits, normalize_dictionary_name
 from .board_factory import BoardSpec
 from .camera_config import usd_camera_attrs_from_fov
 from .pose_utils import look_at_matrix, set_translate_rotate, set_world_matrix
@@ -262,6 +262,8 @@ class SceneLoader:
             self._board_target = self._create_circles_board(stage, spec, z_top, asymmetric=False)
         elif t == "circles_asymmetric":
             self._board_target = self._create_circles_board(stage, spec, z_top, asymmetric=True)
+        elif t == "aruco":
+            self._board_target = self._create_aruco_single(stage, spec, z_top)
         elif t == "aruco_grid":
             self._board_target = self._create_aruco_grid(stage, spec, z_top)
         elif t == "charuco":
@@ -452,7 +454,8 @@ class SceneLoader:
         marker_frac = min(0.95, max(0.4, spec.marker_length_m / max(s, 1e-6)))
         mk_root = f"{BOARD_PATH}/Markers"
         UsdGeom.Xform.Define(stage, mk_root)
-        mid = 0
+        dictionary = normalize_dictionary_name(getattr(spec, "dictionary", "") or "")
+        mid = clamp_marker_id(dictionary, int(getattr(spec, "marker_id", 0) or 0))
         for r in range(rows):
             for c in range(cols):
                 if (r + c) % 2 == 0:
@@ -468,6 +471,7 @@ class SceneLoader:
                     mid,
                     axis="xy",
                     n_lift=0.00005,
+                    dictionary=dictionary,
                 )
                 mid += 1
         return (cx, cy, z_top)
@@ -519,6 +523,48 @@ class SceneLoader:
                 )
         return (cx, cy, z_top)
 
+    def _create_aruco_single(
+        self, stage, spec: BoardSpec, z_top: float
+    ) -> Tuple[float, float, float]:
+        """Single ArUco marker on a white plate (dictionary + marker_id from spec)."""
+        w, h = spec.physical_size_xy
+        cx, cy = BOARD_CENTER_XY
+        self._add_backing(
+            stage, (cx, cy), (w, h), TABLE_TOP_Z + BOARD_THICKNESS * 0.5, BOARD_THICKNESS
+        )
+        plane_z = z_top + 0.0003
+        self._add_flat_quad(
+            stage,
+            f"{BOARD_PATH}/WhiteFace",
+            (cx - w * 0.5, cy - h * 0.5, plane_z),
+            "xy",
+            0.0,
+            0.0,
+            w,
+            h,
+            (1.0, 1.0, 1.0),
+        )
+        L = max(float(spec.marker_length_m), 0.01)
+        dictionary = normalize_dictionary_name(getattr(spec, "dictionary", "") or "")
+        mid = clamp_marker_id(dictionary, int(getattr(spec, "marker_id", 0) or 0))
+        root = f"{BOARD_PATH}/ArucoSingle"
+        UsdGeom.Xform.Define(stage, root)
+        self._add_aruco_marker_geom(
+            stage,
+            f"{root}/m0",
+            (cx, cy, plane_z),
+            L,
+            mid,
+            axis="xy",
+            n_lift=0.00025,
+            dictionary=dictionary,
+        )
+        print(
+            f"SceneLoader: single ArUco id={mid} size={L:.4f}m "
+            f"{dictionary} plate=({w:.3f},{h:.3f})"
+        )
+        return (cx, cy, z_top)
+
     def _create_aruco_grid(self, stage, spec: BoardSpec, z_top: float) -> Tuple[float, float, float]:
         w, h = spec.physical_size_xy
         cx, cy = BOARD_CENTER_XY
@@ -540,7 +586,8 @@ class SceneLoader:
         s = spec.square_length_m
         sx, sy = spec.squares_x, spec.squares_y
         margin = s * 0.5
-        mid = 0
+        dictionary = normalize_dictionary_name(getattr(spec, "dictionary", "") or "")
+        mid = clamp_marker_id(dictionary, int(getattr(spec, "marker_id", 0) or 0))
         for r in range(sy):
             for c in range(sx):
                 x = cx - w * 0.5 + margin + c * s + s * 0.5
@@ -553,6 +600,7 @@ class SceneLoader:
                     mid,
                     axis="xy",
                     n_lift=0.00025,
+                    dictionary=dictionary,
                 )
                 mid += 1
         return (cx, cy, z_top)
@@ -567,8 +615,9 @@ class SceneLoader:
         axis: str = "xy",
         n_lift: float = 0.00025,
         flip_u: bool = False,
+        dictionary: str = "DICT_4X4_250",
     ) -> None:
-        """OpenCV DICT_4X4_250 as 6×6 coplanar cells (border + bits, same n).
+        """ArUco marker as coplanar cells (border + bits, same n).
 
         Stacking a black plate under raised white bits causes parallax: detectMarkers
         boxes drift off the printed marker at oblique views. All cells share n_lift.
@@ -579,8 +628,7 @@ class SceneLoader:
         map wrong and interpolateCornersCharuco / PnP blow up.
         """
         UsdGeom.Xform.Define(stage, root)
-        bits = marker_bits_4x4(int(marker_id))
-        n_bits = 4
+        bits, n_bits = marker_bits(dictionary, int(marker_id))
         grid = n_bits + 2
         cell = size / float(grid)
         half = size * 0.5
@@ -596,9 +644,6 @@ class SceneLoader:
                 if r == 0 or r == grid - 1 or c == 0 or c == grid - 1:
                     white = False
                 else:
-                    # Side faces are viewed from inside the corner → image-space
-                    # mirror. Reverse bit columns in-place (keep cell centers) so
-                    # OpenCV DICT_4X4 decodes without suite image-flip.
                     if flip_u:
                         white = bool(bits[r - 1][n_bits - 1 - (c - 1)])
                     else:
@@ -650,8 +695,10 @@ class SceneLoader:
         thick = 0.004
         mid_base = {"xy": 0, "xz": 0, "yz": 0}  # identical boards; suite splits by geometry
         local_origin = (0.0, 0.0, 0.0)
+        dictionary = normalize_dictionary_name(getattr(spec, "dictionary", "") or "")
+        first_id = clamp_marker_id(dictionary, int(getattr(spec, "marker_id", 0) or 0))
 
-        for axis, mid0 in mid_base.items():
+        for axis, _mid0 in mid_base.items():
             self._paint_trihedral_face(
                 stage,
                 f"{faces_root}/Face{axis.upper()}",
@@ -664,8 +711,9 @@ class SceneLoader:
                 pattern=pattern,
                 margin=margin,
                 face_side=face_side,
-                marker_id0=mid0,
+                marker_id0=first_id,
                 marker_length_m=spec.marker_length_m,
+                dictionary=dictionary,
             )
 
         # Tip the corner so the concave center opens upward (+Z).
@@ -704,10 +752,10 @@ class SceneLoader:
         opening_h = face_side * 0.35
         target = (float(apex[0]), float(apex[1]), float(apex[2]) + opening_h)
         extra = ""
-        if pattern == "charuco":
+        if pattern in ("charuco", "aruco"):
             extra = (
-                f" charuco_cells={cols}x{rows} DICT_4X4_250 "
-                "identical IDs on all faces; suite splits by geometry"
+                f" {pattern} cells={cols}x{rows} {dictionary} "
+                f"first_id={first_id}; identical IDs on all faces"
             )
         print(
             f"SceneLoader: trihedral square faces n_inner={n_inner} "
@@ -731,6 +779,7 @@ class SceneLoader:
         face_side: float,
         marker_id0: int,
         marker_length_m: float,
+        dictionary: str = "DICT_4X4_250",
     ) -> None:
         """Square face plate with solid B/W cells + ArUco geometry (detect-correct)."""
         UsdGeom.Xform.Define(stage, root)
@@ -826,6 +875,7 @@ class SceneLoader:
                             axis=axis,
                             n_lift=n_pat + 0.00003,
                             flip_u=flip_u,
+                            dictionary=dictionary,
                         )
                         mid += 1
         else:
@@ -850,6 +900,7 @@ class SceneLoader:
                         axis=axis,
                         n_lift=n_pat + 0.00003,
                         flip_u=flip_u,
+                        dictionary=dictionary,
                     )
                     mid += 1
 

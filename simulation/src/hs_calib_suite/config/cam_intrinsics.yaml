@@ -7,7 +7,8 @@
 #   circles_symmetric   — squares_x/y = 圆点列/行；square_length = 圆心距 (m)
 #   circles_asymmetric  — 同上，非对称圆点阵列
 #
-# model: pinhole | fisheye
+#model: brown_conrady | kannala_brandt | cmei
+#        （兼容别名 pinhole / fisheye / plumb_bob / equidistant / mei / omnidir）
 # dictionary: 仅 charuco / aruco_grid 使用
 
 squares_x: 9
@@ -16,4 +17,4 @@ square_length: 0.025
 marker_length: 0.018
 target: chessboard
 dictionary: DICT_4X4_50
-model: pinhole
+model: brown_conrady

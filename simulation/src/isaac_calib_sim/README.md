@@ -8,8 +8,9 @@
 ## 功能概要
 
 - 单相机 + 可切换标定板（实体几何建模，不依赖贴图）
-- 平面：棋盘 / 圆点 / ChArUco / ArUco
+- 平面：棋盘 / 圆点 / ChArUco / **单码 ArUco**（可选字典与 ID） / ArUco 网格
 - 直角三面：**正方形面板** + 四周约 1 格**白边**；开口朝上（chess / ChArUco / ArUco）
+- 切换板型时 UI 只显示相关参数（字典 / Marker ID / 网格 / 边长）
 - 视觉场景：无 PhysX / 碰撞；相机轨道由 app 更新驱动
 - ROS2 约 **30 FPS** 发布图像与 CameraInfo（默认分辨率不变）
 - 话题命名空间默认 `calib_sim`，可在面板修改

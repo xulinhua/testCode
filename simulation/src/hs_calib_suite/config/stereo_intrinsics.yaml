@@ -1,0 +1,17 @@
+# hs_calib_suite — stereo_intrinsics（左右目各自内参）
+#
+# 流程：在 GUI 中选择 stereo_side=left 采集若干姿态 → 切换 right 再采集 → Solve
+# 导出：camera_left.yaml + camera_right.yaml（同目录另有兼容名 camera_intrinsics.yaml）
+#
+# 板参与单目 cam_intrinsics 相同；畸变模型：
+#   brown_conrady | kannala_brandt | cmei
+
+squares_x: 9
+squares_y: 6
+square_length: 0.025
+marker_length: 0.018
+target: chessboard
+dictionary: DICT_4X4_50
+model: brown_conrady
+min_views: 6
+stereo_side: left

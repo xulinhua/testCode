@@ -43,6 +43,8 @@ DEFAULT_SQUARES_X = 8
 DEFAULT_SQUARES_Y = 8
 DEFAULT_SQUARE_LENGTH_M = 0.025
 DEFAULT_MARKER_LENGTH_M = 0.018
+DEFAULT_ARUCO_DICTIONARY = "DICT_4X4_250"
+DEFAULT_MARKER_ID = 0
 
 DEFAULT_DIST_MIN = 0.2
 DEFAULT_DIST_MAX = 1.1
@@ -78,6 +80,7 @@ BOARD_TYPE_LABELS = (
     ("circles_symmetric", "Circles grid (symmetric)"),
     ("circles_asymmetric", "Circles grid (asymmetric)"),
     ("charuco", "ChArUco"),
+    ("aruco", "ArUco single marker"),
     ("aruco_grid", "ArUco / AprilTag grid"),
     ("trihedral_chess", "Trihedral — chessboard (3 faces)"),
     ("trihedral_charuco", "Trihedral — ChArUco (3 faces)"),

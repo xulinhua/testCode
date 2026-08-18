@@ -1,0 +1,17 @@
+# hs_calib_suite project — Arm Cell A
+id: arm_cell_A
+display_name: Arm Cell A
+description: |
+  工位 A：固定外置相机（眼在手外），桌面平面靶 / 三面靶。
+notes: |
+  相机固定在工位支架；手眼请选 eye_to_hand。
+parent_frame: cell_A_camera_link
+child_frame: cell_A_camera_optical
+base_frame: cell_A_base
+gripper_frame: flange
+image_frame: cell_A_camera_optical
+camera_link_frame: cell_A_camera_link
+recommended_calibrators:
+  - cam_intrinsics
+  - eye_to_hand
+  - trihedral_oneshot

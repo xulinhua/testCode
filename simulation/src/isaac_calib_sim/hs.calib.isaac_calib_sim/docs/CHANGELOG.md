@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Board UI: **ArUco dictionary** combo + dedicated **Marker ID / first ID**
+- Params shown/hidden by board type (chess / circles / ChArUco / single / grid / trihedral)
+- Marker geometry generated from selected OpenCV dictionary (4x4…7x7, etc.)
+
 ## 0.1.4
 
 - Trihedral ChArUco: **identical marker IDs on all three faces** (real-world same boards)

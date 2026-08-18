@@ -8,9 +8,11 @@
 
 - 单相机 + 可切换标定板（**实体几何**，不依赖贴图）
 - 板型：
-  - 平面：Chessboard / Circles / ChArUco / ArUco
+  - 平面：Chessboard / Circles / ChArUco / **ArUco single** / ArUco grid
   - **直角三面（3 faces）：** chessboard / **ChArUco（推荐，DICT_4X4_250，面 ID 0/100/200）** / ArUco·Tag
   - 三面为正方形板 + 约 1 格白边；`Squares X/Y` 表示**内角点**（ChArUco 方格 = n+1）
+  - 单码 ArUco：**Dictionary** + **Marker ID** + **Marker length**（独立控件，不再占用 Squares X）
+  - ChArUco / ArUco grid / 三面码板：可选手典与起始 Marker ID；切换板型时只显示相关参数
 - Play 后：距离与仰角振荡、方位角旋转；相机朝向板心（含轻微 look-at 漂移与 roll，增加姿态多样性）
 - 无物理 / 无碰撞；地面为纯视觉网格
 - ROS2：默认约 **30 FPS** 发布 `/calib_sim/camera/image_raw` 与 `camera_info`（分辨率默认 1280×720，可在面板改；灯光保持默认）

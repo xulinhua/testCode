@@ -19,6 +19,7 @@
 
 #include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/detectors/aruco_grid_detector.hpp"
+#include "hs_calib_suite/core/detectors/aruco_marker_detector.hpp"
 #include "hs_calib_suite/core/targets/aruco_grid_target.hpp"
 #include "hs_calib_suite/core/detectors/charuco_detector.hpp"
 #include "hs_calib_suite/core/targets/charuco_target.hpp"
@@ -28,6 +29,8 @@
 #include "hs_calib_suite/core/targets/circle_grid_target.hpp"
 #include "hs_calib_suite/core/util/cv_bridge_local.hpp"
 #include "hs_calib_suite/core/io/export_camera_yaml.hpp"
+#include "hs_calib_suite/core/util/camera_models.hpp"
+#include "hs_calib_suite/core/util/cv_image_ops.hpp"
 #include "hs_calib_suite/core/registry/registry.hpp"
 #include "hs_calib_suite/core/detectors/trihedral_charuco_detector.hpp"
 #include "hs_calib_suite/core/detectors/trihedral_chess_detector.hpp"
@@ -95,6 +98,10 @@ struct DetectJobIn {
   bool viz_conf = true;
   bool viz_aruco = true;
   int viz_marker_radius = 4;
+  cv::Mat camera_matrix;  ///< 3x3 CV_64F，空则 guess_K
+  cv::Mat dist_coeffs;    ///< 畸变，可空
+  std::string camera_model = "brown_conrady";
+  double camera_xi = 0.0;
 };
 
 struct DetectJobOut {
@@ -107,6 +114,7 @@ struct DetectJobOut {
   int width = 0;
   int height = 0;
   DetectFp fp;
+  double aruco_reproj_px = -1.0;  ///< 单码/ArUco 轴位姿平均重投影误差；无效为 -1
 };
 
 /// \brief 由角点包围盒生成视角指纹（面积/中心/倾角）
@@ -140,21 +148,53 @@ double confidence_from_corners_job(
   double score = 0.0;
   const std::string target_type =
       opts.count("target") ? opts.at("target") : "chessboard";
+  const std::string completeness =
+      opts.count("detect_completeness") ? opts.at("detect_completeness") : "";
+  const bool require_full = (completeness == "full" || completeness == "complete");
+  const bool force_partial = (completeness == "partial");
+  const bool aruco_loose =
+      target_type == "aruco" || target_type == "aruco_single";
+  const bool is_charuco =
+      target_type == "charuco" || target_type == "trihedral_charuco";
+  const bool is_aruco_grid = target_type == "aruco_grid";
+  int expect_pts = expect_face;
+  if (is_charuco) {
+    expect_pts = std::max(4, (squares_x - 1) * (squares_y - 1));
+  } else if (is_aruco_grid) {
+    expect_pts = std::max(4, expect_face * 4);
+  }
+  // 未指定时：三面/码类允许局部；棋盘/圆点仍要求整面（兼容标定会话）
   const bool partial_ok =
-      trihedral || target_type == "charuco" || target_type == "aruco_grid";
+      !require_full &&
+      (trihedral || is_charuco || is_aruco_grid || aruco_loose ||
+       (force_partial && target_type == "chessboard"));
   if (partial_ok) {
-    if (corners.size() < 6) {
-      return 0.0;  // OpenCV calibrateCamera / DLT 每帧至少 6 点
+    if (corners.size() < (aruco_loose ? 4u : 6u)) {
+      return 0.0;  // 单码至少 4 角；标定用靶至少 6 点
     }
-    const double fill = std::min(
-        1.0, static_cast<double>(corners.size()) /
-                 static_cast<double>(std::max(6, expect_face)));
-    score = 0.15 + 0.50 * fill;
+    if (aruco_loose) {
+      const int n_markers = static_cast<int>(corners.size()) / 4;
+      score = std::min(0.95, 0.55 + 0.08 * static_cast<double>(n_markers));
+    } else {
+      const double fill = std::min(
+          1.0, static_cast<double>(corners.size()) /
+                   static_cast<double>(std::max(6, expect_pts)));
+      score = 0.15 + 0.50 * fill;
+    }
   } else {
-    if (static_cast<int>(corners.size()) != expect_face) {
-      return 0.0;
+    // 完整模式：点数须达到整面期望（允许极少漏点：≥95%）
+    if (aruco_loose) {
+      if (corners.size() < 4) {
+        return 0.0;
+      }
+      score = 0.55;
+    } else {
+      const int need = std::max(4, static_cast<int>(0.95 * expect_pts + 0.5));
+      if (static_cast<int>(corners.size()) < need) {
+        return 0.0;
+      }
+      score = 0.45;
     }
-    score = 0.35;
   }
   if (fp.area_ratio >= 0.04 && fp.area_ratio <= 0.45) {
     score += 0.25;
@@ -235,7 +275,17 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         cv::Scalar(40, 180, 255),   // XZ 橙
         cv::Scalar(255, 140, 40),   // YZ 蓝
     };
-    const cv::Scalar kArucoDefault(160, 160, 160);
+    // 单码 / 未分面：高对比色循环，便于检测台肉眼核对
+    const cv::Scalar kArucoPalette[] = {
+        cv::Scalar(0, 255, 255),    // 黄
+        cv::Scalar(0, 200, 0),      // 绿
+        cv::Scalar(255, 128, 0),    // 蓝
+        cv::Scalar(0, 128, 255),    // 橙
+        cv::Scalar(255, 0, 255),    // 品红
+        cv::Scalar(255, 255, 0),    // 青
+    };
+    constexpr int kArucoPaletteN =
+        static_cast<int>(sizeof(kArucoPalette) / sizeof(kArucoPalette[0]));
 
     auto draw_aruco_overlay = [&]() {
       if (!in.viz_aruco || aruco.empty() ||
@@ -245,11 +295,15 @@ DetectJobOut run_detect_job(DetectJobIn in) {
       if (aruco.face_ids.size() != aruco.ids.size()) {
         aruco.face_ids.assign(aruco.ids.size(), -1);
       }
+      // OpenCV 标准边框（再叠加 ID / 角点强化）
+      cv::aruco::drawDetectedMarkers(in.bgr, aruco.corners, aruco.ids);
+
       for (size_t i = 0; i < aruco.ids.size(); ++i) {
         const int id = aruco.ids[i];
         const int fi = aruco.face_ids[i];
-        const cv::Scalar &col =
-            (fi >= 0 && fi < 3) ? kFaceColors[fi] : kArucoDefault;
+        const cv::Scalar &col = (fi >= 0 && fi < 3)
+            ? kFaceColors[fi]
+            : kArucoPalette[static_cast<int>(i) % kArucoPaletteN];
         const auto &corners = aruco.corners[i];
         if (corners.size() < 4) {
           continue;
@@ -264,17 +318,147 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         center *= 1.f / static_cast<float>(corners.size());
         const cv::Point *pts = poly.data();
         const int npts = static_cast<int>(poly.size());
-        cv::polylines(in.bgr, &pts, &npts, 1, true, col, 1, cv::LINE_AA);
-        for (const auto &p : corners) {
-          cv::circle(in.bgr, p, 2, col, -1, cv::LINE_AA);
+        cv::polylines(in.bgr, &pts, &npts, 1, true, col, 2, cv::LINE_AA);
+        for (size_t k = 0; k < corners.size(); ++k) {
+          const int r = (k == 0) ? 5 : 3;
+          cv::circle(in.bgr, corners[k], r, col, -1, cv::LINE_AA);
+          // 角点序号（核对方向）
+          cv::putText(
+              in.bgr, std::to_string(static_cast<int>(k)),
+              cv::Point(cvRound(corners[k].x) + 4, cvRound(corners[k].y) - 4),
+              cv::FONT_HERSHEY_SIMPLEX, 0.4, col, 1, cv::LINE_AA);
         }
-        const std::string label = std::to_string(id);
-        const cv::Point org(cvRound(center.x) + 3, cvRound(center.y) - 3);
+        const std::string label = "id=" + std::to_string(id);
+        const cv::Point org(cvRound(center.x) - 18, cvRound(center.y) + 5);
         cv::putText(
-            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 0, 0), 2,
+            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 0, 0), 3,
             cv::LINE_AA);
         cv::putText(
-            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, 0.35, col, 1, cv::LINE_AA);
+            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, 0.55, col, 2, cv::LINE_AA);
+      }
+    };
+
+    auto resolve_K_D = [&](cv::Mat *K_out, cv::Mat *D_out) {
+      if (!in.camera_matrix.empty() && in.camera_matrix.rows == 3 &&
+          in.camera_matrix.cols == 3) {
+        in.camera_matrix.convertTo(*K_out, CV_64F);
+        if (in.dist_coeffs.empty()) {
+          *D_out = cv::Mat::zeros(1, 5, CV_64F);
+        } else {
+          in.dist_coeffs.convertTo(*D_out, CV_64F);
+        }
+        return true;
+      }
+      *K_out = core::guess_K(in.bgr.cols, in.bgr.rows);
+      *D_out = cv::Mat::zeros(1, 5, CV_64F);
+      return false;
+    };
+
+    /// \brief 估计 ArUco 位姿、写重投影误差，并按需画坐标系
+    auto draw_aruco_axes = [&]() {
+      if (aruco.empty() || aruco.corners.size() != aruco.ids.size()) {
+        return;
+      }
+      auto opt_double = [&](const char *key, double def) -> double {
+        const auto it = in.solve_options.find(key);
+        if (it == in.solve_options.end()) {
+          return def;
+        }
+        try {
+          return std::stod(it->second);
+        } catch (...) {
+          return def;
+        }
+      };
+      const double marker_len = opt_double("marker_length", 0.1);
+      if (marker_len <= 1e-6) {
+        return;
+      }
+      cv::Mat K, D;
+      const bool real_K = resolve_K_D(&K, &D);
+      const core::CameraModelId mid = core::parse_camera_model(in.camera_model);
+      const double xi = in.camera_xi;
+      const float h = static_cast<float>(marker_len * 0.5);
+      // TL,TR,BR,BL — OpenCV ArUco / calib_sim_isaac
+      const std::vector<cv::Point3f> obj = {
+          {-h, h, 0.f}, {h, h, 0.f}, {h, -h, 0.f}, {-h, -h, 0.f}};
+      const float axis_len = static_cast<float>(marker_len * 0.5);
+
+      int drawn = 0;
+      double sum_err = 0.0;
+      int n_err = 0;
+      for (size_t i = 0; i < aruco.corners.size(); ++i) {
+        if (aruco.corners[i].size() < 4) {
+          continue;
+        }
+        cv::Mat rvec, tvec;
+        bool ok = false;
+        // Brown 可用 OpenCV ArUco 官方位姿；其它模型走统一 PnP
+        if (mid == core::CameraModelId::BrownConrady) {
+          try {
+            std::vector<cv::Vec3d> rvecs, tvecs;
+            cv::aruco::estimatePoseSingleMarkers(
+                std::vector<std::vector<cv::Point2f>>{aruco.corners[i]}, marker_len, K, D,
+                rvecs, tvecs);
+            if (!rvecs.empty() && !tvecs.empty()) {
+              rvec = cv::Mat(rvecs[0]);
+              tvec = cv::Mat(tvecs[0]);
+              ok = true;
+            }
+          } catch (const cv::Exception &) {
+            ok = false;
+          }
+        }
+        if (!ok) {
+          ok = core::solve_pnp_model(
+              mid, obj, aruco.corners[i], K, D, xi, &rvec, &tvec, true);
+        }
+        if (!ok) {
+          continue;
+        }
+
+        std::vector<cv::Point2f> reproj;
+        if (!core::project_points_model(mid, obj, rvec, tvec, K, D, xi, &reproj)) {
+          continue;
+        }
+        double err = 0.0;
+        if (reproj.size() == 4) {
+          for (int k = 0; k < 4; ++k) {
+            err += cv::norm(reproj[static_cast<size_t>(k)] -
+                            aruco.corners[i][static_cast<size_t>(k)]);
+          }
+          err *= 0.25;
+        }
+        sum_err += err;
+        ++n_err;
+        if (!in.viz_aruco || err > 40.0) {
+          continue;
+        }
+        core::draw_frame_axes_model(in.bgr, mid, K, D, xi, rvec, tvec, axis_len, 2);
+        ++drawn;
+      }
+      const double last_err = n_err > 0 ? (sum_err / static_cast<double>(n_err)) : -1.0;
+      out.aruco_reproj_px = last_err;
+      if (in.viz_conf) {
+        std::string msg;
+        const std::string model_tag = core::camera_model_to_string(mid);
+        if (drawn > 0) {
+          msg = real_K ? ("axes: " + model_tag) : ("axes: guess_K/" + model_tag);
+          if (last_err >= 0.0) {
+            msg += cv::format(" reproj=%.1fpx", last_err);
+          }
+        } else if (n_err > 0 && !in.viz_aruco) {
+          msg = cv::format("reproj=%.1fpx (axes off)", last_err);
+        } else {
+          msg = last_err >= 0.0
+              ? cv::format("axes: skip reproj=%.1fpx (check marker_length/K)", last_err)
+              : "axes: skip (PnP failed)";
+        }
+        cv::putText(
+            in.bgr, msg, cv::Point(12, in.bgr.rows - 12), cv::FONT_HERSHEY_SIMPLEX, 0.45,
+            drawn > 0 ? (real_K ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 165, 255))
+                      : (last_err >= 0.0 ? cv::Scalar(0, 165, 255) : cv::Scalar(0, 80, 255)),
+            1, cv::LINE_AA);
       }
     };
 
@@ -320,16 +504,24 @@ DetectJobOut run_detect_job(DetectJobIn in) {
       } else {
         // trihedral_chess / 默认：仅角点棋盘，掩膜剥面后贴 XY/XZ/YZ
         core::TrihedralChessDetector detector(geom);
-        detected = detector.detect_merged(
-            frame, &faces_found,
-            in.fast ? core::TrihedralChessDetectSpeed::Fast
-                    : core::TrihedralChessDetectSpeed::Thorough);
+        const std::string completeness = opt_str("detect_completeness", "");
+        const bool require_full =
+            completeness == "full" || completeness == "complete";
+        core::TrihedralChessDetectSpeed speed =
+            require_full ? core::TrihedralChessDetectSpeed::Complete
+                         : (in.fast ? core::TrihedralChessDetectSpeed::Fast
+                                    : core::TrihedralChessDetectSpeed::Thorough);
+        detected = detector.detect_merged(frame, &faces_found, speed);
         if (detected.image_points.rows() < 4) {
           out.preview = mat_bgr_to_qimage(in.bgr);
           out.error = (target_type == "trihedral_aruco")
               ? QStringLiteral("三面 ArUco 网格请改用 trihedral_charuco；当前按棋盘角点路径未检出")
-              : QStringLiteral(
-                    "未检测到三面棋盘角点（允许局部网格；确认 squares_x/y=内角点数 与 Isaac 一致）");
+              : (require_full
+                     ? QStringLiteral(
+                           "未检测到完整三面棋盘网格（完整模式不接受局部；确认 squares_x/y）")
+                     : QStringLiteral(
+                           "未检测到三面棋盘角点（允许局部网格；确认 squares_x/y=内角点数 与 "
+                           "Isaac 一致）"));
           return out;
         }
       }
@@ -350,8 +542,8 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         }
       };
       const std::string target_type = opt_str("target", "chessboard");
-      const std::string dictionary = opt_str("dictionary", "DICT_4X4_50");
-      const double marker_len = opt_double("marker_length", 0.018);
+      const std::string dictionary = opt_str("dictionary", "DICT_6X6_1000");
+      const double marker_len = opt_double("marker_length", 0.1);
       double marker_sep = opt_double("marker_separation", -1.0);
       if (marker_sep <= 0.0) {
         marker_sep = (in.square_length_m > marker_len)
@@ -364,6 +556,9 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         core::CharucoTarget target(
             in.squares_x, in.squares_y, in.square_length_m, marker_len, dictionary);
         corrs = core::CharucoDetector(target).detect(frame, &aruco);
+      } else if (target_type == "aruco" || target_type == "aruco_single") {
+        corrs = core::ArucoMarkerDetector(dictionary, marker_len)
+                    .detect(frame, &aruco, in.fast);
       } else if (target_type == "aruco_grid") {
         core::ArucoGridTarget target(
             in.squares_x, in.squares_y, marker_len, marker_sep, dictionary);
@@ -388,10 +583,17 @@ DetectJobOut run_detect_job(DetectJobIn in) {
           }
           return it->second == "1" || it->second == "true";
         };
+        const std::string completeness = opt_str("detect_completeness", "");
+        const bool require_full =
+            completeness == "full" || completeness == "complete";
+        const bool force_partial = completeness == "partial";
         dopts.adaptive_thresh = flag_on("cb_adaptive", true);
         dopts.normalize_image = flag_on("cb_normalize", true);
         dopts.filter_quads = flag_on("cb_filter_quads", false);
-        dopts.fast_check = flag_on("cb_fast_check", true);
+        // 完整模式 / 未指定：默认 fast_check；局部检测台关 fast_check
+        dopts.fast_check = flag_on("cb_fast_check", !force_partial);
+        dopts.allow_partial = force_partial && !require_full;
+        dopts.thorough = !in.fast;
         {
           const auto it = in.solve_options.find("subpix_win");
           if (it != in.solve_options.end()) {
@@ -410,6 +612,18 @@ DetectJobOut run_detect_job(DetectJobIn in) {
               in.bgr, cv::format("aruco=%d (no board)", static_cast<int>(aruco.ids.size())),
               cv::Point(12, 22), cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 255, 255), 1,
               cv::LINE_AA);
+        }
+        if (target_type == "aruco" || target_type == "aruco_single") {
+          cv::putText(
+              in.bgr,
+              "ArUco: 0 markers (check dictionary / lighting)",
+              cv::Point(12, 22), cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 80, 255), 2,
+              cv::LINE_AA);
+          out.preview = mat_bgr_to_qimage(in.bgr);
+          out.error = QStringLiteral(
+              "未检测到 ArUco 码。calib_sim_isaac 默认字典为 DICT_6X6_1000；"
+              "请确认 dictionary / 光照，或到检测台调试");
+          return out;
         }
         out.preview = mat_bgr_to_qimage(in.bgr);
         out.error = aruco.empty()
@@ -443,10 +657,24 @@ DetectJobOut run_detect_job(DetectJobIn in) {
 
     // —— 叠加可视化 ——
     draw_aruco_overlay();
+    {
+      const std::string target_type =
+          in.solve_options.count("target") ? in.solve_options.at("target")
+                                           : "chessboard";
+      if (target_type == "aruco" || target_type == "aruco_single" ||
+          target_type == "aruco_grid" || target_type == "charuco" ||
+          in.trihedral) {
+        draw_aruco_axes();
+      }
+    }
     if (in.viz_corners) {
       const std::string target_type =
           in.solve_options.count("target") ? in.solve_options.at("target")
                                            : "chessboard";
+      const bool aruco_only =
+          target_type == "aruco" || target_type == "aruco_single";
+      // 单码路径已由 draw_aruco_overlay 画边框/ID/角序，避免再叠实心点
+      if (!aruco_only) {
       const bool draw_as_markers =
           in.trihedral || in.viz_marker_radius > 4 || target_type != "chessboard" ||
           static_cast<int>(corners.size()) != in.squares_x * in.squares_y;
@@ -489,6 +717,7 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         cv::drawChessboardCorners(
             in.bgr, cv::Size(in.squares_x, in.squares_y), corners, true);
       }
+      }
     }
     if (in.viz_hull && corners.size() >= 3 && !(in.trihedral && in.viz_corners)) {
       std::vector<cv::Point2f> hull_f;
@@ -506,15 +735,24 @@ DetectJobOut run_detect_job(DetectJobIn in) {
       }
     }
     if (in.viz_conf) {
-      const std::string label = in.trihedral
-          ? cv::format(
-                "conf=%.2f faces=%d aruco=%d", out.confidence, faces_found,
-                static_cast<int>(aruco.ids.size()))
-          : (aruco.empty()
-                 ? cv::format("conf=%.2f", out.confidence)
-                 : cv::format(
-                       "conf=%.2f aruco=%d", out.confidence,
-                       static_cast<int>(aruco.ids.size())));
+      std::string label;
+      if (in.trihedral) {
+        label = cv::format(
+            "conf=%.2f faces=%d aruco=%d", out.confidence, faces_found,
+            static_cast<int>(aruco.ids.size()));
+      } else if (!aruco.empty()) {
+        if (!aruco.dictionary_name.empty()) {
+          label = cv::format(
+              "conf=%.2f aruco=%d %s", out.confidence,
+              static_cast<int>(aruco.ids.size()), aruco.dictionary_name.c_str());
+        } else {
+          label = cv::format(
+              "conf=%.2f aruco=%d", out.confidence,
+              static_cast<int>(aruco.ids.size()));
+        }
+      } else {
+        label = cv::format("conf=%.2f", out.confidence);
+      }
       cv::putText(
           in.bgr, label, cv::Point(12, 20), cv::FONT_HERSHEY_SIMPLEX, 0.5,
           cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
@@ -533,6 +771,20 @@ DetectJobOut run_detect_job(DetectJobIn in) {
       }
     }
     out.preview = mat_bgr_to_qimage(in.bgr);
+    {
+      const std::string completeness =
+          in.solve_options.count("detect_completeness")
+              ? in.solve_options.at("detect_completeness")
+              : "";
+      const bool require_full =
+          completeness == "full" || completeness == "complete";
+      if (require_full && out.confidence <= 1e-9) {
+        out.ok = false;
+        out.error = QStringLiteral(
+            "完整模式：标定板不完整或点数不足，已忽略（请换整面清晰帧）");
+        return out;
+      }
+    }
     out.ok = true;
     return out;
   } catch (const cv::Exception &e) {
@@ -562,7 +814,7 @@ void SessionController::set_calibrator_id(const QString &id) {
   if (is_handeye() && pose_source_ == PoseSource::None) {
     pose_source_ = PoseSource::Csv;
   }
-  if (is_intrinsics() || is_trihedral()) {
+  if (is_intrinsics() || is_trihedral() || is_stereo_extrinsics()) {
     pose_source_ = PoseSource::None;
   }
   if (is_trihedral() && min_views_ > 1) {
@@ -579,7 +831,20 @@ bool SessionController::is_handeye() const {
 
 /// \brief 是否为单目内参标定器
 bool SessionController::is_intrinsics() const {
-  return calibrator_id_ == QStringLiteral("cam_intrinsics");
+  return calibrator_id_ == QStringLiteral("cam_intrinsics") ||
+         calibrator_id_ == QStringLiteral("stereo_intrinsics");
+}
+
+bool SessionController::is_stereo_intrinsics() const {
+  return calibrator_id_ == QStringLiteral("stereo_intrinsics");
+}
+
+bool SessionController::is_stereo_extrinsics() const {
+  return calibrator_id_ == QStringLiteral("stereo_extrinsics");
+}
+
+bool SessionController::is_stereo_side_tagged() const {
+  return is_stereo_intrinsics() || is_stereo_extrinsics();
 }
 
 /// \brief 是否为直角三面标定器
@@ -649,6 +914,35 @@ void SessionController::set_handeye_method(const QString &method) {
 /// \brief 设置手眼用相机内参 YAML 路径
 void SessionController::set_camera_yaml(const QString &path) {
   camera_yaml_ = path;
+  if (path.isEmpty()) {
+    return;
+  }
+  core::CameraIntrinsics intr;
+  if (core::load_camera_yaml(path.toStdString(), &intr) && intr.valid && !intr.K.empty()) {
+    detect_K_ = intr.K.clone();
+    detect_D_ = intr.D.empty() ? cv::Mat::zeros(1, 5, CV_64F) : intr.D.clone();
+    detect_model_ = intr.model.empty() ? "brown_conrady" : intr.model;
+    detect_xi_ = intr.xi;
+  }
+}
+
+/// \brief 设置检测叠加用内参（CameraInfo 优先）
+void SessionController::set_detect_intrinsics(
+    const cv::Mat &camera_matrix,
+    const cv::Mat &dist_coeffs,
+    const std::string &model,
+    double xi) {
+  if (camera_matrix.empty() || camera_matrix.rows != 3 || camera_matrix.cols != 3) {
+    return;
+  }
+  camera_matrix.convertTo(detect_K_, CV_64F);
+  if (dist_coeffs.empty()) {
+    detect_D_ = cv::Mat::zeros(1, 5, CV_64F);
+  } else {
+    dist_coeffs.convertTo(detect_D_, CV_64F);
+  }
+  detect_model_ = core::camera_model_to_string(core::parse_camera_model(model));
+  detect_xi_ = xi;
 }
 
 /// \brief 绑定 TF 位姿桥
@@ -685,6 +979,7 @@ int SessionController::load_image_dir(const QString &dir_path) {
   current_index_ = -1;
   has_detection_ = false;
   last_confidence_ = 0.0;
+  last_aruco_reproj_px_ = -1.0;
   last_preview_ = {};
   captured_fps_.clear();
   captured_views_.clear();
@@ -787,11 +1082,15 @@ std::map<std::string, std::string> SessionController::solve_config_map() const {
     m["target"] = is_trihedral() ? "trihedral_charuco" : "chessboard";
   }
   if (!m.count("model")) {
-    m["model"] = "pinhole";
+    m["model"] = "brown_conrady";
   }
   m["method"] = handeye_method_.toStdString();
   if (!camera_yaml_.isEmpty()) {
     m["camera_yaml"] = camera_yaml_.toStdString();
+    // 双目外参：若未单独指定左 YAML，则复用 camera_yaml
+    if (is_stereo_extrinsics() && !m.count("left_camera_yaml")) {
+      m["left_camera_yaml"] = camera_yaml_.toStdString();
+    }
   }
   if (calibrator_id_ == QStringLiteral("eye_in_hand")) {
     m["parent_frame"] = "gripper";
@@ -799,6 +1098,13 @@ std::map<std::string, std::string> SessionController::solve_config_map() const {
   } else if (calibrator_id_ == QStringLiteral("eye_to_hand")) {
     m["parent_frame"] = "base";
     m["child_frame"] = "camera";
+  } else if (is_stereo_extrinsics()) {
+    if (!m.count("parent_frame") || m["parent_frame"].empty()) {
+      m["parent_frame"] = "left";
+    }
+    if (!m.count("child_frame") || m["child_frame"].empty()) {
+      m["child_frame"] = "right";
+    }
   }
   return m;
 }
@@ -807,6 +1113,9 @@ std::map<std::string, std::string> SessionController::solve_config_map() const {
 QString SessionController::result_parent_frame() const {
   if (last_result_.intrinsics_meta.count("parent_frame")) {
     return QString::fromStdString(last_result_.intrinsics_meta.at("parent_frame"));
+  }
+  if (is_stereo_extrinsics()) {
+    return QStringLiteral("left");
   }
   return is_handeye()
       ? (calibrator_id_ == QStringLiteral("eye_to_hand") ? QStringLiteral("base")
@@ -819,7 +1128,18 @@ QString SessionController::result_child_frame() const {
   if (last_result_.intrinsics_meta.count("child_frame")) {
     return QString::fromStdString(last_result_.intrinsics_meta.at("child_frame"));
   }
+  if (is_stereo_extrinsics()) {
+    return QStringLiteral("right");
+  }
   return is_handeye() ? QStringLiteral("camera") : QString();
+}
+
+/// \brief 最近一次有效检测的图像点数
+int SessionController::last_point_count() const {
+  if (!has_detection_) {
+    return 0;
+  }
+  return static_cast<int>(current_corr_.image_points.rows());
 }
 
 /// \brief 同步检测当前帧并更新预览/置信度
@@ -838,9 +1158,14 @@ bool SessionController::detect_current(QImage *preview_out, QString *error_out, 
   in.viz_conf = viz_conf_;
   in.viz_aruco = viz_aruco_;
   in.viz_marker_radius = viz_marker_radius_;
+  in.camera_matrix = detect_K_.empty() ? cv::Mat() : detect_K_.clone();
+  in.dist_coeffs = detect_D_.empty() ? cv::Mat() : detect_D_.clone();
+  in.camera_model = detect_model_;
+  in.camera_xi = detect_xi_;
   const DetectJobOut out = run_detect_job(std::move(in));
   last_preview_ = out.preview;
   last_confidence_ = out.confidence;
+  last_aruco_reproj_px_ = out.aruco_reproj_px;
   last_faces_found_ = out.faces;
   detect_width_ = out.width;
   detect_height_ = out.height;
@@ -889,6 +1214,10 @@ void SessionController::start_detect_job(bool fast) {
   in.viz_conf = viz_conf_;
   in.viz_aruco = viz_aruco_;
   in.viz_marker_radius = viz_marker_radius_;
+  in.camera_matrix = detect_K_.empty() ? cv::Mat() : detect_K_.clone();
+  in.dist_coeffs = detect_D_.empty() ? cv::Mat() : detect_D_.clone();
+  in.camera_model = detect_model_;
+  in.camera_xi = detect_xi_;
   if (in.bgr.empty()) {
     has_detection_ = false;
     last_preview_ = {};
@@ -916,6 +1245,7 @@ void SessionController::start_detect_job(bool fast) {
           }
           last_preview_ = out.preview;
           last_confidence_ = out.confidence;
+          last_aruco_reproj_px_ = out.aruco_reproj_px;
           last_faces_found_ = out.faces;
           detect_width_ = out.width;
           detect_height_ = out.height;
@@ -968,26 +1298,57 @@ double SessionController::confidence_from_corners(
   const ViewFingerprint fp = fingerprint_from_corners(corners, width, height);
 
   // —— 按靶标类型计分 ——
-  // 三面 / ChArUco / ArUco：按填充比例计分（允许部分角点）
-  // 棋盘 / 圆点：通常要求整面点数
+  // detect_completeness=full：只认整面；partial：三面/ChArUco/ArUco/棋盘局部均可
   double score = 0.0;
   const std::string target_type =
       solve_options_.count("target") ? solve_options_.at("target") : "chessboard";
+  const std::string completeness = solve_options_.count("detect_completeness")
+      ? solve_options_.at("detect_completeness")
+      : "";
+  const bool require_full =
+      completeness == "full" || completeness == "complete";
+  const bool force_partial = completeness == "partial";
+  const bool aruco_loose =
+      target_type == "aruco" || target_type == "aruco_single";
+  const bool is_charuco =
+      target_type == "charuco" || target_type == "trihedral_charuco";
+  const bool is_aruco_grid = target_type == "aruco_grid";
+  int expect_pts = expect_face;
+  if (is_charuco) {
+    expect_pts = std::max(4, (squares_x_ - 1) * (squares_y_ - 1));
+  } else if (is_aruco_grid) {
+    expect_pts = std::max(4, expect_face * 4);
+  }
   const bool partial_ok =
-      is_trihedral() || target_type == "charuco" || target_type == "aruco_grid";
+      !require_full &&
+      (is_trihedral() || is_charuco || is_aruco_grid || aruco_loose ||
+       (force_partial && target_type == "chessboard"));
   if (partial_ok) {
-    if (corners.size() < 6) {
+    if (corners.size() < (aruco_loose ? 4u : 6u)) {
       return 0.0;
     }
-    const double fill =
-        std::min(1.0, static_cast<double>(corners.size()) /
-                          static_cast<double>(std::max(6, expect_face)));
-    score = 0.15 + 0.50 * fill;
+    if (aruco_loose) {
+      const int n_markers = static_cast<int>(corners.size()) / 4;
+      score = std::min(0.95, 0.55 + 0.08 * static_cast<double>(n_markers));
+    } else {
+      const double fill =
+          std::min(1.0, static_cast<double>(corners.size()) /
+                            static_cast<double>(std::max(6, expect_pts)));
+      score = 0.15 + 0.50 * fill;
+    }
   } else {
-    if (static_cast<int>(corners.size()) != expect_face) {
-      return 0.0;
+    if (aruco_loose) {
+      if (corners.size() < 4) {
+        return 0.0;
+      }
+      score = 0.55;
+    } else {
+      const int need = std::max(4, static_cast<int>(0.95 * expect_pts + 0.5));
+      if (static_cast<int>(corners.size()) < need) {
+        return 0.0;
+      }
+      score = 0.45;
     }
-    score = 0.35;
   }
 
   // Prefer mid-size board (not too far / too close)
@@ -1119,16 +1480,29 @@ bool SessionController::add_current_observation(QString *error_out) {
   }
 
   QString path = current_path();
+  std::string side = "left";
+  if (is_stereo_side_tagged()) {
+    const auto it = solve_options_.find("stereo_side");
+    if (it != solve_options_.end() &&
+        (it->second == "right" || it->second == "RIGHT" || it->second == "R")) {
+      side = "right";
+    }
+  }
   if (source_mode_ == SourceMode::RosTopic) {
     path = QStringLiteral("ros://%1#%2")
                .arg(ros_topic_name_.isEmpty() ? QStringLiteral("image")
                                               : ros_topic_name_)
                .arg(++live_seq_);
-  } else {
+  }
+  std::string stored_path = path.toStdString();
+  if (is_stereo_side_tagged()) {
+    stored_path = side + ":" + stored_path;
+  }
+  if (source_mode_ != SourceMode::RosTopic) {
     for (const auto &obs : batch_.items) {
-      if (obs.source_path == path.toStdString()) {
+      if (obs.source_path == stored_path) {
         if (error_out) {
-          *error_out = QStringLiteral("该图片已在观测列表中");
+          *error_out = QStringLiteral("该图片已在观测列表中（同侧）");
         }
         return false;
       }
@@ -1137,8 +1511,8 @@ bool SessionController::add_current_observation(QString *error_out) {
 
   // —— 组装观测并缓存原图/叠加 ——
   core::Observation obs;
-  obs.source_path = path.toStdString();
-  obs.frame_id = "camera";
+  obs.source_path = stored_path;
+  obs.frame_id = is_stereo_side_tagged() ? side : "camera";
   obs.image_width = detect_width_;
   obs.image_height = detect_height_;
   obs.correspondences = {current_corr_};
@@ -1195,6 +1569,21 @@ bool SessionController::solve(QString *error_out) {
     }
     return false;
   }
+  if (is_stereo_extrinsics()) {
+    const auto cfg = solve_config_map();
+    const bool has_left =
+        (cfg.count("left_camera_yaml") && !cfg.at("left_camera_yaml").empty()) ||
+        (cfg.count("camera_yaml") && !cfg.at("camera_yaml").empty());
+    const bool has_right =
+        cfg.count("right_camera_yaml") && !cfg.at("right_camera_yaml").empty();
+    if (!has_left || !has_right) {
+      if (error_out) {
+        *error_out = QStringLiteral(
+            "双目外参需要左/右内参 YAML（left_camera_yaml 与 right_camera_yaml）");
+      }
+      return false;
+    }
+  }
   try {
     auto calibrator =
         core::CalibratorRegistry::instance().create(calibrator_id_.toStdString());
@@ -1228,7 +1617,7 @@ bool SessionController::export_yaml(const QString &path, QString *error_out) con
     }
     return false;
   }
-  if (is_handeye()) {
+  if (is_handeye() || is_stereo_extrinsics()) {
     if (!core::export_extrinsics_yaml(
             last_result_, result_parent_frame().toStdString(),
             result_child_frame().toStdString(), path.toStdString())) {
@@ -1278,12 +1667,40 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
   }
 
   // —— 标定结果 YAML ——
-  const QString result_name = is_handeye()
-      ? QStringLiteral("handeye_extrinsics.yaml")
-      : QStringLiteral("camera_intrinsics.yaml");
-  const QString result_path = out.filePath(result_name);
-  if (!export_yaml(result_path, error_out)) {
-    return false;
+  QString result_name = is_handeye() ? QStringLiteral("handeye_extrinsics.yaml")
+                                     : QStringLiteral("camera_intrinsics.yaml");
+  if (is_stereo_extrinsics()) {
+    result_name = QStringLiteral("stereo_extrinsics.yaml");
+  }
+  if (is_stereo_intrinsics()) {
+    result_name = QStringLiteral("camera_left.yaml+camera_right.yaml");
+    const QString left_path = out.filePath(QStringLiteral("camera_left.yaml"));
+    const QString right_path = out.filePath(QStringLiteral("camera_right.yaml"));
+    bool any = false;
+    if (core::export_camera_yaml_prefixed(
+            last_result_, "left_", left_path.toStdString())) {
+      any = true;
+    }
+    if (core::export_camera_yaml_prefixed(
+            last_result_, "right_", right_path.toStdString())) {
+      any = true;
+    }
+    // 另存一份默认名（优先左）便于兼容旧流程
+    const QString fallback = out.filePath(QStringLiteral("camera_intrinsics.yaml"));
+    if (!export_yaml(fallback, nullptr)) {
+      // ignore
+    }
+    if (!any) {
+      if (error_out) {
+        *error_out = QStringLiteral("未能写出左右内参 YAML");
+      }
+      return false;
+    }
+  } else {
+    const QString result_path = out.filePath(result_name);
+    if (!export_yaml(result_path, error_out)) {
+      return false;
+    }
   }
 
   // —— 会话配置 ——

@@ -437,10 +437,21 @@ bool accept_grown_corner(
   return contrast > 8.f;
 }
 
-/// \brief 沿四边向外长一圈角点（预测 + cornerSubPix），尽量补到 sx×sy
+/// \brief 内角点网格 → 方格数（OpenCV pattern 为内角点）
+cv::Size squares_of_inner(cv::Size inner) {
+  return cv::Size(inner.width + 1, inner.height + 1);
+}
+
+/// \brief 方格数是否大于 2×2（用户阈值：大于 2×2 方格的角点都要找对）
+bool squares_gt_2x2(cv::Size squares) {
+  return squares.width > 2 && squares.height > 2;
+}
+
+/// \brief 沿四边向外长一圈角点，直到撞上白边/非角点或名义满格
 /// \param work 已增强的灰度（避免每次全图 CLAHE）
+/// \param force_to_border Thorough：尽量长到可见边界，不因「差不多」提前停
 bool try_grow_to_target(
-    const cv::Mat &work, int sx, int sy, FaceHit *hit) {
+    const cv::Mat &work, int sx, int sy, FaceHit *hit, bool force_to_border) {
   if (hit == nullptr || work.empty() || hit->corners.size() < 9) {
     return false;
   }
@@ -453,7 +464,8 @@ bool try_grow_to_target(
   }
 
   bool any = false;
-  const int max_iters = std::min(sx + sy, 8);
+  const int max_iters =
+      force_to_border ? (sx + sy) : std::min(sx + sy, 8);
   for (int iter = 0; iter < max_iters; ++iter) {
     if (is_full(*hit)) {
       break;
@@ -512,7 +524,7 @@ bool try_grow_to_target(
           cv::cornerSubPix(
               work, one, cv::Size(5, 5), cv::Size(-1, -1),
               cv::TermCriteria(
-                  cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 20, 0.03));
+                  cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.02));
           if (accept_grown_corner(work, pred, one[0], cell)) {
             grown[static_cast<size_t>(r)] = one[0];
             ok[static_cast<size_t>(r)] = 1;
@@ -521,7 +533,11 @@ bool try_grow_to_target(
             grown[static_cast<size_t>(r)] = pred;
           }
         }
-        if (ok_n < std::max(2, (rows * 3 + 3) / 4)) {
+        // Thorough 找边界：要求更高通过率，避免假外圈
+        const int need =
+            force_to_border ? std::max(2, (rows * 4 + 4) / 5)
+                            : std::max(2, (rows * 3 + 3) / 4);
+        if (ok_n < need) {
           return;
         }
         for (int r = 0; r < rows; ++r) {
@@ -584,7 +600,7 @@ bool try_grow_to_target(
           cv::cornerSubPix(
               work, one, cv::Size(5, 5), cv::Size(-1, -1),
               cv::TermCriteria(
-                  cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 20, 0.03));
+                  cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.02));
           if (accept_grown_corner(work, pred, one[0], cell)) {
             grown[static_cast<size_t>(c)] = one[0];
             ok[static_cast<size_t>(c)] = 1;
@@ -593,7 +609,10 @@ bool try_grow_to_target(
             grown[static_cast<size_t>(c)] = pred;
           }
         }
-        if (ok_n < std::max(2, (cols * 3 + 3) / 4)) {
+        const int need =
+            force_to_border ? std::max(2, (cols * 4 + 4) / 5)
+                            : std::max(2, (cols * 3 + 3) / 4);
+        if (ok_n < need) {
           return;
         }
         for (int c = 0; c < cols; ++c) {
@@ -635,7 +654,7 @@ bool try_grow_to_target(
       try_grow(side);
     }
     if (cands.empty()) {
-      break;
+      break;  // 四边都碰边界 → 可见格已齐
     }
     std::sort(cands.begin(), cands.end(), [](const Cand &a, const Cand &b) {
       const int aa = a.new_cols * a.new_rows;
@@ -652,7 +671,49 @@ bool try_grow_to_target(
   return any || is_full(*hit);
 }
 
-/// \brief 补全流水线：局部 ROI 上生长 + 有限次重检（避免整图 CLAHE）
+/// \brief 在已有网格尺寸上再跑一遍经典检测，用真实角点替换生长点（找准）
+bool refine_hit_by_redetect(
+    const cv::Mat &gray_roi, const FaceHit &seed, FaceHit *hit, bool allow_sb) {
+  if (hit == nullptr || gray_roi.empty()) {
+    return false;
+  }
+  std::vector<cv::Size> targets;
+  targets.push_back(hit->pattern);
+  if (hit->pattern.width != hit->pattern.height) {
+    targets.emplace_back(hit->pattern.height, hit->pattern.width);
+  }
+  FaceHit best;
+  bool got = false;
+  for (const cv::Size &tg : targets) {
+    if (tg.width < 3 || tg.height < 3) {
+      continue;
+    }
+    std::vector<cv::Point2f> corners;
+    if (!try_find_full(gray_roi, tg, &corners, allow_sb)) {
+      continue;
+    }
+    if (!corners_same_face(seed.corners, corners)) {
+      continue;
+    }
+    if (!got ||
+        static_cast<int>(corners.size()) > static_cast<int>(best.corners.size())) {
+      best.corners = std::move(corners);
+      best.pattern = tg;
+      got = true;
+    }
+  }
+  if (!got) {
+    return false;
+  }
+  // 同尺寸或更大：用重检结果替换生长点
+  if (best.corners.size() >= hit->corners.size()) {
+    *hit = std::move(best);
+    return true;
+  }
+  return false;
+}
+
+/// \brief 补全流水线：把「大于 2×2 方格」的可见区域角点找齐找准
 void complete_face_hit(
     const cv::Mat &gray, int sx, int sy, FaceHit *hit,
     TrihedralChessDetectSpeed speed) {
@@ -664,15 +725,23 @@ void complete_face_hit(
            (h.pattern.width == sy && h.pattern.height == sx);
   };
   if (is_full(*hit)) {
+    refine_corners_subpix(gray, &hit->corners, 11);
+    return;
+  }
+
+  // 方格数 ≤2×2：不作为「必须找全」的有效面（种子阶段极少会到这里）
+  if (!squares_gt_2x2(squares_of_inner(hit->pattern))) {
     refine_corners_subpix(gray, &hit->corners, 7);
     return;
   }
 
+  const bool thorough = (speed == TrihedralChessDetectSpeed::Thorough);
   const float cell = median_neighbor_spacing(hit->corners);
   cv::Rect box = cv::boundingRect(hit->corners);
-  const int pad = cvRound(cell * static_cast<float>(
-      2 + std::max(0, std::max(sx, sy) - std::min(hit->pattern.width,
-                                                  hit->pattern.height))));
+  // Thorough：外扩够吃外圈 + 白边；便于 upgrade / 重检
+  const int miss = std::max(0, std::max(sx, sy) - std::min(hit->pattern.width,
+                                                           hit->pattern.height));
+  const int pad = cvRound(cell * static_cast<float>(thorough ? (miss + 3) : (miss + 2)));
   box.x = std::max(0, box.x - pad);
   box.y = std::max(0, box.y - pad);
   box.width = std::min(gray.cols - box.x, box.width + 2 * pad);
@@ -682,26 +751,46 @@ void complete_face_hit(
   }
 
   cv::Mat local = gray(box).clone();
-  // 把角点挪到 local 坐标
   FaceHit local_hit = *hit;
   for (auto &p : local_hit.corners) {
     p.x -= static_cast<float>(box.x);
     p.y -= static_cast<float>(box.y);
   }
+  const FaceHit seed_local = local_hit;
   const cv::Mat work = enhance_clahe(local, 3.0);
-  try_grow_to_target(work, sx, sy, &local_hit);
+
+  // 1) 先长到可见边界（或满格）
+  try_grow_to_target(work, sx, sy, &local_hit, thorough);
+
+  // 2) ROI 内再冲更大/满格（同面校验）
   if (!is_full(local_hit)) {
     try_upgrade_to_full(local, sx, sy, &local_hit, speed);
   }
-  if (!is_full(local_hit) && speed == TrihedralChessDetectSpeed::Thorough) {
-    try_grow_to_target(work, sx, sy, &local_hit);
+
+  // 3) Thorough：再生长一轮 + 用真实检测替换生长点（找准）
+  if (thorough) {
+    if (!is_full(local_hit)) {
+      try_grow_to_target(work, sx, sy, &local_hit, true);
+    }
+    refine_hit_by_redetect(work, seed_local, &local_hit, true);
+    if (!is_full(local_hit)) {
+      try_upgrade_to_full(local, sx, sy, &local_hit, speed);
+    }
+    // 终态再重检当前尺寸，压掉生长噪声
+    refine_hit_by_redetect(work, seed_local, &local_hit, true);
+  } else {
+    refine_hit_by_redetect(work, seed_local, &local_hit, false);
   }
+
   for (auto &p : local_hit.corners) {
     p.x += static_cast<float>(box.x);
     p.y += static_cast<float>(box.y);
   }
-  *hit = std::move(local_hit);
-  refine_corners_subpix(gray, &hit->corners, 7);
+  if (corners_same_face(hit->corners, local_hit.corners) &&
+      local_hit.corners.size() >= hit->corners.size()) {
+    *hit = std::move(local_hit);
+  }
+  refine_corners_subpix(gray, &hit->corners, thorough ? 11 : 7);
 }
 
 /// \brief 按面积从大到小试子网格（含 3×3）；三面允许局部
@@ -809,10 +898,11 @@ bool try_find_any(
     TrihedralChessDetectSpeed speed) {
   hit_out->corners.clear();
   std::vector<cv::Point2f> corners;
+  const bool complete = (speed == TrihedralChessDetectSpeed::Complete);
   const bool fast = (speed == TrihedralChessDetectSpeed::Fast);
   const bool large = gray.total() > static_cast<size_t>(720 * 540);
-  // 满格：大图 Fast 不开 SB；小图 / Thorough 可开
-  const bool sb_full = !fast && !large;
+  // 满格：大图 Fast 不开 SB；小图 / Thorough / Complete 可开
+  const bool sb_full = (!fast || complete) && !large;
   if (try_find_full(gray, cv::Size(sx, sy), &corners, sb_full)) {
     hit_out->corners = std::move(corners);
     hit_out->pattern = cv::Size(sx, sy);
@@ -822,6 +912,9 @@ bool try_find_any(
     hit_out->corners = std::move(corners);
     hit_out->pattern = cv::Size(sy, sx);
     return true;
+  }
+  if (complete) {
+    return false;  // 完整模式：不要局部
   }
   // 大图少试几档子网格，避免掩膜全图阶段拖死
   const int sub_try = large ? (fast ? 5 : 7) : (fast ? 8 : 12);
@@ -1273,17 +1366,22 @@ std::vector<FaceHit> find_all_boards(
     }
   }
 
-  // 各面局部补全：搜索已超时则只做廉价生长，避免预算外再穷举
-  const auto complete_speed =
-      (fast || timed_out()) ? TrihedralChessDetectSpeed::Fast : speed;
+  // 各面补全：Thorough 优先找齐可见方格（>2×2）；Fast 仍轻量
+  // 搜索预算到了也不砍 Thorough 补全（本步目标是找全找准）
+  const int complete_extra_ms = fast ? 300 : 2500;
   for (size_t i = 0; i < hits.size(); ++i) {
-    if (std::chrono::duration_cast<std::chrono::milliseconds>(
+    if (fast &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0)
-            .count() >= budget_ms + (fast ? 250 : 600)) {
-      break;  // 硬顶：补全总时间也封顶
+                .count() >= budget_ms + complete_extra_ms) {
+      break;
     }
     const FaceHit before = hits[i];
-    complete_face_hit(gray_in, sx, sy, &hits[i], complete_speed);
+    // 方格 ≤2×2：跳过强制补全（几乎不会出现，因入库已 ≥3×3 内角点）
+    if (!squares_gt_2x2(squares_of_inner(before.pattern))) {
+      continue;
+    }
+    complete_face_hit(gray_in, sx, sy, &hits[i], speed);
     if (!corners_same_face(before.corners, hits[i].corners) ||
         hits[i].corners.size() < before.corners.size()) {
       hits[i] = before;

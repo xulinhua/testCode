@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -40,6 +41,22 @@ QSpinBox *make_int(QWidget *parent, int v, int min_v, int max_v) {
   return s;
 }
 
+/// \brief 紧凑「标签 + 控件」单元
+QWidget *make_field_unit(QWidget *parent, const QString &text, QWidget *field, QLabel **lab_out) {
+  auto *unit = new QWidget(parent);
+  auto *lay = new QHBoxLayout(unit);
+  lay->setContentsMargins(0, 0, 0, 0);
+  lay->setSpacing(6);
+  auto *lab = new QLabel(text, unit);
+  lab->setObjectName(QStringLiteral("Muted"));
+  lay->addWidget(lab);
+  lay->addWidget(field, 1);
+  if (lab_out != nullptr) {
+    *lab_out = lab;
+  }
+  return unit;
+}
+
 }  // namespace
 
 /// \brief 构建 Launcher 风格分组配置面板
@@ -51,7 +68,8 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
   // ---- ROS / Topics（图像源、话题、帧名） ----
   {
     auto *host = new QWidget(this);
-    auto *form = new_form(host);
+    form_ros_ = new_form(host);
+    auto *form = form_ros_;
     combo_source_mode_ = new QComboBox(host);
     combo_source_mode_->addItem(
         QStringLiteral("离线 · 图片目录"), static_cast<int>(SourceMode::Offline));
@@ -59,7 +77,10 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
         QStringLiteral("在线 · ROS 图像话题"), static_cast<int>(SourceMode::RosTopic));
     connect(
         combo_source_mode_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-        &LauncherConfigPanel::source_mode_changed);
+        [this](int index) {
+          refresh_source_mode_rows();
+          emit source_mode_changed(index);
+        });
 
     edit_image_dir_ = new QLineEdit(host);
     edit_image_dir_->setPlaceholderText(QStringLiteral("…/images"));
@@ -91,8 +112,22 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     topic_lay->addWidget(combo_image_topic_, 1);
     topic_lay->addWidget(btn_refresh_topics_);
 
-    edit_camera_info_topic_ = new QLineEdit(QStringLiteral("/camera/camera_info"), host);
-    chk_use_rectified_ = new QCheckBox(QStringLiteral("图像已去畸变 / rectified"), host);
+    combo_camera_info_topic_ = new QComboBox(host);
+    combo_camera_info_topic_->setEditable(true);
+    combo_camera_info_topic_->setInsertPolicy(QComboBox::NoInsert);
+    combo_camera_info_topic_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    combo_camera_info_topic_->setMinimumWidth(200);
+    combo_camera_info_topic_->lineEdit()->setPlaceholderText(
+        QStringLiteral("/camera/camera_info"));
+    combo_camera_info_topic_->setEditText(QStringLiteral("/camera/camera_info"));
+    connect(
+        combo_camera_info_topic_, &QComboBox::currentTextChanged, this,
+        &LauncherConfigPanel::camera_info_topic_changed);
+    camera_info_row_ = new QWidget(host);
+    auto *info_lay = new QHBoxLayout(camera_info_row_);
+    info_lay->setContentsMargins(0, 0, 0, 0);
+    info_lay->addWidget(combo_camera_info_topic_, 1);
+    chk_use_rectified_ = new QCheckBox(QStringLiteral("已去畸变"), host);
     chk_use_rectified_->setChecked(false);
     edit_image_frame_ = new QLineEdit(QStringLiteral("camera_optical_frame"), host);
     edit_camera_link_frame_ = new QLineEdit(QStringLiteral("camera_link"), host);
@@ -107,15 +142,23 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     cfg_lay->addWidget(edit_config_path_, 1);
     cfg_lay->addWidget(reload);
 
+    auto *frame_row = new QWidget(host);
+    auto *frame_lay = new QHBoxLayout(frame_row);
+    frame_lay->setContentsMargins(0, 0, 0, 0);
+    frame_lay->setSpacing(10);
+    frame_lay->addWidget(make_field_unit(frame_row, QStringLiteral("optical"), edit_image_frame_, nullptr), 1);
+    frame_lay->addWidget(
+        make_field_unit(frame_row, QStringLiteral("link"), edit_camera_link_frame_, nullptr), 1);
+
     form->addRow(QStringLiteral("数据源"), combo_source_mode_);
     form->addRow(QStringLiteral("图片目录"), offline_row_);
     form->addRow(QStringLiteral("image_topic"), topic_row_);
-    form->addRow(QStringLiteral("camera_info_topic"), edit_camera_info_topic_);
-    form->addRow(QStringLiteral("use_rectified_image"), chk_use_rectified_);
-    form->addRow(QStringLiteral("image_frame"), edit_image_frame_);
-    form->addRow(QStringLiteral("camera_link_frame"), edit_camera_link_frame_);
-    form->addRow(QStringLiteral("config YAML"), cfg_row);
+    form->addRow(QStringLiteral("camera_info"), camera_info_row_);
+    form->addRow(QStringLiteral("rectified"), chk_use_rectified_);
+    form->addRow(QStringLiteral("frames"), frame_row);
+    form->addRow(QStringLiteral("config"), cfg_row);
     root->addWidget(make_group(QStringLiteral("ROS / Topics"), host));
+    refresh_source_mode_rows();
   }
 
   // ---- 靶标 / 板参数 ----
@@ -126,14 +169,18 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     combo_target_type_ = new QComboBox(host);
     combo_target_type_->addItems(
         {QStringLiteral("chessboard"), QStringLiteral("charuco"),
-         QStringLiteral("aruco_grid"), QStringLiteral("circles_symmetric"),
-         QStringLiteral("circles_asymmetric"), QStringLiteral("trihedral_chess"),
-         QStringLiteral("trihedral_charuco"), QStringLiteral("trihedral_aruco")});
+         QStringLiteral("aruco"), QStringLiteral("aruco_grid"),
+         QStringLiteral("circles_symmetric"), QStringLiteral("circles_asymmetric"),
+         QStringLiteral("trihedral_chess"), QStringLiteral("trihedral_charuco"),
+         QStringLiteral("trihedral_aruco")});
     combo_dictionary_ = new QComboBox(host);
     combo_dictionary_->addItems(
-        {QStringLiteral("DICT_4X4_250"), QStringLiteral("DICT_4X4_50"),
-         QStringLiteral("DICT_4X4_100"), QStringLiteral("DICT_5X5_100"),
-         QStringLiteral("DICT_6X6_250"), QStringLiteral("DICT_7X7_1000"),
+        {QStringLiteral("DICT_6X6_1000"), QStringLiteral("DICT_6X6_250"),
+         QStringLiteral("DICT_4X4_250"), QStringLiteral("DICT_4X4_50"),
+         QStringLiteral("DICT_4X4_100"), QStringLiteral("DICT_5X5_50"),
+         QStringLiteral("DICT_5X5_100"), QStringLiteral("DICT_5X5_250"),
+         QStringLiteral("DICT_6X6_50"), QStringLiteral("DICT_7X7_1000"),
+         QStringLiteral("DICT_ARUCO_ORIGINAL"),
          QStringLiteral("DICT_APRILTAG_36h11")});
     spin_squares_x_ = make_int(host, 9, 2, 40);
     spin_squares_y_ = make_int(host, 6, 2, 40);
@@ -145,18 +192,77 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     spin_max_board_area_ = make_dbl(host, 0.45, 0.01, 0.95, 3, 0.01);
     spin_max_tag_distance_ = make_dbl(host, 5.0, 0.1, 50.0, 2, 0.1);
     spin_max_tag_distance_->setSuffix(QStringLiteral(" m"));
+
+    squares_row_ = new QWidget(host);
+    auto *sq_lay = new QHBoxLayout(squares_row_);
+    sq_lay->setContentsMargins(0, 0, 0, 0);
+    sq_lay->setSpacing(10);
+    sq_lay->addWidget(
+        make_field_unit(squares_row_, QStringLiteral("X"), spin_squares_x_, &lab_squares_x_), 1);
+    sq_lay->addWidget(
+        make_field_unit(squares_row_, QStringLiteral("Y"), spin_squares_y_, &lab_squares_y_), 1);
+
+    lengths_row_ = new QWidget(host);
+    auto *len_lay = new QHBoxLayout(lengths_row_);
+    len_lay->setContentsMargins(0, 0, 0, 0);
+    len_lay->setSpacing(10);
+    len_lay->addWidget(
+        make_field_unit(
+            lengths_row_, QStringLiteral("方格"), spin_square_length_, &lab_square_length_),
+        1);
+    len_lay->addWidget(
+        make_field_unit(
+            lengths_row_, QStringLiteral("标记"), spin_marker_length_, &lab_marker_length_),
+        1);
+
+    area_row_ = new QWidget(host);
+    auto *area_lay = new QHBoxLayout(area_row_);
+    area_lay->setContentsMargins(0, 0, 0, 0);
+    area_lay->setSpacing(10);
+    area_lay->addWidget(
+        make_field_unit(area_row_, QStringLiteral("面积min"), spin_min_board_area_, nullptr), 1);
+    area_lay->addWidget(
+        make_field_unit(area_row_, QStringLiteral("面积max"), spin_max_board_area_, nullptr), 1);
+    area_lay->addWidget(
+        make_field_unit(area_row_, QStringLiteral("最远"), spin_max_tag_distance_, nullptr), 1);
+
     form->addRow(QStringLiteral("target"), combo_target_type_);
     form->addRow(QStringLiteral("dictionary"), combo_dictionary_);
-    form->addRow(QStringLiteral("squares_x"), spin_squares_x_);
-    form->addRow(QStringLiteral("squares_y"), spin_squares_y_);
-    form->addRow(QStringLiteral("square_length"), spin_square_length_);
-    form->addRow(QStringLiteral("marker_length"), spin_marker_length_);
-    form->addRow(QStringLiteral("min_board_area_ratio"), spin_min_board_area_);
-    form->addRow(QStringLiteral("max_board_area_ratio"), spin_max_board_area_);
-    form->addRow(QStringLiteral("max_tag_distance"), spin_max_tag_distance_);
+    form->addRow(QStringLiteral("网格"), squares_row_);
+    form->addRow(QStringLiteral("尺寸"), lengths_row_);
+    form->addRow(QStringLiteral("过滤"), area_row_);
+    connect(
+        spin_squares_x_, QOverload<int>::of(&QSpinBox::valueChanged), this,
+        [this](int v) {
+          if (combo_target_type_ == nullptr || spin_squares_y_ == nullptr) {
+            return;
+          }
+          if (combo_target_type_->currentText().startsWith(QStringLiteral("trihedral")) &&
+              spin_squares_y_->value() != v) {
+            spin_squares_y_->setValue(v);
+          }
+        });
     connect(
         combo_target_type_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-        [this](int) { update_board_param_visibility(); });
+        [this](int) {
+          update_board_param_visibility();
+          if (combo_target_type_ == nullptr) {
+            return;
+          }
+          if (combo_target_type_->currentText() == QStringLiteral("aruco")) {
+            if (combo_dictionary_ != nullptr) {
+              const int didx =
+                  combo_dictionary_->findText(QStringLiteral("DICT_6X6_1000"));
+              if (didx >= 0) {
+                combo_dictionary_->setCurrentIndex(didx);
+              }
+            }
+            if (spin_marker_length_ != nullptr &&
+                spin_marker_length_->value() < 0.05) {
+              spin_marker_length_->setValue(0.10);
+            }
+          }
+        });
     root->addWidget(make_group(QStringLiteral("Target / Board"), host));
   }
 
@@ -171,26 +277,56 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     spin_auto_cooldown_ms_ = make_int(host, 900, 100, 10000);
     spin_auto_cooldown_ms_->setSuffix(QStringLiteral(" ms"));
     chk_auto_capture_default_ = new QCheckBox(
-        QStringLiteral("进入工作台后默认开启自动采集"), host);
+        QStringLiteral("进入工作台默认自动采集"), host);
     chk_auto_capture_default_->setChecked(true);
-    chk_cb_adaptive_ = new QCheckBox(QStringLiteral("ADAPTIVE_THRESH"), host);
+    chk_cb_adaptive_ = new QCheckBox(QStringLiteral("ADAPTIVE"), host);
     chk_cb_adaptive_->setChecked(true);
-    chk_cb_normalize_ = new QCheckBox(QStringLiteral("NORMALIZE_IMAGE"), host);
+    chk_cb_normalize_ = new QCheckBox(QStringLiteral("NORMALIZE"), host);
     chk_cb_normalize_->setChecked(true);
     chk_cb_filter_quads_ = new QCheckBox(QStringLiteral("FILTER_QUADS"), host);
     chk_cb_fast_check_ = new QCheckBox(QStringLiteral("FAST_CHECK"), host);
     chk_cb_fast_check_->setChecked(true);
     spin_subpix_win_ = make_int(host, 11, 3, 31);
-    form->addRow(QStringLiteral("calibration_pairs (最少姿态)"), spin_min_views_);
-    form->addRow(QStringLiteral("min_confidence"), spin_min_confidence_);
-    form->addRow(QStringLiteral("pairs_min_distance (多样性)"), spin_min_diversity_);
-    form->addRow(QStringLiteral("auto_capture_cooldown"), spin_auto_cooldown_ms_);
-    form->addRow(QStringLiteral("auto_capture"), chk_auto_capture_default_);
-    form->addRow(QStringLiteral("findChessboard flags"), chk_cb_adaptive_);
-    form->addRow(QString(), chk_cb_normalize_);
-    form->addRow(QString(), chk_cb_filter_quads_);
-    form->addRow(QString(), chk_cb_fast_check_);
-    form->addRow(QStringLiteral("cornerSubPix window"), spin_subpix_win_);
+    combo_stereo_side_ = new QComboBox(host);
+    combo_stereo_side_->addItem(QStringLiteral("left"), QStringLiteral("left"));
+    combo_stereo_side_->addItem(QStringLiteral("right"), QStringLiteral("right"));
+
+    auto *capture_row = new QWidget(host);
+    auto *cap_lay = new QHBoxLayout(capture_row);
+    cap_lay->setContentsMargins(0, 0, 0, 0);
+    cap_lay->setSpacing(10);
+    cap_lay->addWidget(
+        make_field_unit(capture_row, QStringLiteral("最少姿态"), spin_min_views_, nullptr), 1);
+    cap_lay->addWidget(
+        make_field_unit(capture_row, QStringLiteral("置信度"), spin_min_confidence_, nullptr), 1);
+    cap_lay->addWidget(
+        make_field_unit(capture_row, QStringLiteral("多样性"), spin_min_diversity_, nullptr), 1);
+
+    auto *auto_row = new QWidget(host);
+    auto *auto_lay = new QHBoxLayout(auto_row);
+    auto_lay->setContentsMargins(0, 0, 0, 0);
+    auto_lay->setSpacing(10);
+    auto_lay->addWidget(
+        make_field_unit(auto_row, QStringLiteral("冷却"), spin_auto_cooldown_ms_, nullptr), 1);
+    auto_lay->addWidget(chk_auto_capture_default_, 1);
+
+    auto *flags_row = new QWidget(host);
+    chess_flags_row_ = flags_row;
+    auto *flags_lay = new QHBoxLayout(flags_row);
+    flags_lay->setContentsMargins(0, 0, 0, 0);
+    flags_lay->setSpacing(8);
+    flags_lay->addWidget(chk_cb_adaptive_);
+    flags_lay->addWidget(chk_cb_normalize_);
+    flags_lay->addWidget(chk_cb_filter_quads_);
+    flags_lay->addWidget(chk_cb_fast_check_);
+    flags_lay->addStretch(1);
+    flags_lay->addWidget(
+        make_field_unit(flags_row, QStringLiteral("subpix"), spin_subpix_win_, nullptr));
+
+    form->addRow(QStringLiteral("stereo_side"), combo_stereo_side_);
+    form->addRow(QStringLiteral("采集"), capture_row);
+    form->addRow(QStringLiteral("自动"), auto_row);
+    form->addRow(QStringLiteral("棋盘 flags"), flags_row);
     root->addWidget(make_group(QStringLiteral("Detection / Capture"), host));
   }
 
@@ -199,27 +335,47 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     auto *host = new QWidget(this);
     auto *form = new_form(host);
     combo_camera_model_ = new QComboBox(host);
-    combo_camera_model_->addItems({QStringLiteral("pinhole"), QStringLiteral("fisheye")});
-    chk_fix_principal_ = new QCheckBox(QStringLiteral("FIX_PRINCIPAL_POINT"), host);
-    chk_fix_aspect_ = new QCheckBox(QStringLiteral("FIX_ASPECT_RATIO"), host);
-    chk_zero_tangent_ = new QCheckBox(QStringLiteral("ZERO_TANGENT_DIST"), host);
+    combo_camera_model_->addItem(
+        QStringLiteral("Brown-Conrady (pinhole)"), QStringLiteral("brown_conrady"));
+    combo_camera_model_->addItem(
+        QStringLiteral("Kannala-Brandt (fisheye)"), QStringLiteral("kannala_brandt"));
+    combo_camera_model_->addItem(
+        QStringLiteral("CMei (omnidir)"), QStringLiteral("cmei"));
+    combo_camera_model_->setCurrentIndex(0);
+    chk_fix_principal_ = new QCheckBox(QStringLiteral("FIX_PP"), host);
+    chk_fix_aspect_ = new QCheckBox(QStringLiteral("FIX_ASPECT"), host);
+    chk_zero_tangent_ = new QCheckBox(QStringLiteral("ZERO_TANGENT"), host);
     chk_fix_k1_ = new QCheckBox(QStringLiteral("FIX_K1"), host);
     chk_fix_k2_ = new QCheckBox(QStringLiteral("FIX_K2"), host);
     chk_fix_k3_ = new QCheckBox(QStringLiteral("FIX_K3"), host);
     chk_fix_k3_->setChecked(true);
-    chk_rational_model_ = new QCheckBox(QStringLiteral("RATIONAL_MODEL"), host);
-    chk_thin_prism_ = new QCheckBox(QStringLiteral("THIN_PRISM_MODEL"), host);
-    chk_use_intrinsic_guess_ = new QCheckBox(QStringLiteral("USE_INTRINSIC_GUESS"), host);
-    form->addRow(QStringLiteral("camera_model"), combo_camera_model_);
-    form->addRow(QStringLiteral("flags"), chk_fix_principal_);
-    form->addRow(QString(), chk_fix_aspect_);
-    form->addRow(QString(), chk_zero_tangent_);
-    form->addRow(QString(), chk_fix_k1_);
-    form->addRow(QString(), chk_fix_k2_);
-    form->addRow(QString(), chk_fix_k3_);
-    form->addRow(QString(), chk_rational_model_);
-    form->addRow(QString(), chk_thin_prism_);
-    form->addRow(QString(), chk_use_intrinsic_guess_);
+    chk_rational_model_ = new QCheckBox(QStringLiteral("RATIONAL"), host);
+    chk_thin_prism_ = new QCheckBox(QStringLiteral("THIN_PRISM"), host);
+    chk_use_intrinsic_guess_ = new QCheckBox(QStringLiteral("USE_GUESS"), host);
+
+    auto *flags1 = new QWidget(host);
+    auto *f1 = new QHBoxLayout(flags1);
+    f1->setContentsMargins(0, 0, 0, 0);
+    f1->setSpacing(8);
+    for (auto *c : {chk_fix_principal_, chk_fix_aspect_, chk_zero_tangent_,
+                    chk_fix_k1_, chk_fix_k2_}) {
+      f1->addWidget(c);
+    }
+    f1->addStretch(1);
+
+    auto *flags2 = new QWidget(host);
+    auto *f2 = new QHBoxLayout(flags2);
+    f2->setContentsMargins(0, 0, 0, 0);
+    f2->setSpacing(8);
+    for (auto *c :
+         {chk_fix_k3_, chk_rational_model_, chk_thin_prism_, chk_use_intrinsic_guess_}) {
+      f2->addWidget(c);
+    }
+    f2->addStretch(1);
+
+    form->addRow(QStringLiteral("model"), combo_camera_model_);
+    form->addRow(QStringLiteral("flags"), flags1);
+    form->addRow(QString(), flags2);
     root->addWidget(make_group(QStringLiteral("Solver / Intrinsics"), host));
   }
 
@@ -231,9 +387,16 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     edit_child_frame_ = new QLineEdit(QStringLiteral("camera_optical_frame"), host);
     edit_export_path_ = new QLineEdit(host);
     edit_export_path_->setPlaceholderText(QStringLiteral("~/calib_out"));
-    form->addRow(QStringLiteral("parent_frame"), edit_parent_frame_);
-    form->addRow(QStringLiteral("child_frame"), edit_child_frame_);
-    form->addRow(QStringLiteral("export_dir"), edit_export_path_);
+    auto *tf_row = new QWidget(host);
+    auto *tf_lay = new QHBoxLayout(tf_row);
+    tf_lay->setContentsMargins(0, 0, 0, 0);
+    tf_lay->setSpacing(10);
+    tf_lay->addWidget(
+        make_field_unit(tf_row, QStringLiteral("parent"), edit_parent_frame_, nullptr), 1);
+    tf_lay->addWidget(
+        make_field_unit(tf_row, QStringLiteral("child"), edit_child_frame_, nullptr), 1);
+    form->addRow(QStringLiteral("frames"), tf_row);
+    form->addRow(QStringLiteral("export"), edit_export_path_);
     root->addWidget(make_group(QStringLiteral("Frames / Output"), host));
   }
 
@@ -292,24 +455,69 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     handeye_block_->setVisible(false);
   }
 
+  // ---- 双目外参（左右内参 YAML）----
+  {
+    stereo_extrinsics_block_ = new QWidget(this);
+    auto *form = new_form(stereo_extrinsics_block_);
+
+    edit_left_camera_yaml_ = new QLineEdit(stereo_extrinsics_block_);
+    edit_left_camera_yaml_->setPlaceholderText(QStringLiteral("camera_left.yaml"));
+    auto *browse_l = new QPushButton(QStringLiteral("浏览…"), stereo_extrinsics_block_);
+    browse_l->setObjectName(QStringLiteral("GhostButton"));
+    connect(
+        browse_l, &QPushButton::clicked, this,
+        &LauncherConfigPanel::browse_left_camera_yaml_clicked);
+    auto *left_row = new QWidget(stereo_extrinsics_block_);
+    auto *left_lay = new QHBoxLayout(left_row);
+    left_lay->setContentsMargins(0, 0, 0, 0);
+    left_lay->addWidget(edit_left_camera_yaml_, 1);
+    left_lay->addWidget(browse_l);
+
+    edit_right_camera_yaml_ = new QLineEdit(stereo_extrinsics_block_);
+    edit_right_camera_yaml_->setPlaceholderText(QStringLiteral("camera_right.yaml"));
+    auto *browse_r = new QPushButton(QStringLiteral("浏览…"), stereo_extrinsics_block_);
+    browse_r->setObjectName(QStringLiteral("GhostButton"));
+    connect(
+        browse_r, &QPushButton::clicked, this,
+        &LauncherConfigPanel::browse_right_camera_yaml_clicked);
+    auto *right_row = new QWidget(stereo_extrinsics_block_);
+    auto *right_lay = new QHBoxLayout(right_row);
+    right_lay->setContentsMargins(0, 0, 0, 0);
+    right_lay->addWidget(edit_right_camera_yaml_, 1);
+    right_lay->addWidget(browse_r);
+
+    form->addRow(QStringLiteral("left_camera_yaml"), left_row);
+    form->addRow(QStringLiteral("right_camera_yaml"), right_row);
+    root->addWidget(
+        make_group(QStringLiteral("Stereo extrinsics"), stereo_extrinsics_block_));
+    stereo_extrinsics_block_->setVisible(false);
+  }
+
   // ---- 可视化默认项 ----
   {
     auto *host = new QWidget(this);
     auto *form = new_form(host);
-    chk_viz_corners_ = new QCheckBox(QStringLiteral("draw chessboard corners"), host);
+    chk_viz_corners_ = new QCheckBox(QStringLiteral("角点"), host);
     chk_viz_corners_->setChecked(true);
-    chk_viz_hull_ = new QCheckBox(QStringLiteral("draw board hull"), host);
+    chk_viz_hull_ = new QCheckBox(QStringLiteral("凸包"), host);
     chk_viz_hull_->setChecked(true);
-    chk_viz_conf_ = new QCheckBox(QStringLiteral("show confidence text"), host);
+    chk_viz_conf_ = new QCheckBox(QStringLiteral("置信度"), host);
     chk_viz_conf_->setChecked(true);
-    chk_viz_aruco_ = new QCheckBox(QStringLiteral("draw ArUco markers + IDs"), host);
+    chk_viz_aruco_ = new QCheckBox(QStringLiteral("ArUco"), host);
     chk_viz_aruco_->setChecked(true);
     spin_viz_marker_radius_ = make_int(host, 4, 1, 20);
-    form->addRow(QStringLiteral("overlay"), chk_viz_corners_);
-    form->addRow(QString(), chk_viz_hull_);
-    form->addRow(QString(), chk_viz_conf_);
-    form->addRow(QString(), chk_viz_aruco_);
-    form->addRow(QStringLiteral("marker_size (px)"), spin_viz_marker_radius_);
+    auto *viz_row = new QWidget(host);
+    auto *viz_lay = new QHBoxLayout(viz_row);
+    viz_lay->setContentsMargins(0, 0, 0, 0);
+    viz_lay->setSpacing(8);
+    viz_lay->addWidget(chk_viz_corners_);
+    viz_lay->addWidget(chk_viz_hull_);
+    viz_lay->addWidget(chk_viz_conf_);
+    viz_lay->addWidget(chk_viz_aruco_);
+    viz_lay->addStretch(1);
+    viz_lay->addWidget(
+        make_field_unit(viz_row, QStringLiteral("半径"), spin_viz_marker_radius_, nullptr));
+    form->addRow(QStringLiteral("overlay"), viz_row);
     root->addWidget(make_group(QStringLiteral("Visualization"), host));
   }
 
@@ -337,6 +545,17 @@ QFormLayout *LauncherConfigPanel::new_form(QWidget *host) {
   return form;
 }
 
+/// \brief 按离线/ROS 显隐对应表单行（含左侧标签）
+void LauncherConfigPanel::refresh_source_mode_rows() {
+  const bool ros_mode =
+      combo_source_mode_ != nullptr &&
+      combo_source_mode_->currentData().toInt() == static_cast<int>(SourceMode::RosTopic);
+  set_form_row_visible(form_ros_, offline_row_, !ros_mode);
+  set_form_row_visible(form_ros_, topic_row_, ros_mode);
+  set_form_row_visible(form_ros_, camera_info_row_, ros_mode);
+  set_form_row_visible(form_ros_, chk_use_rectified_, ros_mode);
+}
+
 /// \brief 按字段显隐表单行
 void LauncherConfigPanel::set_form_row_visible(
     QFormLayout *form, QWidget *field, bool visible) {
@@ -362,24 +581,60 @@ void LauncherConfigPanel::update_board_param_visibility() {
   const bool charuco =
       t == QStringLiteral("charuco") || t == QStringLiteral("trihedral_charuco");
   const bool aruco =
-      t == QStringLiteral("aruco_grid") || t == QStringLiteral("trihedral_aruco");
+      t == QStringLiteral("aruco") || t == QStringLiteral("aruco_grid") ||
+      t == QStringLiteral("trihedral_aruco");
   const bool circles = t == QStringLiteral("circles_symmetric") ||
                        t == QStringLiteral("circles_asymmetric");
   const bool tag_family = charuco || aruco;
+  const bool aruco_single = t == QStringLiteral("aruco");
+  const bool square_board = t.startsWith(QStringLiteral("trihedral"));
 
-  // Tag / ChArUco：字典、标记边长、最远距离
   set_form_row_visible(form_target_, combo_dictionary_, tag_family);
-  set_form_row_visible(form_target_, spin_marker_length_, tag_family);
-  set_form_row_visible(form_target_, spin_max_tag_distance_, tag_family);
+  set_form_row_visible(form_target_, squares_row_, !aruco_single);
+  set_form_row_visible(form_target_, lengths_row_, true);
+  set_form_row_visible(form_target_, area_row_, true);
 
-  // 几何尺寸：各类靶标都需要行列 + 尺度；标签文案随类型变化
-  set_form_row_visible(form_target_, spin_squares_x_, true);
-  set_form_row_visible(form_target_, spin_squares_y_, true);
-  set_form_row_visible(form_target_, spin_square_length_, true);
-  set_form_row_visible(form_target_, spin_min_board_area_, true);
-  set_form_row_visible(form_target_, spin_max_board_area_, true);
+  if (spin_square_length_ != nullptr) {
+    spin_square_length_->setVisible(!aruco_single);
+  }
+  if (lab_square_length_ != nullptr) {
+    lab_square_length_->setVisible(!aruco_single);
+  }
+  if (spin_marker_length_ != nullptr) {
+    spin_marker_length_->setVisible(tag_family);
+  }
+  if (lab_marker_length_ != nullptr) {
+    lab_marker_length_->setVisible(tag_family);
+  }
+  if (spin_max_tag_distance_ != nullptr) {
+    spin_max_tag_distance_->setVisible(tag_family);
+    if (QWidget *p = spin_max_tag_distance_->parentWidget()) {
+      // 单元容器
+      if (p != area_row_) {
+        p->setVisible(tag_family);
+      }
+    }
+  }
 
-  auto set_lab = [this](QWidget *field, const QString &text) {
+  // 正方形三面靶：只显示一个 n，Y 同步隐藏
+  if (spin_squares_y_ != nullptr) {
+    spin_squares_y_->setVisible(!square_board);
+    if (QWidget *unit = spin_squares_y_->parentWidget()) {
+      if (unit != squares_row_) {
+        unit->setVisible(!square_board);
+      }
+    }
+  }
+  if (lab_squares_y_ != nullptr) {
+    lab_squares_y_->setVisible(!square_board);
+  }
+
+  auto set_unit_lab = [](QLabel *lab, const QString &text) {
+    if (lab != nullptr) {
+      lab->setText(text);
+    }
+  };
+  auto set_form_lab = [this](QWidget *field, const QString &text) {
     if (form_target_ == nullptr || field == nullptr) {
       return;
     }
@@ -390,63 +645,49 @@ void LauncherConfigPanel::update_board_param_visibility() {
     }
   };
 
-  if (chess) {
-    set_lab(spin_squares_x_, QStringLiteral("squares_x (内角点列)"));
-    set_lab(spin_squares_y_, QStringLiteral("squares_y (内角点行)"));
-    set_lab(spin_square_length_, QStringLiteral("square_length (方格边长)"));
-    if (t.startsWith(QStringLiteral("trihedral"))) {
-      set_lab(spin_squares_x_, QStringLiteral("squares_n (正方形内角点)"));
-      set_lab(spin_squares_y_, QStringLiteral("squares_n (同左，正方形)"));
-      // 保持正方形：两轴同步为较大值
-      if (spin_squares_x_ && spin_squares_y_) {
-        const int n = std::max(spin_squares_x_->value(), spin_squares_y_->value());
-        if (spin_squares_x_->value() != n) {
-          spin_squares_x_->setValue(n);
-        }
-        if (spin_squares_y_->value() != n) {
-          spin_squares_y_->setValue(n);
-        }
+  if (square_board) {
+    set_form_lab(squares_row_, QStringLiteral("网格 n"));
+    set_unit_lab(lab_squares_x_, QStringLiteral("n"));
+    if (spin_squares_x_ && spin_squares_y_) {
+      const int n = std::max(spin_squares_x_->value(), spin_squares_y_->value());
+      if (spin_squares_x_->value() != n) {
+        spin_squares_x_->setValue(n);
+      }
+      if (spin_squares_y_->value() != n) {
+        spin_squares_y_->setValue(n);
       }
     }
-  } else if (charuco) {
-    if (t == QStringLiteral("trihedral_charuco")) {
-      set_lab(spin_squares_x_, QStringLiteral("squares_n (内角点；方格=n+1)"));
-      set_lab(spin_squares_y_, QStringLiteral("squares_n (同左，正方形)"));
-      set_lab(spin_square_length_, QStringLiteral("square_length (方格边长)"));
-      set_lab(spin_marker_length_, QStringLiteral("marker_length (DICT_4X4_250)"));
-      if (spin_squares_x_ && spin_squares_y_) {
-        const int n = std::max(spin_squares_x_->value(), spin_squares_y_->value());
-        if (spin_squares_x_->value() != n) {
-          spin_squares_x_->setValue(n);
-        }
-        if (spin_squares_y_->value() != n) {
-          spin_squares_y_->setValue(n);
-        }
-      }
-    } else {
-      set_lab(spin_squares_x_, QStringLiteral("squares_x (方格列)"));
-      set_lab(spin_squares_y_, QStringLiteral("squares_y (方格行)"));
-      set_lab(spin_square_length_, QStringLiteral("square_length (方格边长)"));
-      set_lab(spin_marker_length_, QStringLiteral("marker_length (标记边长)"));
-    }
-  } else if (aruco) {
-    set_lab(spin_squares_x_, QStringLiteral("markers_x (标记列)"));
-    set_lab(spin_squares_y_, QStringLiteral("markers_y (标记行)"));
-    set_lab(spin_square_length_, QStringLiteral("cell_pitch (标记+间距)"));
-    set_lab(spin_marker_length_, QStringLiteral("marker_length (标记边长)"));
-  } else if (circles) {
-    set_lab(spin_squares_x_, QStringLiteral("circles_x (圆点列)"));
-    set_lab(spin_squares_y_, QStringLiteral("circles_y (圆点行)"));
-    set_lab(spin_square_length_, QStringLiteral("center_distance (圆心距)"));
+  } else {
+    set_form_lab(squares_row_, QStringLiteral("网格"));
+    set_unit_lab(lab_squares_x_, QStringLiteral("X"));
+    set_unit_lab(lab_squares_y_, QStringLiteral("Y"));
   }
 
-  // findChessboard 选项仅棋盘格 / 三面棋盘
-  const bool show_cb_flags = chess;
-  set_form_row_visible(form_detect_, chk_cb_adaptive_, show_cb_flags);
-  set_form_row_visible(form_detect_, chk_cb_normalize_, show_cb_flags);
-  set_form_row_visible(form_detect_, chk_cb_filter_quads_, show_cb_flags);
-  set_form_row_visible(form_detect_, chk_cb_fast_check_, show_cb_flags);
-  set_form_row_visible(form_detect_, spin_subpix_win_, show_cb_flags);
+  if (chess) {
+    set_unit_lab(lab_square_length_, QStringLiteral("方格"));
+  } else if (charuco) {
+    set_unit_lab(lab_square_length_, QStringLiteral("方格"));
+    set_unit_lab(lab_marker_length_, QStringLiteral("标记"));
+  } else if (aruco) {
+    if (aruco_single) {
+      set_unit_lab(lab_marker_length_, QStringLiteral("码边长"));
+    } else {
+      set_unit_lab(lab_squares_x_, QStringLiteral("列"));
+      set_unit_lab(lab_squares_y_, QStringLiteral("行"));
+      set_unit_lab(lab_square_length_, QStringLiteral("间距"));
+      set_unit_lab(lab_marker_length_, QStringLiteral("标记"));
+    }
+  } else if (circles) {
+    set_unit_lab(lab_squares_x_, QStringLiteral("列"));
+    set_unit_lab(lab_squares_y_, QStringLiteral("行"));
+    set_unit_lab(lab_square_length_, QStringLiteral("圆心距"));
+  }
+
+  set_form_row_visible(form_detect_, chess_flags_row_, chess);
+  set_form_row_visible(
+      form_detect_, combo_stereo_side_,
+      calibrator_id_ == QStringLiteral("stereo_intrinsics") ||
+          calibrator_id_ == QStringLiteral("stereo_extrinsics"));
 }
 
 /// \brief 切换标定器并调整手眼块/默认靶标
@@ -489,6 +730,27 @@ void LauncherConfigPanel::set_calibrator_id(const QString &id) {
     }
   } else if (spin_min_views_ != nullptr) {
     spin_min_views_->setMinimum(1);
+  }
+  if (combo_stereo_side_ != nullptr && form_detect_ != nullptr) {
+    const bool stereo = id == QStringLiteral("stereo_intrinsics") ||
+                        id == QStringLiteral("stereo_extrinsics");
+    set_form_row_visible(form_detect_, combo_stereo_side_, stereo);
+    // 左右各至少约 3 帧；默认总数 6
+    if (stereo && spin_min_views_ != nullptr && prev != id) {
+      spin_min_views_->setValue(6);
+    }
+  }
+  if (stereo_extrinsics_block_ != nullptr) {
+    const bool se = id == QStringLiteral("stereo_extrinsics");
+    stereo_extrinsics_block_->setVisible(se);
+    if (se && prev != id) {
+      if (edit_parent_frame_ != nullptr) {
+        edit_parent_frame_->setText(QStringLiteral("left"));
+      }
+      if (edit_child_frame_ != nullptr) {
+        edit_child_frame_->setText(QStringLiteral("right"));
+      }
+    }
   }
   update_board_param_visibility();
 }
@@ -536,9 +798,29 @@ std::map<std::string, std::string> LauncherConfigPanel::to_config_map() const {
       {"target", combo_target_type_ ? combo_target_type_->currentText().toStdString()
                                     : "chessboard"},
       {"dictionary", combo_dictionary_ ? combo_dictionary_->currentText().toStdString()
-                                       : "DICT_4X4_250"},
-      {"model", combo_camera_model_ ? combo_camera_model_->currentText().toStdString()
-                                    : "pinhole"},
+                                       : "DICT_6X6_1000"},
+      {"model",
+       [&]() -> std::string {
+         if (!combo_camera_model_) {
+           return "brown_conrady";
+         }
+         const QVariant d = combo_camera_model_->currentData();
+         if (d.isValid() && !d.toString().isEmpty()) {
+           return d.toString().toStdString();
+         }
+         return combo_camera_model_->currentText().toStdString();
+       }()},
+      {"stereo_side",
+       [&]() -> std::string {
+         if (!combo_stereo_side_) {
+           return "left";
+         }
+         const QVariant d = combo_stereo_side_->currentData();
+         if (d.isValid() && !d.toString().isEmpty()) {
+           return d.toString().toStdString();
+         }
+         return "left";
+       }()},
       {"min_views", std::to_string(min_views())},
       {"min_confidence", std::to_string(min_confidence())},
       {"min_diversity", std::to_string(min_diversity())},
@@ -563,7 +845,9 @@ std::map<std::string, std::string> LauncherConfigPanel::to_config_map() const {
       {"use_rectified_image", b(chk_use_rectified_->isChecked())},
       {"image_frame", edit_image_frame_->text().trimmed().toStdString()},
       {"camera_link_frame", edit_camera_link_frame_->text().trimmed().toStdString()},
-      {"camera_info_topic", edit_camera_info_topic_->text().trimmed().toStdString()},
+      {"camera_info_topic",
+       combo_camera_info_topic_ ? combo_camera_info_topic_->currentText().trimmed().toStdString()
+                                : ""},
       {"parent_frame", edit_parent_frame_->text().trimmed().toStdString()},
       {"child_frame", edit_child_frame_->text().trimmed().toStdString()},
       {"viz_corners", b(chk_viz_corners_->isChecked())},
@@ -577,6 +861,14 @@ std::map<std::string, std::string> LauncherConfigPanel::to_config_map() const {
   }
   if (edit_camera_yaml_ != nullptr && !edit_camera_yaml_->text().trimmed().isEmpty()) {
     m["camera_yaml"] = edit_camera_yaml_->text().trimmed().toStdString();
+  }
+  if (edit_left_camera_yaml_ != nullptr &&
+      !edit_left_camera_yaml_->text().trimmed().isEmpty()) {
+    m["left_camera_yaml"] = edit_left_camera_yaml_->text().trimmed().toStdString();
+  }
+  if (edit_right_camera_yaml_ != nullptr &&
+      !edit_right_camera_yaml_->text().trimmed().isEmpty()) {
+    m["right_camera_yaml"] = edit_right_camera_yaml_->text().trimmed().toStdString();
   }
   return m;
 }
@@ -666,6 +958,34 @@ void LauncherConfigPanel::set_config_path(const QString &path) {
 void LauncherConfigPanel::set_image_dir(const QString &path) {
   if (edit_image_dir_) {
     edit_image_dir_->setText(path);
+  }
+}
+
+/// \brief 应用项目默认坐标系
+void LauncherConfigPanel::apply_project_frames(
+    const QString &parent_frame,
+    const QString &child_frame,
+    const QString &base_frame,
+    const QString &gripper_frame,
+    const QString &image_frame,
+    const QString &camera_link_frame) {
+  if (edit_parent_frame_ && !parent_frame.isEmpty()) {
+    edit_parent_frame_->setText(parent_frame);
+  }
+  if (edit_child_frame_ && !child_frame.isEmpty()) {
+    edit_child_frame_->setText(child_frame);
+  }
+  if (edit_base_frame_ && !base_frame.isEmpty()) {
+    edit_base_frame_->setText(base_frame);
+  }
+  if (edit_gripper_frame_ && !gripper_frame.isEmpty()) {
+    edit_gripper_frame_->setText(gripper_frame);
+  }
+  if (edit_image_frame_ && !image_frame.isEmpty()) {
+    edit_image_frame_->setText(image_frame);
+  }
+  if (edit_camera_link_frame_ && !camera_link_frame.isEmpty()) {
+    edit_camera_link_frame_->setText(camera_link_frame);
   }
 }
 

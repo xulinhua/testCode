@@ -14,6 +14,8 @@ struct DetectedMarkers {
   std::vector<int> ids;
   /// \brief 几何分面结果：-1 未归类，0/1/2 = XY/XZ/YZ（与码 ID 无关）
   std::vector<int> face_ids;
+  /// \brief 实际命中的字典名（单码多字典回退时填写）
+  std::string dictionary_name;
   bool empty() const { return ids.empty(); }
 };
 

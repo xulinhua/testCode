@@ -52,6 +52,12 @@ public:
   bool is_handeye() const;
   /// \brief 是否为单目内参标定器
   bool is_intrinsics() const;
+  /// \brief 是否为双目各自内参
+  bool is_stereo_intrinsics() const;
+  /// \brief 是否为双目相对外参
+  bool is_stereo_extrinsics() const;
+  /// \brief 是否为需左右侧标记的双目流程（内参分侧 / 外参成对）
+  bool is_stereo_side_tagged() const;
   /// \brief 是否为直角三面标定器
   bool is_trihedral() const;
 
@@ -105,6 +111,17 @@ public:
   /// \brief 角点/码绘制半径
   int viz_marker_radius() const { return viz_marker_radius_; }
 
+  /// \brief 设置检测用内参（CameraInfo / YAML）；空 Mat 则用 guess_K
+  void set_detect_intrinsics(
+      const cv::Mat &camera_matrix,
+      const cv::Mat &dist_coeffs,
+      const std::string &model = "brown_conrady",
+      double xi = 0.0);
+  /// \brief 是否已有检测用内参
+  bool has_detect_intrinsics() const { return !detect_K_.empty(); }
+  /// \brief 当前检测用畸变模型
+  std::string detect_camera_model() const { return detect_model_; }
+
   /// \brief 设置手眼 TF 坐标系
   void set_handeye_frames(const QString &base, const QString &gripper);
   /// \brief 设置手眼求解方法名
@@ -151,11 +168,15 @@ public:
   bool detect_busy() const { return detect_busy_.load(); }
   /// \brief 最近一次检出的面数（三面靶）
   int last_faces_found() const { return last_faces_found_; }
+  /// \brief 最近一次有效检测的图像点数（失败为 0）
+  int last_point_count() const;
 
   /// \brief 当前帧是否有有效检测
   bool has_current_detection() const { return has_detection_; }
   /// \brief 最近检测置信度
   double last_confidence() const { return last_confidence_; }
+  /// \brief 最近 ArUco 轴位姿平均重投影误差（px）；无有效值时 < 0
+  double last_aruco_reproj_px() const { return last_aruco_reproj_px_; }
   /// \brief 最近检测叠加预览
   QImage last_preview() const { return last_preview_; }
 
@@ -238,6 +259,10 @@ private:
   int viz_marker_radius_ = 4;
 
   QString camera_yaml_;
+  cv::Mat detect_K_;   ///< 检测叠加坐标系用（CameraInfo / YAML）
+  cv::Mat detect_D_;
+  std::string detect_model_ = "brown_conrady";
+  double detect_xi_ = 0.0;
   QString base_frame_ = QStringLiteral("base");
   QString gripper_frame_ = QStringLiteral("tool0");
   QString handeye_method_ = QStringLiteral("tsai");
@@ -254,6 +279,7 @@ private:
   int detect_width_ = 0;
   int detect_height_ = 0;
   double last_confidence_ = 0.0;
+  double last_aruco_reproj_px_ = -1.0;
   int last_faces_found_ = 0;
   QImage last_preview_;
 

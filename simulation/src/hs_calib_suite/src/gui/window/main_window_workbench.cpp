@@ -4,6 +4,7 @@
 
 #include "hs_calib_suite/gui/theme/app_style.hpp"
 #include "hs_calib_suite/gui/widgets/image_view_widget.hpp"
+#include "hs_calib_suite/gui/widgets/review_charts_widget.hpp"
 #include "hs_calib_suite/gui/panels/launcher_config_panel.hpp"
 #include "hs_calib_suite/gui/bridges/ros_image_bridge.hpp"
 #include "hs_calib_suite/gui/session/session_controller.hpp"
@@ -11,9 +12,11 @@
 
 #include "hs_calib_suite/core/io/export_camera_yaml.hpp"
 #include "hs_calib_suite/core/io/board_config_yaml.hpp"
+#include "hs_calib_suite/core/review/review_diagnostics.hpp"
 
 #include <functional>
 #include <memory>
+#include <algorithm>
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -130,7 +133,7 @@ void MainWindow::apply_workbench_viz_to_session() {
   session_->set_viz_options(corners, hull, conf, radius, aruco);
 }
 
-/// \brief 按是否手眼显隐相关块
+/// \brief 按是否手眼 / 双目外参显隐相关块
 void MainWindow::refresh_handeye_ui() {
   const bool he =
       selected_calibrator_id_ == QStringLiteral("eye_in_hand") ||
@@ -138,14 +141,17 @@ void MainWindow::refresh_handeye_ui() {
   if (handeye_block_ != nullptr) {
     handeye_block_->setVisible(he);
   }
+  if (launcher_panel_ != nullptr && launcher_panel_->stereo_extrinsics_block() != nullptr) {
+    launcher_panel_->stereo_extrinsics_block()->setVisible(
+        selected_calibrator_id_ == QStringLiteral("stereo_extrinsics"));
+  }
 }
 
 /// \brief 刷新设置页就绪检查清单
 void MainWindow::refresh_setup_readiness() {
-  if (setup_check_list_ == nullptr || session_ == nullptr) {
+  if (setup_ready_label_ == nullptr || session_ == nullptr) {
     return;
   }
-  setup_check_list_->clear();
   const bool he = session_->is_handeye() ||
                   selected_calibrator_id_ == QStringLiteral("eye_in_hand") ||
                   selected_calibrator_id_ == QStringLiteral("eye_to_hand");
@@ -154,7 +160,7 @@ void MainWindow::refresh_setup_readiness() {
        combo_source_mode_->currentData().toInt() == static_cast<int>(SourceMode::RosTopic)) ||
       session_->source_mode() == SourceMode::RosTopic;
 
-  // —— 按模式汇总就绪项 ——
+  QStringList parts;
   bool can_start = true;
   if (ros_mode) {
     const bool ros_ok = ros_bridge_ && ros_bridge_->is_ready();
@@ -162,74 +168,78 @@ void MainWindow::refresh_setup_readiness() {
         combo_image_topic_ != nullptr ? combo_image_topic_->currentText() : QString();
     const bool topic_ok = !topic.isEmpty();
     const bool frame_ok = ros_bridge_ && ros_bridge_->has_frame();
-    setup_check_list_->addItem(
-        (ros_ok ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-        QStringLiteral("ROS 节点就绪"));
-    setup_check_list_->addItem(
-        (topic_ok ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-        QStringLiteral("已选择图像话题"));
-    setup_check_list_->addItem(
-        (frame_ok ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-        QStringLiteral("话题已有图像数据"));
+    parts << (ros_ok ? QStringLiteral("ROS✓") : QStringLiteral("ROS○"));
+    parts << (topic_ok ? QStringLiteral("话题✓") : QStringLiteral("话题○"));
+    parts << (frame_ok ? QStringLiteral("有图✓") : QStringLiteral("有图○"));
     can_start = ros_ok && topic_ok;
   } else {
     const QString dir =
         edit_image_dir_ != nullptr ? edit_image_dir_->text().trimmed() : QString();
     const int n = session_->image_paths().size();
     const bool dir_ok = !dir.isEmpty() && n > 0;
-    setup_check_list_->addItem(
-        (dir_ok ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-        QStringLiteral("图片目录可读（%1 张）").arg(n));
-    setup_check_list_->addItem(
-        (n >= 3 ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-        QStringLiteral("建议至少 3 张可用于求解"));
+    parts << (dir_ok ? QStringLiteral("目录✓ %1张").arg(n)
+                     : QStringLiteral("目录○"));
     can_start = dir_ok;
   }
   {
     QString target = QStringLiteral("chessboard");
-    QString model = QStringLiteral("pinhole");
+    QString model = QStringLiteral("brown_conrady");
     int min_views = 12;
     if (launcher_panel_ != nullptr) {
       if (launcher_panel_->combo_target_type() != nullptr) {
         target = launcher_panel_->combo_target_type()->currentText();
       }
       if (launcher_panel_->combo_camera_model() != nullptr) {
-        model = launcher_panel_->combo_camera_model()->currentText();
+        const QVariant d = launcher_panel_->combo_camera_model()->currentData();
+        model = d.isValid() && !d.toString().isEmpty()
+            ? d.toString()
+            : launcher_panel_->combo_camera_model()->currentText();
       }
       min_views = launcher_panel_->min_views();
     }
-    setup_check_list_->addItem(
-        QStringLiteral("● 靶标：%1 · 模型：%2 · 建议姿态 ≥%3")
-            .arg(target, model)
-            .arg(min_views));
+    parts << QStringLiteral("%1 · %2 · ≥%3姿").arg(target, model).arg(min_views);
   }
 
   if (he) {
     const QString cam =
         edit_camera_yaml_ != nullptr ? edit_camera_yaml_->text().trimmed() : QString();
     const bool cam_ok = !cam.isEmpty();
-    setup_check_list_->addItem(
-        (cam_ok ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-        QStringLiteral("已指定相机内参 YAML"));
+    parts << (cam_ok ? QStringLiteral("内参✓") : QStringLiteral("内参○"));
     can_start = can_start && cam_ok;
     const int pose_mode =
         combo_pose_source_ != nullptr ? combo_pose_source_->currentData().toInt()
                                       : static_cast<int>(PoseSource::Csv);
     if (pose_mode == static_cast<int>(PoseSource::Csv)) {
       const bool csv_ok = session_->pose_csv_count() > 0;
-      setup_check_list_->addItem(
-          (csv_ok ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-          QStringLiteral("位姿 CSV 已加载（%1）").arg(session_->pose_csv_count()));
+      parts << (csv_ok ? QStringLiteral("CSV✓%1").arg(session_->pose_csv_count())
+                       : QStringLiteral("CSV○"));
       can_start = can_start && csv_ok;
     } else {
       const bool tf_ok = tf_bridge_ && tf_bridge_->is_ready();
-      setup_check_list_->addItem(
-          (tf_ok ? QStringLiteral("● ") : QStringLiteral("○ ")) +
-          QStringLiteral("TF 桥就绪（采集时查询）"));
+      parts << (tf_ok ? QStringLiteral("TF✓") : QStringLiteral("TF○"));
       can_start = can_start && tf_ok;
     }
   }
 
+  const bool stereo_ext =
+      selected_calibrator_id_ == QStringLiteral("stereo_extrinsics") ||
+      (session_ && session_->is_stereo_extrinsics());
+  if (stereo_ext && launcher_panel_ != nullptr) {
+    const QString left =
+        launcher_panel_->edit_left_camera_yaml()
+            ? launcher_panel_->edit_left_camera_yaml()->text().trimmed()
+            : QString();
+    const QString right =
+        launcher_panel_->edit_right_camera_yaml()
+            ? launcher_panel_->edit_right_camera_yaml()->text().trimmed()
+            : QString();
+    const bool ok = !left.isEmpty() && !right.isEmpty();
+    parts << (ok ? QStringLiteral("左右YAML✓") : QStringLiteral("左右YAML○"));
+    can_start = can_start && ok;
+  }
+
+  setup_ready_label_->setText(parts.join(QStringLiteral("  ·  ")));
+  setup_ready_label_->setToolTip(parts.join(QStringLiteral("\n")));
   if (btn_start_session_ != nullptr) {
     btn_start_session_->setEnabled(can_start);
   }
@@ -237,43 +247,137 @@ void MainWindow::refresh_setup_readiness() {
 
 /// \brief 按离线/ROS 切换源相关控件
 void MainWindow::refresh_setup_source_ui() {
-  const bool ros_mode =
-      combo_source_mode_ != nullptr &&
-      combo_source_mode_->currentData().toInt() == static_cast<int>(SourceMode::RosTopic);
-  if (offline_row_ != nullptr) {
-    offline_row_->setVisible(!ros_mode);
+  if (launcher_panel_ != nullptr) {
+    launcher_panel_->refresh_source_mode_rows();
+  } else {
+    const bool ros_mode =
+        combo_source_mode_ != nullptr &&
+        combo_source_mode_->currentData().toInt() == static_cast<int>(SourceMode::RosTopic);
+    if (offline_row_ != nullptr) {
+      offline_row_->setVisible(!ros_mode);
+    }
+    if (topic_row_ != nullptr) {
+      topic_row_->setVisible(ros_mode);
+    }
   }
-  if (topic_row_ != nullptr) {
-    topic_row_->setVisible(ros_mode);
-  }
-  if (btn_prev_ != nullptr) {
-    btn_prev_->setEnabled(!ros_mode);
-    btn_next_->setEnabled(!ros_mode);
-  }
+  update_workbench_mode_actions();
 }
 
-/// \brief 刷新 ROS 图像话题下拉
+/// \brief 刷新 ROS 图像 / CameraInfo 话题下拉
 void MainWindow::refresh_topic_list() {
-  if (combo_image_topic_ == nullptr || ros_bridge_ == nullptr) {
+  if (ros_bridge_ == nullptr) {
     return;
   }
-  const QString prev = combo_image_topic_->currentText();
-  const QStringList topics = ros_bridge_->list_image_topics();
-  combo_image_topic_->blockSignals(true);
-  combo_image_topic_->clear();
-  combo_image_topic_->addItems(topics);
-  int idx = combo_image_topic_->findText(prev);
-  if (idx >= 0) {
-    combo_image_topic_->setCurrentIndex(idx);
-  } else if (!topics.isEmpty()) {
-    combo_image_topic_->setCurrentIndex(0);
+  if (combo_image_topic_ != nullptr) {
+    const QString prev = combo_image_topic_->currentText();
+    const QStringList topics = ros_bridge_->list_image_topics();
+    combo_image_topic_->blockSignals(true);
+    combo_image_topic_->clear();
+    combo_image_topic_->addItems(topics);
+    int idx = combo_image_topic_->findText(prev);
+    if (idx >= 0) {
+      combo_image_topic_->setCurrentIndex(idx);
+    } else if (!topics.isEmpty()) {
+      combo_image_topic_->setCurrentIndex(0);
+    } else if (!prev.isEmpty()) {
+      combo_image_topic_->setEditText(prev);
+    }
+    combo_image_topic_->blockSignals(false);
+    append_log(LogLevel::Info, QStringLiteral("› 刷新图像话题：%1 个").arg(topics.size()));
+    if (!combo_image_topic_->currentText().isEmpty()) {
+      on_topic_changed(combo_image_topic_->currentText());
+    }
   }
-  combo_image_topic_->blockSignals(false);
-  append_log(LogLevel::Info, QStringLiteral("› 刷新图像话题：%1 个").arg(topics.size()));
-  if (combo_image_topic_->currentIndex() >= 0) {
-    on_topic_changed(combo_image_topic_->currentText());
+
+  if (combo_camera_info_topic_ != nullptr) {
+    const QString prev_info = combo_camera_info_topic_->currentText();
+    const QStringList info_topics = ros_bridge_->list_camera_info_topics();
+    combo_camera_info_topic_->blockSignals(true);
+    combo_camera_info_topic_->clear();
+    combo_camera_info_topic_->addItems(info_topics);
+    int idx = combo_camera_info_topic_->findText(prev_info);
+    if (idx >= 0) {
+      combo_camera_info_topic_->setCurrentIndex(idx);
+    } else {
+      // 常见约定：image_raw → camera_info
+      QString guess;
+      if (combo_image_topic_ != nullptr) {
+        const QString img = combo_image_topic_->currentText();
+        if (img.contains(QStringLiteral("image_raw"))) {
+          guess = img;
+          guess.replace(QStringLiteral("image_raw"), QStringLiteral("camera_info"));
+        } else if (img.contains(QStringLiteral("image"))) {
+          guess = img;
+          guess.replace(QStringLiteral("/image"), QStringLiteral("/camera_info"));
+        }
+      }
+      const int gidx = combo_camera_info_topic_->findText(guess);
+      if (gidx >= 0) {
+        combo_camera_info_topic_->setCurrentIndex(gidx);
+      } else if (!info_topics.isEmpty()) {
+        combo_camera_info_topic_->setCurrentIndex(0);
+      } else if (!prev_info.isEmpty()) {
+        combo_camera_info_topic_->setEditText(prev_info);
+      } else if (!guess.isEmpty()) {
+        combo_camera_info_topic_->setEditText(guess);
+      }
+    }
+    combo_camera_info_topic_->blockSignals(false);
+    append_log(
+        LogLevel::Info,
+        QStringLiteral("› 刷新 CameraInfo 话题：%1 个").arg(info_topics.size()));
+    if (!combo_camera_info_topic_->currentText().isEmpty()) {
+      on_camera_info_topic_changed(combo_camera_info_topic_->currentText());
+    }
   }
   refresh_setup_readiness();
+}
+
+/// \brief CameraInfo 话题变更并订阅内参
+void MainWindow::on_camera_info_topic_changed(const QString &topic) {
+  if (ros_bridge_ == nullptr) {
+    return;
+  }
+  ros_bridge_->subscribe_camera_info(topic);
+  append_log(
+      topic.isEmpty() ? LogLevel::Warn : LogLevel::Info,
+      topic.isEmpty() ? QStringLiteral("› 已清空 CameraInfo 订阅")
+                      : QStringLiteral("› 订阅 CameraInfo：%1").arg(topic));
+  sync_detect_intrinsics_from_sources();
+}
+
+/// \brief 从 CameraInfo / camera_yaml 同步检测用内参
+void MainWindow::sync_detect_intrinsics_from_sources() {
+  if (session_ == nullptr) {
+    return;
+  }
+  if (ros_bridge_ != nullptr && ros_bridge_->has_camera_info()) {
+    session_->set_detect_intrinsics(
+        ros_bridge_->camera_matrix(), ros_bridge_->dist_coeffs(),
+        ros_bridge_->distortion_model().toStdString(), 0.0);
+    return;
+  }
+  // 双目外参：按当前采集侧选用左右 YAML
+  if (session_->is_stereo_extrinsics() && launcher_panel_ != nullptr) {
+    QString path;
+    const auto &opts = session_->solve_options();
+    const auto it = opts.find("stereo_side");
+    const bool right =
+        it != opts.end() &&
+        (it->second == "right" || it->second == "RIGHT" || it->second == "R");
+    if (right && launcher_panel_->edit_right_camera_yaml() != nullptr) {
+      path = launcher_panel_->edit_right_camera_yaml()->text().trimmed();
+    } else if (launcher_panel_->edit_left_camera_yaml() != nullptr) {
+      path = launcher_panel_->edit_left_camera_yaml()->text().trimmed();
+    }
+    if (!path.isEmpty()) {
+      session_->set_camera_yaml(path);
+      return;
+    }
+  }
+  if (edit_camera_yaml_ != nullptr && !edit_camera_yaml_->text().trimmed().isEmpty()) {
+    session_->set_camera_yaml(edit_camera_yaml_->text().trimmed());
+  }
 }
 
 /// \brief 源模式变更处理
@@ -302,6 +406,7 @@ void MainWindow::on_source_mode_changed(int index) {
     refresh_topic_list();
   } else if (ros_bridge_) {
     ros_bridge_->unsubscribe();
+    ros_bridge_->unsubscribe_camera_info();
   }
   refresh_setup_readiness();
   const int page = stack_ != nullptr ? stack_->currentIndex() : 0;
@@ -322,6 +427,18 @@ void MainWindow::on_topic_changed(const QString &topic) {
       topic.isEmpty() ? LogLevel::Warn : LogLevel::Info,
       topic.isEmpty() ? QStringLiteral("› 已清空图像话题订阅")
                       : QStringLiteral("› 订阅图像话题：%1").arg(topic));
+  if (combo_camera_info_topic_ != nullptr && !topic.isEmpty()) {
+    QString guess = topic;
+    if (guess.contains(QStringLiteral("image_raw"))) {
+      guess.replace(QStringLiteral("image_raw"), QStringLiteral("camera_info"));
+      if (combo_camera_info_topic_->findText(guess) >= 0 ||
+          combo_camera_info_topic_->currentText().isEmpty() ||
+          combo_camera_info_topic_->currentText() == QStringLiteral("/camera/camera_info")) {
+        combo_camera_info_topic_->setEditText(guess);
+        on_camera_info_topic_changed(guess);
+      }
+    }
+  }
   refresh_setup_readiness();
 }
 
@@ -361,15 +478,17 @@ void MainWindow::run_live_preview_tick(bool allow_auto_capture) {
   }
   update_detect_status_ui();
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
-  // 实时检测节流：约 5–8 Hz，避免一直 busy 且看不到叠加
-  if (now - last_live_detect_ms_ < 150) {
+  // 实时检测节流：约 4–5 Hz；Fast 路径下足够流畅
+  if (now - last_live_detect_ms_ < 200) {
     return;
   }
   if (session_->detect_busy()) {
     return;
   }
   last_live_detect_ms_ = now;
-  session_->request_detect(session_->is_trihedral());
+  sync_detect_intrinsics_from_sources();
+  // 实时预览一律 Fast，避免 ArUco 多字典/2× 把 UI 卡在「检测中…」
+  session_->request_detect(true);
 }
 
 /// \brief 异步检测开始：更新忙状态 UI
@@ -377,6 +496,18 @@ void MainWindow::on_async_detect_started() {
   update_detect_status_ui();
   if (btn_detect_ != nullptr) {
     btn_detect_->setText(QStringLiteral("检测中…"));
+  }
+  if (stack_ != nullptr &&
+      stack_->currentIndex() == static_cast<int>(PageId::DetectLab)) {
+    if (btn_lab_detect_ != nullptr) {
+      btn_lab_detect_->setEnabled(false);
+    }
+    if (btn_lab_detect_fast_ != nullptr) {
+      btn_lab_detect_fast_->setEnabled(false);
+    }
+    if (lab_stats_ != nullptr) {
+      lab_stats_->setText(QStringLiteral("检测中…"));
+    }
   }
 }
 
@@ -387,12 +518,37 @@ void MainWindow::on_async_detect_finished(bool ok, const QString &err) {
   }
   update_detect_status_ui();
 
+  const bool on_lab =
+      stack_ != nullptr &&
+      stack_->currentIndex() == static_cast<int>(PageId::DetectLab);
+
   // —— 刷新叠加预览 ——
   // 实时/冻结都显示带叠加的预览（否则实时几乎看不到渲染）
   QImage img = session_ != nullptr ? session_->last_preview() : QImage();
   if (img.isNull() && session_ != nullptr) {
     img = session_->load_current_qimage();
   }
+  if (on_lab) {
+    refresh_detect_lab_view(true);
+    if (lab_pending_log_) {
+      lab_pending_log_ = false;
+      if (ok) {
+        append_log(
+            LogLevel::Info,
+            QStringLiteral("› 检测台成功：pts=%1 conf=%2% faces=%3")
+                .arg(session_->last_point_count())
+                .arg(qRound(session_->last_confidence() * 100.0))
+                .arg(session_->last_faces_found()));
+      } else {
+        append_log(LogLevel::Error, QStringLiteral("› 检测台失败：%1").arg(err));
+        if (lab_stats_ != nullptr) {
+          lab_stats_->setText(QStringLiteral("失败：%1").arg(err));
+        }
+      }
+    }
+    return;
+  }
+
   if (!img.isNull()) {
     show_preview_image(img);
   }
@@ -464,6 +620,17 @@ void MainWindow::update_detect_status_ui() {
       set_metric_value(metric_detect_, text);
     } else {
       set_metric_value(metric_detect_, QStringLiteral("—"));
+    }
+  }
+  if (metric_reproj_ != nullptr) {
+    if (busy) {
+      set_metric_value(metric_reproj_, QStringLiteral("…"));
+    } else if (session_->last_aruco_reproj_px() >= 0.0) {
+      set_metric_value(
+          metric_reproj_,
+          QStringLiteral("%1 px").arg(session_->last_aruco_reproj_px(), 0, 'f', 1));
+    } else {
+      set_metric_value(metric_reproj_, QStringLiteral("—"));
     }
   }
   update_preview_mode_ui();
@@ -543,13 +710,11 @@ void MainWindow::update_preview_mode_ui() {
       }
     }
     if (!session_->has_live_frame() && preview_live_) {
-      workbench_path_label_->setText(
-          QStringLiteral("等待话题图像 · %1").arg(path));
+      set_workbench_path_text(QStringLiteral("等待话题图像 · %1").arg(path));
     } else if (preview_live_) {
-      workbench_path_label_->setText(
-          QStringLiteral("实时 · %1%2").arg(path, extra));
+      set_workbench_path_text(QStringLiteral("实时 · %1%2").arg(path, extra));
     } else {
-      workbench_path_label_->setText(
+      set_workbench_path_text(
           QStringLiteral("冻结 · %1%2  （空格切换）").arg(path, extra));
     }
   }
@@ -557,6 +722,44 @@ void MainWindow::update_preview_mode_ui() {
   if (chk_auto_capture_ != nullptr) {
     chk_auto_capture_->setEnabled(ros_mode && preview_live_);
   }
+}
+
+/// \brief 在线/离线切换工作台按钮显隐（右侧动作区宽度不随左侧文案变化）
+void MainWindow::update_workbench_mode_actions() {
+  const bool ros_mode =
+      (session_ != nullptr && session_->source_mode() == SourceMode::RosTopic) ||
+      (combo_source_mode_ != nullptr &&
+       combo_source_mode_->currentData().toInt() == static_cast<int>(SourceMode::RosTopic));
+  if (btn_prev_ != nullptr) {
+    btn_prev_->setVisible(!ros_mode);
+  }
+  if (btn_next_ != nullptr) {
+    btn_next_->setVisible(!ros_mode);
+  }
+  if (chk_auto_capture_ != nullptr) {
+    chk_auto_capture_->setVisible(ros_mode);
+    if (!ros_mode) {
+      chk_auto_capture_->setChecked(false);
+    }
+  }
+}
+
+/// \brief 设置工作台路径文案（中间省略，避免挤占右侧按钮）
+void MainWindow::set_workbench_path_text(const QString &text) {
+  if (workbench_path_label_ == nullptr) {
+    return;
+  }
+  workbench_path_label_->setToolTip(text);
+  int avail = workbench_path_label_->width();
+  if (avail < 60) {
+    if (auto *parent = workbench_path_label_->parentWidget()) {
+      avail = std::max(60, parent->width() - 28);
+    } else {
+      avail = 360;
+    }
+  }
+  workbench_path_label_->setText(
+      workbench_path_label_->fontMetrics().elidedText(text, Qt::ElideMiddle, avail));
 }
 
 /// \brief 在预览控件显示图像
@@ -583,7 +786,7 @@ void MainWindow::refresh_workbench_view(bool update_preview) {
   const bool ros_mode = session_->source_mode() == SourceMode::RosTopic;
   if (workbench_path_label_ != nullptr && !ros_mode) {
     const QString path = session_->current_path();
-    workbench_path_label_->setText(
+    set_workbench_path_text(
         path.isEmpty()
             ? QStringLiteral("无图片")
             : QStringLiteral("%1 / %2  ·  %3")
@@ -592,14 +795,7 @@ void MainWindow::refresh_workbench_view(bool update_preview) {
                   .arg(path));
   }
   update_preview_mode_ui();
-
-  if (btn_prev_ != nullptr) {
-    btn_prev_->setEnabled(!ros_mode);
-    btn_next_->setEnabled(!ros_mode);
-  }
-  if (chk_auto_capture_ != nullptr && !ros_mode) {
-    chk_auto_capture_->setChecked(false);
-  }
+  update_workbench_mode_actions();
 
   if (update_preview && preview_view_ != nullptr) {
     QImage img;
@@ -620,7 +816,21 @@ void MainWindow::refresh_workbench_view(bool update_preview) {
   if (obs_list_ != nullptr) {
     obs_list_->clear();
     for (const auto &obs : session_->batch().items) {
-      QString line = QString::fromStdString(obs.source_path);
+      QString path = QString::fromStdString(obs.source_path);
+      QString side_tag;
+      if (obs.frame_id == "left" || path.startsWith(QStringLiteral("left:"))) {
+        side_tag = QStringLiteral("[L] ");
+        if (path.startsWith(QStringLiteral("left:"))) {
+          path = path.mid(5);
+        }
+      } else if (obs.frame_id == "right" ||
+                 path.startsWith(QStringLiteral("right:"))) {
+        side_tag = QStringLiteral("[R] ");
+        if (path.startsWith(QStringLiteral("right:"))) {
+          path = path.mid(6);
+        }
+      }
+      QString line = side_tag + path;
       if (obs.has_base_gripper) {
         line += QStringLiteral("  [pose]");
       }
@@ -628,7 +838,23 @@ void MainWindow::refresh_workbench_view(bool update_preview) {
     }
   }
 
-  set_metric_value(metric_frames_, QString::number(session_->observation_count()));
+  int n_left = 0;
+  int n_right = 0;
+  if (session_->is_stereo_side_tagged()) {
+    for (const auto &obs : session_->batch().items) {
+      if (obs.frame_id == "right" ||
+          obs.source_path.rfind("right:", 0) == 0) {
+        ++n_right;
+      } else {
+        ++n_left;
+      }
+    }
+    set_metric_value(
+        metric_frames_,
+        QStringLiteral("L%1 / R%2").arg(n_left).arg(n_right));
+  } else {
+    set_metric_value(metric_frames_, QString::number(session_->observation_count()));
+  }
   if (session_->detect_busy()) {
     set_metric_value(metric_detect_, QStringLiteral("检测中…"));
   } else if (session_->has_current_detection()) {
@@ -641,10 +867,30 @@ void MainWindow::refresh_workbench_view(bool update_preview) {
   } else {
     set_metric_value(metric_detect_, QStringLiteral("—"));
   }
-  set_metric_value(
-      metric_coverage_,
-      session_->observation_count() >= 8 ? QStringLiteral("较充分")
-                                         : QStringLiteral("继续采集"));
+  if (metric_reproj_ != nullptr) {
+    if (session_->detect_busy()) {
+      set_metric_value(metric_reproj_, QStringLiteral("…"));
+    } else if (session_->last_aruco_reproj_px() >= 0.0) {
+      set_metric_value(
+          metric_reproj_,
+          QStringLiteral("%1 px").arg(session_->last_aruco_reproj_px(), 0, 'f', 1));
+    } else {
+      set_metric_value(metric_reproj_, QStringLiteral("—"));
+    }
+  }
+  if (session_->is_stereo_side_tagged()) {
+    const bool enough =
+        n_left >= 3 && n_right >= 3;
+    set_metric_value(
+        metric_coverage_,
+        enough ? QStringLiteral("左右均≥3")
+               : QStringLiteral("L≥3 且 R≥3"));
+  } else {
+    set_metric_value(
+        metric_coverage_,
+        session_->observation_count() >= 8 ? QStringLiteral("较充分")
+                                           : QStringLiteral("继续采集"));
+  }
 
   if (act_solve_ != nullptr) {
     act_solve_->setEnabled(session_->observation_count() >= 3);
@@ -662,7 +908,7 @@ void MainWindow::refresh_review_view() {
   }
   const auto &r = session_->last_result();
   if (review_text_ != nullptr) {
-    if (session_->is_handeye()) {
+    if (session_->is_handeye() || session_->is_stereo_extrinsics()) {
       review_text_->setPlainText(QString::fromStdString(core::format_extrinsics_text(
           r, session_->result_parent_frame().toStdString(),
           session_->result_child_frame().toStdString())));
@@ -672,13 +918,15 @@ void MainWindow::refresh_review_view() {
     }
   }
   if (r.success) {
-    if (session_->is_handeye()) {
+    if (session_->is_handeye() || session_->is_stereo_extrinsics()) {
+      const bool stereo = session_->is_stereo_extrinsics();
+      const double err = stereo
+          ? (r.metrics.count("stereo_rms") ? r.metrics.at("stereo_rms") : 0.0)
+          : (r.metrics.count("handeye_rmse") ? r.metrics.at("handeye_rmse") : 0.0);
       set_metric_value(
           review_rmse_,
-          QString::number(
-              r.metrics.count("handeye_rmse") ? r.metrics.at("handeye_rmse") : 0.0,
-              'f', 3) +
-              QStringLiteral(" deg"));
+          QString::number(err, 'f', stereo ? 4 : 3) +
+              (stereo ? QStringLiteral(" px") : QStringLiteral(" deg")));
       set_metric_value(
           review_views_,
           QString::number(
@@ -688,6 +936,40 @@ void MainWindow::refresh_review_view() {
           review_size_,
           session_->result_parent_frame() + QStringLiteral("→") +
               session_->result_child_frame());
+    } else if (session_->is_stereo_intrinsics()) {
+      const double lrms = r.metrics.count("left_reprojection_rmse")
+          ? r.metrics.at("left_reprojection_rmse")
+          : -1.0;
+      const double rrms = r.metrics.count("right_reprojection_rmse")
+          ? r.metrics.at("right_reprojection_rmse")
+          : -1.0;
+      QString rms_txt;
+      if (lrms >= 0.0) {
+        rms_txt += QStringLiteral("L %1").arg(lrms, 0, 'f', 3);
+      }
+      if (rrms >= 0.0) {
+        if (!rms_txt.isEmpty()) {
+          rms_txt += QStringLiteral(" / ");
+        }
+        rms_txt += QStringLiteral("R %1").arg(rrms, 0, 'f', 3);
+      }
+      if (rms_txt.isEmpty()) {
+        rms_txt = QStringLiteral("—");
+      } else {
+        rms_txt += QStringLiteral(" px");
+      }
+      set_metric_value(review_rmse_, rms_txt);
+      set_metric_value(
+          review_views_,
+          QStringLiteral("L%1 / R%2")
+              .arg(static_cast<int>(
+                  r.metrics.count("num_views_left") ? r.metrics.at("num_views_left")
+                                                    : 0))
+              .arg(static_cast<int>(
+                  r.metrics.count("num_views_right")
+                      ? r.metrics.at("num_views_right")
+                      : 0)));
+      set_metric_value(review_size_, QStringLiteral("camera_left/right.yaml"));
     } else {
       set_metric_value(
           review_rmse_,
@@ -712,6 +994,138 @@ void MainWindow::refresh_review_view() {
     set_metric_value(review_rmse_, QStringLiteral("—"));
     set_metric_value(review_views_, QStringLiteral("—"));
     set_metric_value(review_size_, QStringLiteral("—"));
+  }
+
+  // —— 观测列表 + 残差/覆盖诊断（内参类）——
+  if (review_obs_list_ != nullptr) {
+    review_obs_list_->blockSignals(true);
+    review_obs_list_->clear();
+    const auto &batch = session_->batch();
+    for (int i = 0; i < static_cast<int>(batch.items.size()); ++i) {
+      const auto &obs = batch.items[static_cast<size_t>(i)];
+      QString path = QString::fromStdString(obs.source_path);
+      QString side;
+      if (obs.frame_id == "left" || path.startsWith(QStringLiteral("left:"))) {
+        side = QStringLiteral("[L] ");
+        if (path.startsWith(QStringLiteral("left:"))) {
+          path = path.mid(5);
+        }
+      } else if (
+          obs.frame_id == "right" || path.startsWith(QStringLiteral("right:"))) {
+        side = QStringLiteral("[R] ");
+        if (path.startsWith(QStringLiteral("right:"))) {
+          path = path.mid(6);
+        }
+      }
+      const QFileInfo fi(path);
+      QString name = fi.fileName().isEmpty() ? QStringLiteral("view_%1").arg(i)
+                                            : fi.fileName();
+      int npts = 0;
+      if (!obs.correspondences.empty()) {
+        npts = static_cast<int>(obs.correspondences.front().image_points.rows());
+      }
+      auto *item = new QListWidgetItem(
+          QStringLiteral("%1%2  ·  %3 pts").arg(side, name).arg(npts));
+      item->setData(Qt::UserRole, i);
+      review_obs_list_->addItem(item);
+    }
+    review_obs_list_->blockSignals(false);
+  }
+
+  core::ReviewDiagnostics diag;
+  const bool can_diag =
+      r.success && !session_->is_handeye() && !session_->is_stereo_extrinsics();
+  if (can_diag) {
+    if (session_->is_stereo_intrinsics()) {
+      diag = core::compute_stereo_review_diagnostics(r, session_->batch());
+    } else {
+      diag = core::compute_review_diagnostics(r, session_->batch());
+    }
+  }
+
+  if (review_diag_label_ != nullptr) {
+    if (!r.success) {
+      review_diag_label_->setText(QStringLiteral("尚未求解或求解失败"));
+    } else if (!can_diag) {
+      review_diag_label_->setText(
+          QStringLiteral("手眼/外参：残差图暂以观测列表与结果摘要为主"));
+    } else {
+      review_diag_label_->setText(QString::fromStdString(diag.message));
+    }
+  }
+
+  if (review_residual_bars_ != nullptr) {
+    std::vector<ResidualBarWidget::Bar> bars;
+    if (diag.valid) {
+      bars.reserve(diag.views.size());
+      for (const auto &v : diag.views) {
+        ResidualBarWidget::Bar b;
+        b.label = QString::fromStdString(v.label);
+        b.rms_px = v.ok ? v.rms_px : 0.0;
+        b.ok = v.ok;
+        b.view_index = v.index;
+        bars.push_back(b);
+      }
+    }
+    review_residual_bars_->set_bars(bars);
+    review_residual_bars_->set_highlight_view(-1);
+  }
+
+  if (review_coverage_map_ != nullptr) {
+    if (diag.valid) {
+      review_coverage_map_->set_image_size(diag.image_width, diag.image_height);
+      std::vector<CoverageMapWidget::Point> pts;
+      pts.reserve(diag.points.size());
+      for (const auto &p : diag.points) {
+        CoverageMapWidget::Point q;
+        q.u = p.u;
+        q.v = p.v;
+        q.err_px = p.err_px;
+        q.view_index = p.view_index;
+        pts.push_back(q);
+      }
+      review_coverage_map_->set_points(pts);
+      review_coverage_map_->set_filter_view(-1);
+    } else {
+      review_coverage_map_->clear();
+      review_coverage_map_->set_image_size(0, 0);
+    }
+  }
+}
+
+void MainWindow::on_review_obs_selected() {
+  if (review_obs_list_ == nullptr) {
+    return;
+  }
+  auto *item = review_obs_list_->currentItem();
+  if (item == nullptr) {
+    if (review_residual_bars_ != nullptr) {
+      review_residual_bars_->set_highlight_view(-1);
+    }
+    if (review_coverage_map_ != nullptr) {
+      review_coverage_map_->set_filter_view(-1);
+    }
+    return;
+  }
+  const int view = item->data(Qt::UserRole).toInt();
+  if (review_residual_bars_ != nullptr) {
+    review_residual_bars_->set_highlight_view(view);
+  }
+  if (review_coverage_map_ != nullptr) {
+    review_coverage_map_->set_filter_view(view);
+  }
+}
+
+void MainWindow::on_review_bar_clicked(int view_index) {
+  if (review_obs_list_ == nullptr || view_index < 0) {
+    return;
+  }
+  for (int i = 0; i < review_obs_list_->count(); ++i) {
+    auto *item = review_obs_list_->item(i);
+    if (item != nullptr && item->data(Qt::UserRole).toInt() == view_index) {
+      review_obs_list_->setCurrentRow(i);
+      break;
+    }
   }
 }
 
@@ -794,6 +1208,40 @@ void MainWindow::on_browse_camera_yaml() {
   refresh_setup_readiness();
 }
 
+/// \brief 浏览左目内参 YAML（双目外参）
+void MainWindow::on_browse_left_camera_yaml() {
+  if (launcher_panel_ == nullptr || launcher_panel_->edit_left_camera_yaml() == nullptr) {
+    return;
+  }
+  auto *edit = launcher_panel_->edit_left_camera_yaml();
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("选择左目内参 YAML"), edit->text(),
+      QStringLiteral("YAML (*.yaml *.yml)"));
+  if (path.isEmpty()) {
+    return;
+  }
+  edit->setText(path);
+  append_log(LogLevel::Info, QStringLiteral("› 左目内参 YAML：%1").arg(path));
+  refresh_setup_readiness();
+}
+
+/// \brief 浏览右目内参 YAML（双目外参）
+void MainWindow::on_browse_right_camera_yaml() {
+  if (launcher_panel_ == nullptr || launcher_panel_->edit_right_camera_yaml() == nullptr) {
+    return;
+  }
+  auto *edit = launcher_panel_->edit_right_camera_yaml();
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("选择右目内参 YAML"), edit->text(),
+      QStringLiteral("YAML (*.yaml *.yml)"));
+  if (path.isEmpty()) {
+    return;
+  }
+  edit->setText(path);
+  append_log(LogLevel::Info, QStringLiteral("› 右目内参 YAML：%1").arg(path));
+  refresh_setup_readiness();
+}
+
 /// \brief 浏览并加载位姿 CSV
 void MainWindow::on_browse_pose_csv() {
   const QString path = QFileDialog::getOpenFileName(
@@ -827,6 +1275,7 @@ void MainWindow::on_start_session() {
   if (session_ == nullptr) {
     return;
   }
+  apply_selected_project_to_setup();
   sync_session_from_setup_ui();
 
   // —— 按离线/在线准备源数据 ——
@@ -851,6 +1300,20 @@ void MainWindow::on_start_session() {
   if (session_->is_handeye() && !session_->has_camera_yaml()) {
     append_log(LogLevel::Warn, QStringLiteral("› 手眼需要相机内参 YAML"));
     return;
+  }
+  if (session_->is_stereo_extrinsics() && launcher_panel_ != nullptr) {
+    const QString left =
+        launcher_panel_->edit_left_camera_yaml()
+            ? launcher_panel_->edit_left_camera_yaml()->text().trimmed()
+            : QString();
+    const QString right =
+        launcher_panel_->edit_right_camera_yaml()
+            ? launcher_panel_->edit_right_camera_yaml()->text().trimmed()
+            : QString();
+    if (left.isEmpty() || right.isEmpty()) {
+      append_log(LogLevel::Warn, QStringLiteral("› 双目外参需要左右内参 YAML"));
+      return;
+    }
   }
 
   const int sx =
@@ -879,7 +1342,8 @@ void MainWindow::on_start_session() {
     if (session_->has_live_frame()) {
       show_preview_image(session_->load_current_qimage());
     }
-    session_->request_detect(session_->is_trihedral());
+    sync_detect_intrinsics_from_sources();
+    session_->request_detect(true);
   } else {
     on_detect_and_preview();
   }
@@ -890,6 +1354,7 @@ void MainWindow::on_detect_and_preview() {
   if (session_ == nullptr || preview_view_ == nullptr) {
     return;
   }
+  sync_detect_intrinsics_from_sources();
   pending_detect_log_ = true;
   update_detect_status_ui();
   session_->request_detect(false);
@@ -900,6 +1365,8 @@ void MainWindow::on_capture_observation() {
   if (session_ == nullptr) {
     return;
   }
+  // 同步 stereo_side 等面板选项，避免切换左右目后仍用旧侧标记
+  sync_session_from_setup_ui();
   if (session_->detect_busy()) {
     pending_capture_after_detect_ = true;
     append_log(LogLevel::Warn, QStringLiteral("› 检测进行中，完成后自动采集当前帧"));
@@ -915,11 +1382,23 @@ void MainWindow::on_capture_observation() {
     append_log(LogLevel::Error, QStringLiteral("› 采集失败：%1").arg(err));
     return;
   }
+  QString side_note;
+  if (session_->is_stereo_side_tagged()) {
+    const auto &opts = session_->solve_options();
+    const auto it = opts.find("stereo_side");
+    const QString side =
+        (it != opts.end() && (it->second == "right" || it->second == "RIGHT" ||
+                              it->second == "R"))
+            ? QStringLiteral("右目")
+            : QStringLiteral("左目");
+    side_note = QStringLiteral(" · %1").arg(side);
+  }
   append_log(
       LogLevel::Info,
-      QStringLiteral("› 已采集 %1 帧（conf=%2%）")
+      QStringLiteral("› 已采集 %1 帧（conf=%2%%3）")
           .arg(session_->observation_count())
-          .arg(qRound(session_->last_confidence() * 100.0)));
+          .arg(qRound(session_->last_confidence() * 100.0))
+          .arg(side_note));
   if (session_->source_mode() == SourceMode::RosTopic) {
     refresh_workbench_view(false);
     return;
@@ -953,6 +1432,27 @@ void MainWindow::on_solve() {
     append_log(
         LogLevel::Info,
         QStringLiteral("› 手眼求解成功，rot_err≈%1 deg").arg(he, 0, 'f', 3));
+  } else if (session_->is_stereo_extrinsics()) {
+    const auto &m = session_->last_result().metrics;
+    const double rms = m.count("stereo_rms") ? m.at("stereo_rms") : 0.0;
+    const double base = m.count("baseline_m") ? m.at("baseline_m") : 0.0;
+    append_log(
+        LogLevel::Info,
+        QStringLiteral("› 双目外参求解成功，RMS=%1 px · baseline=%2 m")
+            .arg(rms, 0, 'f', 4)
+            .arg(base, 0, 'f', 4));
+  } else if (session_->is_stereo_intrinsics()) {
+    const auto &m = session_->last_result().metrics;
+    const double lrms =
+        m.count("left_reprojection_rmse") ? m.at("left_reprojection_rmse") : -1.0;
+    const double rrms =
+        m.count("right_reprojection_rmse") ? m.at("right_reprojection_rmse") : -1.0;
+    append_log(
+        LogLevel::Info,
+        QStringLiteral("› 双目各自内参求解成功，L RMSE=%1 px · R RMSE=%2 px")
+            .arg(lrms >= 0.0 ? QString::number(lrms, 'f', 4) : QStringLiteral("—"))
+            .arg(rrms >= 0.0 ? QString::number(rrms, 'f', 4)
+                             : QStringLiteral("—")));
   } else {
     const double rms = session_->last_result().metrics.count("reprojection_rmse")
         ? session_->last_result().metrics.at("reprojection_rmse")
@@ -972,7 +1472,10 @@ void MainWindow::on_export_yaml() {
   }
 
   QString hint;
-  if (launcher_panel_ != nullptr) {
+  if (project_workspace_.is_open()) {
+    hint = project_workspace_.suggest_export_dir(session_->calibrator_id());
+  }
+  if (hint.isEmpty() && launcher_panel_ != nullptr) {
     hint = launcher_panel_->export_dir_hint();
     if (hint.startsWith(QLatin1Char('~'))) {
       hint = QDir::homePath() + hint.mid(1);
@@ -981,16 +1484,19 @@ void MainWindow::on_export_yaml() {
   if (hint.isEmpty()) {
     hint = QDir::homePath();
   }
-  const QFileInfo hint_info(hint);
-  QString parent = hint_info.isDir() || hint.endsWith(QLatin1Char('/'))
-      ? hint
-      : hint_info.absolutePath();
-  if (parent.isEmpty() || parent == QStringLiteral(".")) {
-    parent = QDir::homePath();
+  QString suggested = hint;
+  if (!project_workspace_.is_open() || !hint.contains(QStringLiteral("hs_calib_"))) {
+    const QFileInfo hint_info(hint);
+    QString parent = hint_info.isDir() || hint.endsWith(QLatin1Char('/'))
+        ? hint
+        : hint_info.absolutePath();
+    if (parent.isEmpty() || parent == QStringLiteral(".")) {
+      parent = QDir::homePath();
+    }
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
+    suggested = QDir(parent).filePath(
+        QStringLiteral("hs_calib_%1_%2").arg(session_->calibrator_id()).arg(stamp));
   }
-  const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
-  const QString suggested = QDir(parent).filePath(
-      QStringLiteral("hs_calib_%1_%2").arg(session_->calibrator_id()).arg(stamp));
 
   QString path = QFileDialog::getSaveFileName(
       this, QStringLiteral("导出标定结果文件夹"), suggested);
@@ -1013,6 +1519,22 @@ void MainWindow::on_export_yaml() {
     append_log(LogLevel::Warn, QStringLiteral("› %1").arg(err));
   }
   append_log(LogLevel::Info, QStringLiteral("› 已导出文件夹：%1").arg(path));
+
+  // 若导出不在项目 results/ 内，再归档一份到当前项目
+  if (project_workspace_.is_open()) {
+    const QString results = project_workspace_.results_dir();
+    if (!path.startsWith(results)) {
+      QString archived;
+      QString aerr;
+      if (project_workspace_.archive_result_bundle(path, QFileInfo(path).fileName(), &archived, &aerr)) {
+        append_log(
+            LogLevel::Info,
+            QStringLiteral("› 已归档到项目 results：%1").arg(archived));
+      } else if (!aerr.isEmpty()) {
+        append_log(LogLevel::Warn, QStringLiteral("› 项目归档失败：%1").arg(aerr));
+      }
+    }
+  }
 }
 
 // ===== UI 构建 =====

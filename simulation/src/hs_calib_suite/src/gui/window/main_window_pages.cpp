@@ -4,6 +4,7 @@
 
 #include "hs_calib_suite/gui/theme/app_style.hpp"
 #include "hs_calib_suite/gui/widgets/image_view_widget.hpp"
+#include "hs_calib_suite/gui/widgets/review_charts_widget.hpp"
 #include "hs_calib_suite/gui/panels/launcher_config_panel.hpp"
 #include "hs_calib_suite/gui/bridges/ros_image_bridge.hpp"
 #include "hs_calib_suite/gui/session/session_controller.hpp"
@@ -25,6 +26,7 @@
 #include <QComboBox>
 #include <QCursor>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFileDialog>
@@ -34,6 +36,33 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QInputDialog>
+#include <QKeySequence>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QSizePolicy>
+#include <QSpinBox>
+#include <QStackedWidget>
+#include <QStyle>
+#include <QTextEdit>
+#include <QTimer>
+#include <QToolBar>
+#include <QUrl>
+#include <QVBoxLayout>
+#include <QWidget>
+#include <QEvent>
+#include <QFileDialog>
+#include <QFont>
+#include <QFormLayout>
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QIcon>
+#include <QInputDialog>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -112,6 +141,8 @@ QFrame *MainWindow::make_metric_card(const QString &name, const QString &value) 
     metric_frames_ = v;
   } else if (name == QStringLiteral("检测置信度")) {
     metric_detect_ = v;
+  } else if (name == QStringLiteral("重投影")) {
+    metric_reproj_ = v;
   } else if (name == QStringLiteral("覆盖提示")) {
     metric_coverage_ = v;
   } else if (name == QStringLiteral("重投影 RMSE")) {
@@ -139,6 +170,8 @@ QFrame *MainWindow::make_compact_metric_card(const QString &name, const QString 
     metric_frames_ = v;
   } else if (name == QStringLiteral("检测置信度")) {
     metric_detect_ = v;
+  } else if (name == QStringLiteral("重投影")) {
+    metric_reproj_ = v;
   } else if (name == QStringLiteral("覆盖提示")) {
     metric_coverage_ = v;
   }
@@ -169,35 +202,36 @@ void MainWindow::select_calib_tile(QFrame *tile) {
   tile->style()->polish(tile);
 
   selected_calibrator_id_ = tile->property("calibrator_id").toString();
-  if (launcher_panel_ != nullptr) {
+  const bool is_lab = selected_calibrator_id_ == QStringLiteral("detect_lab") ||
+                      selected_calibrator_id_ == QStringLiteral("detect_lab_full");
+  if (launcher_panel_ != nullptr && !is_lab) {
     launcher_panel_->set_calibrator_id(selected_calibrator_id_);
   }
-  if (session_) {
+  if (session_ && !is_lab) {
     session_->set_calibrator_id(selected_calibrator_id_);
   }
   refresh_handeye_ui();
   refresh_setup_readiness();
   const QString title = tile->property("calibrator_title").toString();
-  if (home_selection_ != nullptr) {
-    home_selection_->setText(
-        QStringLiteral("当前：default_robot  ·  %1（%2）")
-            .arg(title, selected_calibrator_id_));
+  update_home_selection_label();
+  if (btn_home_next_ != nullptr) {
+    const bool lab = selected_calibrator_id_ == QStringLiteral("detect_lab") ||
+                     selected_calibrator_id_ == QStringLiteral("detect_lab_full");
+    btn_home_next_->setText(
+        lab ? QStringLiteral("下一步：打开检测台")
+            : QStringLiteral("下一步：会话配置"));
   }
   append_log(LogLevel::Info, QStringLiteral("› 选定标定器：%1").arg(selected_calibrator_id_));
 }
 
 /// \brief 创建标定器选择磁贴
 QFrame *MainWindow::make_calib_tile(
-    const QString &title,
-    const QString &subtitle,
-    const QString &id,
-    bool implemented,
-    const QString &prerequisite) {
+    const QString &title, const QString &id, bool implemented) {
   auto *tile = new QFrame;
   tile->setObjectName(QStringLiteral("CalibTile"));
   tile->setCursor(implemented ? Qt::PointingHandCursor : Qt::ForbiddenCursor);
   tile->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  tile->setMinimumHeight(implemented ? 78 : 72);
+  tile->setMinimumHeight(48);
   tile->setProperty("calibrator_id", id);
   tile->setProperty("calibrator_title", title);
   tile->setProperty("selected", false);
@@ -210,28 +244,14 @@ QFrame *MainWindow::make_calib_tile(
 
   auto *accent = new QFrame(tile);
   accent->setObjectName(QStringLiteral("CalibTileAccent"));
-  accent->setFixedSize(4, 44);
+  accent->setFixedSize(4, 28);
   row->addWidget(accent, 0, Qt::AlignVCenter);
 
-  auto *text_col = new QVBoxLayout;
-  text_col->setContentsMargins(0, 0, 0, 0);
-  text_col->setSpacing(2);
   const QString title_text =
       implemented ? title : (title + QStringLiteral(" · 即将推出"));
   auto *title_lbl = make_label(title_text, QStringLiteral("CalibTileTitle"), tile);
   title_lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-  auto *sub = make_label(subtitle, QStringLiteral("CalibTileSub"), tile);
-  sub->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-  text_col->addWidget(title_lbl);
-  text_col->addWidget(sub);
-  if (!prerequisite.isEmpty()) {
-    auto *pre = make_label(
-        QStringLiteral("前置：%1").arg(prerequisite), QStringLiteral("CalibTilePre"),
-        tile);
-    pre->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    text_col->addWidget(pre);
-  }
-  row->addLayout(text_col, 1);
+  row->addWidget(title_lbl, 1);
 
   tile->installEventFilter(
       new TileClickFilter([this, tile]() { select_calib_tile(tile); }, tile));
@@ -261,45 +281,45 @@ void MainWindow::refresh_home_calibrator_grid() {
 
   struct Entry {
     const char *title;
-    const char *sub;
     const char *id;
     bool implemented;
-    const char *pre;
   };
 
   // —— 按首页分类填充磁贴 ——
-  // category: 0内参 1手眼 2外参 3多传感器
+  // category: 0内参 1手眼 2外参 3多传感器 4检测调试
   QVector<Entry> entries;
   switch (home_category_) {
     case 1:  // hand-eye
       entries = {
-          {"眼在手上", "gripper → camera · 棋盘 + 位姿", "eye_in_hand", true,
-           "相机内参 YAML"},
-          {"眼在手外", "base → camera · 棋盘 + 位姿", "eye_to_hand", true,
-           "相机内参 YAML"},
+          {"眼在手上", "eye_in_hand", true},
+          {"眼在手外", "eye_to_hand", true},
       };
       break;
     case 2:  // extrinsics
       entries = {
-          {"双目相对外参", "左右相机 · 立体校正", "stereo_extrinsics", false, "双目内参"},
-          {"直角三面标定", "单帧/多帧 · 已知夹角三维靶", "trihedral_oneshot", true,
-           "三面 ChArUco"},
-          {"相机–激光", "相机与 LiDAR 外参", "cam_lidar", false, "相机内参 + 点云"},
+          {"双目相对外参", "stereo_extrinsics", true},
+          {"直角三面标定", "trihedral_oneshot", true},
+          {"相机–激光", "cam_lidar", false},
       };
       break;
     case 3:  // multi / system
       entries = {
-          {"传感器套件联合", "按序调用多个标定器", "sensor_kit_bundle", false, "—"},
-          {"时间偏移", "相机 / 激光时间同步", "time_offset", false, "—"},
+          {"传感器套件联合", "sensor_kit_bundle", false},
+          {"时间偏移", "time_offset", false},
+      };
+      break;
+    case 4:  // detect lab
+      entries = {
+          {"局部特征检测台", "detect_lab", true},
+          {"完整标定板检测", "detect_lab_full", true},
       };
       break;
     case 0:
     default:  // intrinsics
       entries = {
-          {"单目内参", "多姿态平面靶 · 已接通", "cam_intrinsics", true, "棋盘/ChArUco/ArUco/圆点"},
-          {"直角三面内参", "单帧即可 · 也可多帧精化", "trihedral_oneshot", true,
-           "三面 ChArUco"},
-          {"双目各自内参", "左右目分别标定", "stereo_intrinsics", false, "双目图像"},
+          {"单目内参", "cam_intrinsics", true},
+          {"直角三面内参", "trihedral_oneshot", true},
+          {"双目各自内参", "stereo_intrinsics", true},
       };
       break;
   }
@@ -308,8 +328,7 @@ void MainWindow::refresh_home_calibrator_grid() {
   for (int i = 0; i < entries.size(); ++i) {
     const auto &e = entries[i];
     auto *tile = make_calib_tile(
-        QString::fromUtf8(e.title), QString::fromUtf8(e.sub), QString::fromUtf8(e.id),
-        e.implemented, QString::fromUtf8(e.pre));
+        QString::fromUtf8(e.title), QString::fromUtf8(e.id), e.implemented);
     home_tile_grid_->addWidget(tile, i / 2, i % 2);
     if (e.implemented && first_impl == nullptr) {
       first_impl = tile;
@@ -320,9 +339,8 @@ void MainWindow::refresh_home_calibrator_grid() {
   if (first_impl != nullptr) {
     select_calib_tile(first_impl);
   } else if (home_selection_ != nullptr) {
-    home_selection_->setText(
-        QStringLiteral("当前类别暂无已接通标定器，请切换「内参」或「手眼」"));
     selected_calibrator_id_.clear();
+    update_home_selection_label();
   }
 }
 
@@ -333,14 +351,54 @@ QWidget *MainWindow::build_home_page() {
   root->setContentsMargins(20, 16, 20, 8);
   root->setSpacing(16);
 
-  auto *project_list = new QListWidget;
-  project_list->addItems(
-      {QStringLiteral("default_robot"), QStringLiteral("arm_cell_A"),
-       QStringLiteral("mobile_base_01")});
-  project_list->setCurrentRow(0);
-  auto *project_panel = make_panel(QStringLiteral("项目（占位）"), project_list);
-  project_panel->setMinimumWidth(240);
-  project_panel->setMaximumWidth(280);
+  // —— 左侧：项目目录 ——
+  auto *project_host = new QWidget(page);
+  auto *project_lay = new QVBoxLayout(project_host);
+  project_lay->setContentsMargins(0, 0, 0, 0);
+  project_lay->setSpacing(8);
+
+  project_list_ = new QListWidget(project_host);
+  project_list_->setObjectName(QStringLiteral("ProjectList"));
+  project_list_->setMinimumHeight(160);
+
+  auto *proj_btns = new QHBoxLayout;
+  auto *btn_new = new QPushButton(QStringLiteral("新建…"), project_host);
+  auto *btn_import_img = new QPushButton(QStringLiteral("导入图像"), project_host);
+  auto *btn_reload = new QPushButton(QStringLiteral("刷新"), project_host);
+  auto *btn_open_dir = new QPushButton(QStringLiteral("打开目录"), project_host);
+  btn_new->setObjectName(QStringLiteral("GhostButton"));
+  btn_import_img->setObjectName(QStringLiteral("GhostButton"));
+  btn_reload->setObjectName(QStringLiteral("GhostButton"));
+  btn_open_dir->setObjectName(QStringLiteral("GhostButton"));
+  proj_btns->addWidget(btn_new);
+  proj_btns->addWidget(btn_import_img);
+  proj_btns->addWidget(btn_reload);
+  proj_btns->addWidget(btn_open_dir);
+
+  project_lay->addWidget(project_list_, 1);
+  project_lay->addLayout(proj_btns);
+
+  auto *project_panel = make_panel(QStringLiteral("项目工作区"), project_host);
+  project_panel->setMinimumWidth(260);
+  project_panel->setMaximumWidth(340);
+
+  connect(project_list_, &QListWidget::currentRowChanged, this, [this](int) {
+    on_project_selection_changed();
+  });
+  connect(btn_new, &QPushButton::clicked, this, &MainWindow::on_new_project);
+  connect(
+      btn_import_img, &QPushButton::clicked, this, &MainWindow::on_import_project_images);
+  connect(btn_reload, &QPushButton::clicked, this, [this]() {
+    refresh_project_list();
+    append_log(LogLevel::Info, QStringLiteral("› 已刷新项目列表"));
+  });
+  connect(btn_open_dir, &QPushButton::clicked, this, [this]() {
+    if (project_workspace_.is_open()) {
+      QDesktopServices::openUrl(QUrl::fromLocalFile(project_workspace_.root_path()));
+    } else {
+      ProjectCatalog::open_user_projects_dir();
+    }
+  });
 
   auto *right = new QWidget;
   auto *right_layout = new QVBoxLayout(right);
@@ -349,15 +407,16 @@ QWidget *MainWindow::build_home_page() {
   right_layout->addWidget(
       make_label(QStringLiteral("选择标定任务"), QStringLiteral("PageTitle"), right));
   right_layout->addWidget(make_label(
-      QStringLiteral("先选类别，再选标定器（对齐 Tier4：Category → Calibrator）。"),
+      QStringLiteral(
+          "先选文件夹项目（或从模板实例化），再选标定器；目录含 config / images / results。"),
       QStringLiteral("PageSubtitle"), right));
 
   auto *cat_row = new QHBoxLayout;
   cat_row->setSpacing(8);
   home_category_group_ = new QButtonGroup(page);
   home_category_group_->setExclusive(true);
-  const char *cats[] = {"内参", "手眼", "外参", "多传感器"};
-  for (int i = 0; i < 4; ++i) {
+  const char *cats[] = {"内参", "手眼", "外参", "多传感器", "检测调试"};
+  for (int i = 0; i < 5; ++i) {
     auto *btn = new QPushButton(QString::fromUtf8(cats[i]), right);
     btn->setObjectName(QStringLiteral("CategoryChip"));
     btn->setCheckable(true);
@@ -393,14 +452,32 @@ QWidget *MainWindow::build_home_page() {
   footer->addWidget(home_selection_, 1);
   auto *next = new QPushButton(QStringLiteral("下一步：会话配置"), right);
   next->setObjectName(QStringLiteral("PrimaryButton"));
+  btn_home_next_ = next;
   connect(next, &QPushButton::clicked, this, [this]() {
     QString err;
     if (!ensure_implemented_calibrator(&err)) {
       append_log(LogLevel::Error, QStringLiteral("› %1").arg(err));
       return;
     }
+    apply_selected_project_to_setup();
+    if (selected_calibrator_id_ == QStringLiteral("detect_lab") ||
+        selected_calibrator_id_ == QStringLiteral("detect_lab_full")) {
+      go_to(PageId::DetectLab);
+      return;
+    }
     go_to(PageId::Setup);
   });
+  connect(home_category_group_, QOverload<int>::of(&QButtonGroup::idClicked), this,
+          [this](int) {
+            const bool lab =
+                selected_calibrator_id_ == QStringLiteral("detect_lab") ||
+                selected_calibrator_id_ == QStringLiteral("detect_lab_full");
+            if (btn_home_next_ != nullptr) {
+              btn_home_next_->setText(
+                  lab ? QStringLiteral("下一步：打开检测台")
+                      : QStringLiteral("下一步：会话配置"));
+            }
+          });
   footer->addWidget(next);
   right_layout->addLayout(footer);
 
@@ -411,8 +488,229 @@ QWidget *MainWindow::build_home_page() {
     b->setChecked(true);
   }
   home_category_ = 0;
+  refresh_project_list();
   refresh_home_calibrator_grid();
   return page;
+}
+
+QString MainWindow::selected_project_display_name() const {
+  if (const ProjectInfo *p = project_catalog_.find(selected_project_id_)) {
+    return p->display_name.isEmpty() ? p->id : p->display_name;
+  }
+  return selected_project_id_.isEmpty() ? QStringLiteral("—") : selected_project_id_;
+}
+
+void MainWindow::update_home_selection_label() {
+  if (home_selection_ == nullptr) {
+    return;
+  }
+  if (selected_calibrator_id_.isEmpty()) {
+    home_selection_->setText(
+        QStringLiteral("当前项目：%1 · 本类别暂无已接通标定器")
+            .arg(selected_project_display_name()));
+    return;
+  }
+  QString title = selected_calibrator_id_;
+  if (selected_tile_ != nullptr) {
+    title = selected_tile_->property("calibrator_title").toString();
+  }
+  home_selection_->setText(
+      QStringLiteral("当前：%1  ·  %2（%3）")
+          .arg(selected_project_display_name(), title, selected_calibrator_id_));
+}
+
+void MainWindow::refresh_project_list() {
+  project_catalog_.reload();
+  if (project_list_ == nullptr) {
+    return;
+  }
+  project_list_->blockSignals(true);
+  project_list_->clear();
+  int select_row = 0;
+  for (int i = 0; i < project_catalog_.projects().size(); ++i) {
+    const auto &p = project_catalog_.projects()[i];
+    QString label = p.display_name;
+    if (p.is_template) {
+      label += QStringLiteral(" 〔模板〕");
+    }
+    auto *item = new QListWidgetItem(label);
+    item->setData(Qt::UserRole, p.id);
+    if (p.is_folder_project && !p.root_path.isEmpty()) {
+      item->setToolTip(p.root_path);
+    } else if (p.is_template) {
+      item->setToolTip(QStringLiteral("模板"));
+    }
+    project_list_->addItem(item);
+    if (p.id == selected_project_id_) {
+      select_row = i;
+    }
+  }
+  if (project_list_->count() > 0) {
+    project_list_->setCurrentRow(select_row);
+  }
+  project_list_->blockSignals(false);
+  on_project_selection_changed();
+}
+
+bool MainWindow::ensure_project_workspace_open(QString *error_out) {
+  const ProjectInfo *p = project_catalog_.find(selected_project_id_);
+  if (p == nullptr) {
+    if (error_out) {
+      *error_out = QStringLiteral("未选择项目");
+    }
+    return false;
+  }
+  if (p->is_folder_project && !p->root_path.isEmpty()) {
+    if (project_workspace_.is_open() && project_workspace_.root_path() == p->root_path) {
+      return true;
+    }
+    return project_workspace_.open(p->root_path, error_out);
+  }
+  // 模板 → 实例化为文件夹项目
+  QString root;
+  if (!project_catalog_.materialize_template(p->id, &root, error_out)) {
+    return false;
+  }
+  selected_project_id_ = p->id;
+  refresh_project_list();
+  return project_workspace_.open(root, error_out);
+}
+
+void MainWindow::on_project_selection_changed() {
+  if (project_list_ == nullptr) {
+    return;
+  }
+  auto *item = project_list_->currentItem();
+  if (item == nullptr) {
+    return;
+  }
+  selected_project_id_ = item->data(Qt::UserRole).toString();
+  const ProjectInfo *p = project_catalog_.find(selected_project_id_);
+  project_workspace_.close();
+  if (p != nullptr && p->is_folder_project && !p->root_path.isEmpty()) {
+    QString err;
+    if (!project_workspace_.open(p->root_path, &err)) {
+      append_log(LogLevel::Warn, QStringLiteral("› 打开项目失败：%1").arg(err));
+    }
+  }
+  update_home_selection_label();
+  append_log(
+      LogLevel::Info,
+      QStringLiteral("› 选定项目：%1").arg(selected_project_display_name()));
+}
+
+void MainWindow::apply_selected_project_to_setup() {
+  QString err;
+  if (!ensure_project_workspace_open(&err)) {
+    append_log(LogLevel::Warn, QStringLiteral("› 项目工作区：%1").arg(err));
+  }
+  const ProjectInfo *p = project_catalog_.find(selected_project_id_);
+  if (p == nullptr && project_workspace_.is_open()) {
+    p = &project_workspace_.meta();
+  }
+  if (p == nullptr) {
+    return;
+  }
+  if (launcher_panel_ != nullptr) {
+    launcher_panel_->apply_project_frames(
+        p->parent_frame, p->child_frame, p->base_frame, p->gripper_frame,
+        p->image_frame, p->camera_link_frame);
+    if (project_workspace_.is_open()) {
+      const QString img = project_workspace_.preferred_image_dir();
+      if (!img.isEmpty() && launcher_panel_->edit_image_dir() != nullptr) {
+        launcher_panel_->edit_image_dir()->setText(img);
+      }
+      // 默认导出到项目 results/
+      if (launcher_panel_->edit_export_path() != nullptr) {
+        launcher_panel_->edit_export_path()->setText(project_workspace_.results_dir());
+      }
+    }
+  }
+  if (session_ != nullptr) {
+    session_->set_handeye_frames(p->base_frame, p->gripper_frame);
+  }
+  if (project_workspace_.is_open() && !selected_calibrator_id_.isEmpty()) {
+    project_workspace_.meta().last_calibrator_id = selected_calibrator_id_;
+    project_workspace_.save_meta(nullptr);
+  }
+}
+
+void MainWindow::on_import_project_images() {
+  QString err;
+  if (!ensure_project_workspace_open(&err)) {
+    append_log(LogLevel::Error, QStringLiteral("› %1").arg(err));
+    return;
+  }
+  const QString dir = QFileDialog::getExistingDirectory(
+      this, QStringLiteral("选择要导入项目的图片目录"),
+      project_workspace_.images_dir());
+  if (dir.isEmpty()) {
+    return;
+  }
+  bool ok = false;
+  const QString sub = QInputDialog::getText(
+                          this, QStringLiteral("导入图像"),
+                          QStringLiteral("存到 images/ 下的子目录名："), QLineEdit::Normal,
+                          QFileInfo(dir).fileName(), &ok)
+                          .trimmed();
+  if (!ok) {
+    return;
+  }
+  if (!project_workspace_.import_image_directory(dir, sub, &err)) {
+    append_log(LogLevel::Error, QStringLiteral("› 导入失败：%1").arg(err));
+    return;
+  }
+  project_workspace_.meta().default_image_subdir = sub;
+  project_workspace_.save_meta(nullptr);
+  on_project_selection_changed();
+  append_log(
+      LogLevel::Info,
+      QStringLiteral("› 已导入图像目录 → %1/images/%2")
+          .arg(project_workspace_.root_path(), sub));
+}
+
+void MainWindow::on_new_project() {
+  bool ok = false;
+  const QString id = QInputDialog::getText(
+                         this, QStringLiteral("新建文件夹项目"),
+                         QStringLiteral("项目 ID（字母数字/_/-）："), QLineEdit::Normal,
+                         QStringLiteral("my_cell"), &ok)
+                         .trimmed();
+  if (!ok || id.isEmpty()) {
+    return;
+  }
+  const QString name = QInputDialog::getText(
+                           this, QStringLiteral("新建文件夹项目"), QStringLiteral("显示名称："),
+                           QLineEdit::Normal, id, &ok)
+                           .trimmed();
+  if (!ok) {
+    return;
+  }
+  ProjectInfo info;
+  info.id = id;
+  info.display_name = name.isEmpty() ? id : name;
+  info.description = QStringLiteral("用户文件夹项目（config / images / results）");
+  info.notes = QStringLiteral("根目录：") + ProjectCatalog::user_projects_dir();
+  if (const ProjectInfo *cur = project_catalog_.find(selected_project_id_)) {
+    info.parent_frame = cur->parent_frame;
+    info.child_frame = cur->child_frame;
+    info.base_frame = cur->base_frame;
+    info.gripper_frame = cur->gripper_frame;
+    info.image_frame = cur->image_frame;
+    info.camera_link_frame = cur->camera_link_frame;
+    info.recommended_calibrators = cur->recommended_calibrators;
+  }
+  QString err;
+  if (!project_catalog_.create_user_project(info, &err)) {
+    append_log(LogLevel::Error, QStringLiteral("› 新建项目失败：%1").arg(err));
+    return;
+  }
+  selected_project_id_ = id;
+  refresh_project_list();
+  append_log(
+      LogLevel::Info,
+      QStringLiteral("› 已创建文件夹项目 %1 → %2/%1")
+          .arg(id, ProjectCatalog::user_projects_dir()));
 }
 
 // ===== 流程门禁 =====
@@ -420,14 +718,19 @@ QWidget *MainWindow::build_home_page() {
 /// \brief 校验当前标定器已实现
 bool MainWindow::ensure_implemented_calibrator(QString *error_out) const {
   if (selected_calibrator_id_ == QStringLiteral("cam_intrinsics") ||
+      selected_calibrator_id_ == QStringLiteral("stereo_intrinsics") ||
+      selected_calibrator_id_ == QStringLiteral("stereo_extrinsics") ||
       selected_calibrator_id_ == QStringLiteral("eye_in_hand") ||
       selected_calibrator_id_ == QStringLiteral("eye_to_hand") ||
-      selected_calibrator_id_ == QStringLiteral("trihedral_oneshot")) {
+      selected_calibrator_id_ == QStringLiteral("trihedral_oneshot") ||
+      selected_calibrator_id_ == QStringLiteral("detect_lab") ||
+      selected_calibrator_id_ == QStringLiteral("detect_lab_full")) {
     return true;
   }
   if (error_out) {
     *error_out = QStringLiteral(
-        "当前仅支持：cam_intrinsics / trihedral_oneshot / eye_in_hand / eye_to_hand");
+        "当前仅支持：cam_intrinsics / stereo_intrinsics / stereo_extrinsics / "
+        "trihedral_oneshot / eye_in_hand / eye_to_hand / detect_lab / detect_lab_full");
   }
   return false;
 }
@@ -450,6 +753,9 @@ QWidget *MainWindow::build_setup_page() {
       launcher_panel_, &LauncherConfigPanel::image_topic_changed, this,
       &MainWindow::on_topic_changed);
   connect(
+      launcher_panel_, &LauncherConfigPanel::camera_info_topic_changed, this,
+      &MainWindow::on_camera_info_topic_changed);
+  connect(
       launcher_panel_, &LauncherConfigPanel::refresh_topics_clicked, this,
       &MainWindow::refresh_topic_list);
   connect(
@@ -458,6 +764,12 @@ QWidget *MainWindow::build_setup_page() {
   connect(
       launcher_panel_, &LauncherConfigPanel::browse_camera_yaml_clicked, this,
       &MainWindow::on_browse_camera_yaml);
+  connect(
+      launcher_panel_, &LauncherConfigPanel::browse_left_camera_yaml_clicked, this,
+      &MainWindow::on_browse_left_camera_yaml);
+  connect(
+      launcher_panel_, &LauncherConfigPanel::browse_right_camera_yaml_clicked, this,
+      &MainWindow::on_browse_right_camera_yaml);
   connect(
       launcher_panel_, &LauncherConfigPanel::browse_pose_csv_clicked, this,
       &MainWindow::on_browse_pose_csv);
@@ -472,6 +784,7 @@ QWidget *MainWindow::build_setup_page() {
   // Alias legacy pointers to panel widgets (keep rest of MainWindow wiring).
   combo_source_mode_ = launcher_panel_->combo_source_mode();
   combo_image_topic_ = launcher_panel_->combo_image_topic();
+  combo_camera_info_topic_ = launcher_panel_->combo_camera_info_topic();
   edit_image_dir_ = launcher_panel_->edit_image_dir();
   offline_row_ = launcher_panel_->offline_row();
   topic_row_ = launcher_panel_->topic_row();
@@ -510,28 +823,27 @@ QWidget *MainWindow::build_setup_page() {
   scroll->setWidget(launcher_panel_);
   auto *params_panel = make_panel(QStringLiteral("Launcher configuration"), scroll);
 
-  setup_check_list_ = new QListWidget;
-  setup_check_list_->setObjectName(QStringLiteral("ReadyCheckList"));
-  setup_check_list_->setSelectionMode(QAbstractItemView::NoSelection);
-  setup_check_list_->setFocusPolicy(Qt::NoFocus);
-  setup_check_list_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-  setup_check_list_->setMaximumHeight(120);
-  setup_check_list_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+  setup_ready_label_ = make_label(QString(), QStringLiteral("Muted"), nullptr);
+  setup_ready_label_->setObjectName(QStringLiteral("ReadyCheckLine"));
+  setup_ready_label_->setWordWrap(false);
+  setup_ready_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  setup_ready_label_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
   auto *ready_strip = new QFrame;
   ready_strip->setObjectName(QStringLiteral("ReadyStrip"));
-  auto *ready_lay = new QHBoxLayout(ready_strip);
+  auto *ready_lay = new QVBoxLayout(ready_strip);
   ready_lay->setContentsMargins(12, 8, 12, 8);
-  ready_lay->setSpacing(12);
-  auto *ready_left = new QVBoxLayout;
-  ready_left->setSpacing(4);
-  ready_left->addWidget(make_label(
-      QStringLiteral("就绪检查"), QStringLiteral("SectionTitle"), ready_strip));
-  ready_left->addWidget(setup_check_list_, 1);
-  ready_lay->addLayout(ready_left, 1);
+  ready_lay->setSpacing(8);
+  auto *ready_top = new QHBoxLayout;
+  ready_top->setSpacing(8);
+  ready_top->addWidget(make_label(
+      QStringLiteral("就绪"), QStringLiteral("SectionTitle"), ready_strip));
+  ready_top->addWidget(setup_ready_label_, 1);
+  ready_lay->addLayout(ready_top);
 
-  auto *nav = new QVBoxLayout;
+  auto *nav = new QHBoxLayout;
   nav->setSpacing(8);
+  nav->addStretch(1);
   auto *back = new QPushButton(QStringLiteral("返回首页"), ready_strip);
   back->setObjectName(QStringLiteral("GhostButton"));
   connect(back, &QPushButton::clicked, this, [this]() { go_to(PageId::Home); });
@@ -539,7 +851,6 @@ QWidget *MainWindow::build_setup_page() {
   btn_start_session_->setObjectName(QStringLiteral("PrimaryButton"));
   btn_start_session_->setEnabled(false);
   connect(btn_start_session_, &QPushButton::clicked, this, &MainWindow::on_start_session);
-  nav->addStretch(1);
   nav->addWidget(back);
   nav->addWidget(btn_start_session_);
   ready_lay->addLayout(nav);
@@ -569,32 +880,40 @@ QWidget *MainWindow::build_workbench_page() {
   root->setSpacing(10);
 
   auto *header = new QHBoxLayout;
-  header->setSpacing(8);
+  header->setSpacing(12);
   auto *titles = new QVBoxLayout;
   titles->setSpacing(2);
   titles->addWidget(
       make_label(QStringLiteral("工作台 · 采集与求解"), QStringLiteral("PageTitle"), page));
   workbench_path_label_ = make_label(
       QStringLiteral("尚未加载图片"), QStringLiteral("PageSubtitle"), page);
+  workbench_path_label_->setWordWrap(false);
+  workbench_path_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  workbench_path_label_->setMinimumWidth(80);
   titles->addWidget(workbench_path_label_);
   header->addLayout(titles, 1);
 
-  btn_prev_ = new QPushButton(QStringLiteral("上一张"), page);
+  auto *actions = new QWidget(page);
+  actions->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+  auto *action_lay = new QHBoxLayout(actions);
+  action_lay->setContentsMargins(0, 0, 0, 0);
+  action_lay->setSpacing(8);
+  btn_prev_ = new QPushButton(QStringLiteral("上一张"), actions);
   btn_prev_->setObjectName(QStringLiteral("GhostButton"));
-  btn_next_ = new QPushButton(QStringLiteral("下一张"), page);
+  btn_next_ = new QPushButton(QStringLiteral("下一张"), actions);
   btn_next_->setObjectName(QStringLiteral("GhostButton"));
-  btn_detect_ = new QPushButton(QStringLiteral("检测"), page);
+  btn_detect_ = new QPushButton(QStringLiteral("检测"), actions);
   btn_detect_->setObjectName(QStringLiteral("GhostButton"));
-  btn_capture_wb_ = new QPushButton(QStringLiteral("采集帧"), page);
+  btn_capture_wb_ = new QPushButton(QStringLiteral("采集帧"), actions);
   btn_capture_wb_->setObjectName(QStringLiteral("GhostButton"));
-  btn_solve_wb_ = new QPushButton(QStringLiteral("求解"), page);
+  btn_solve_wb_ = new QPushButton(QStringLiteral("求解"), actions);
   btn_solve_wb_->setObjectName(QStringLiteral("PrimaryButton"));
   btn_solve_wb_->setEnabled(false);
-  chk_auto_capture_ = new QCheckBox(QStringLiteral("自动采集"), page);
+  chk_auto_capture_ = new QCheckBox(QStringLiteral("自动采集"), actions);
   chk_auto_capture_->setChecked(true);
   chk_auto_capture_->setToolTip(
       QStringLiteral("仅实时预览时生效；冻结画面后暂停自动采集"));
-  auto *to_review = new QPushButton(QStringLiteral("去复核"), page);
+  auto *to_review = new QPushButton(QStringLiteral("复核"), actions);
   to_review->setObjectName(QStringLiteral("GhostButton"));
   connect(btn_prev_, &QPushButton::clicked, this, [this]() {
     if (session_) {
@@ -613,9 +932,10 @@ QWidget *MainWindow::build_workbench_page() {
   connect(btn_solve_wb_, &QPushButton::clicked, this, &MainWindow::on_solve);
   connect(to_review, &QPushButton::clicked, this, [this]() { go_to(PageId::Review); });
   for (auto *b : {btn_prev_, btn_next_, btn_detect_, btn_capture_wb_, btn_solve_wb_, to_review}) {
-    header->addWidget(b);
+    action_lay->addWidget(b);
   }
-  header->addWidget(chk_auto_capture_);
+  action_lay->addWidget(chk_auto_capture_);
+  header->addWidget(actions, 0, Qt::AlignRight | Qt::AlignVCenter);
   root->addLayout(header);
 
   auto *split = new QSplitter(Qt::Horizontal, page);
@@ -803,6 +1123,8 @@ QWidget *MainWindow::build_workbench_page() {
   metrics_layout->addWidget(
       make_compact_metric_card(QStringLiteral("检测置信度"), QStringLiteral("—")));
   metrics_layout->addWidget(
+      make_compact_metric_card(QStringLiteral("重投影"), QStringLiteral("—")));
+  metrics_layout->addWidget(
       make_compact_metric_card(QStringLiteral("覆盖提示"), QStringLiteral("—")));
   right_lay->addWidget(make_panel(QStringLiteral("会话指标"), metrics_host), 0);
   right_lay->addStretch(1);
@@ -823,14 +1145,14 @@ QWidget *MainWindow::build_review_page() {
   auto *page = new QWidget;
   auto *root = new QVBoxLayout(page);
   root->setContentsMargins(20, 16, 20, 8);
-  root->setSpacing(12);
+  root->setSpacing(10);
 
   auto *header = new QHBoxLayout;
   auto *titles = new QVBoxLayout;
   titles->addWidget(
       make_label(QStringLiteral("复核与导出"), QStringLiteral("PageTitle"), page));
   titles->addWidget(make_label(
-      QStringLiteral("检查重投影误差与内参矩阵，确认后导出结果文件夹（图像 + YAML + 配置）"),
+      QStringLiteral("残差 · 观测 · 覆盖可视化，确认后导出"),
       QStringLiteral("PageSubtitle"), page));
   header->addLayout(titles, 1);
   auto *export_btn = new QPushButton(QStringLiteral("导出结果"), page);
@@ -849,10 +1171,40 @@ QWidget *MainWindow::build_review_page() {
   metrics_row->addWidget(make_metric_card(QStringLiteral("图像尺寸"), QStringLiteral("—")));
   root->addLayout(metrics_row);
 
+  review_diag_label_ = make_label(QString(), QStringLiteral("Muted"), page);
+  root->addWidget(review_diag_label_);
+
+  auto *split = new QSplitter(Qt::Horizontal, page);
+  split->setChildrenCollapsible(false);
+
+  review_obs_list_ = new QListWidget(split);
+  review_obs_list_->setObjectName(QStringLiteral("ReviewObsList"));
+  review_obs_list_->setMinimumWidth(200);
+  review_obs_list_->setMaximumWidth(320);
+  connect(
+      review_obs_list_, &QListWidget::currentRowChanged, this,
+      [this](int) { on_review_obs_selected(); });
+  split->addWidget(make_panel(QStringLiteral("观测列表"), review_obs_list_));
+
+  review_residual_bars_ = new ResidualBarWidget(split);
+  connect(
+      review_residual_bars_, &ResidualBarWidget::bar_clicked, this,
+      &MainWindow::on_review_bar_clicked);
+  split->addWidget(make_panel(QStringLiteral("残差图"), review_residual_bars_));
+
+  review_coverage_map_ = new CoverageMapWidget(split);
+  split->addWidget(make_panel(QStringLiteral("覆盖 / 重投影"), review_coverage_map_));
+
+  split->setStretchFactor(0, 0);
+  split->setStretchFactor(1, 1);
+  split->setStretchFactor(2, 1);
+  root->addWidget(split, 2);
+
   review_text_ = new QTextEdit(page);
   review_text_->setReadOnly(true);
+  review_text_->setMaximumHeight(140);
   review_text_->setPlainText(QStringLiteral("求解后显示 K / D / RMSE。"));
-  root->addWidget(make_panel(QStringLiteral("内参结果"), review_text_), 1);
+  root->addWidget(make_panel(QStringLiteral("结果摘要"), review_text_), 0);
   return page;
 }
 

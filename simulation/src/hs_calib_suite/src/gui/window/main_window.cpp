@@ -115,7 +115,12 @@ MainWindow::MainWindow(QWidget *parent)
     refresh_setup_readiness();
   });
   connect(session_.get(), &SessionController::current_changed, this, [this]() {
-    refresh_workbench_view();
+    if (stack_ != nullptr &&
+        stack_->currentIndex() == static_cast<int>(PageId::DetectLab)) {
+      refresh_detect_lab_view(false);
+    } else {
+      refresh_workbench_view();
+    }
   });
   connect(session_.get(), &SessionController::observations_changed, this, [this]() {
     refresh_workbench_view();
@@ -135,6 +140,10 @@ MainWindow::MainWindow(QWidget *parent)
   connect(
       ros_bridge_.get(), &RosImageBridge::frame_received, this,
       &MainWindow::on_ros_frame);
+  connect(
+      ros_bridge_.get(), &RosImageBridge::camera_info_received, this, [this]() {
+        sync_detect_intrinsics_from_sources();
+      });
 
   auto *preview_mode_shortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
   preview_mode_shortcut->setContext(Qt::WindowShortcut);
@@ -227,7 +236,9 @@ void MainWindow::update_step_rail(PageId page) {
       continue;
     }
     step_labels_[i]->setText(QString::fromUtf8(titles[i]));
-    if (i < static_cast<int>(page)) {
+    if (page == PageId::DetectLab) {
+      step_labels_[i]->setObjectName(QStringLiteral("StepIdle"));
+    } else if (i < static_cast<int>(page)) {
       step_labels_[i]->setObjectName(QStringLiteral("StepDone"));
     } else if (i == static_cast<int>(page)) {
       step_labels_[i]->setObjectName(QStringLiteral("StepActive"));
@@ -279,12 +290,16 @@ void MainWindow::append_log(LogLevel level, const QString &line) {
 /// \brief 刷新状态栏模式/页面/提示
 void MainWindow::update_status_bar(PageId page) {
   static const char *names[] = {
-      "PAGE / HOME", "PAGE / SETUP", "PAGE / WORKBENCH", "PAGE / REVIEW"};
+      "PAGE / HOME", "PAGE / SETUP", "PAGE / WORKBENCH", "PAGE / REVIEW",
+      "PAGE / DETECT LAB"};
   if (status_page_ != nullptr) {
     status_page_->setText(QString::fromUtf8(names[static_cast<int>(page)]));
   }
   if (status_hint_ != nullptr) {
-    if (page == PageId::Workbench && online_mode_) {
+    if (page == PageId::DetectLab) {
+      status_hint_->setText(
+          QStringLiteral("检测台 · 调角点/码/圆点 · Thorough 更完整 · Fast 更快"));
+    } else if (page == PageId::Workbench && online_mode_) {
       const bool busy = session_ && session_->detect_busy();
       if (busy) {
         status_hint_->setText(QStringLiteral("在线 · 后台检测中… 画面保持实时"));
@@ -365,9 +380,13 @@ void MainWindow::go_to(PageId page) {
     refresh_workbench_view();
   } else if (page == PageId::Review) {
     refresh_review_view();
+  } else if (page == PageId::DetectLab) {
+    refresh_lab_mode_ui();
+    refresh_detect_lab_view(false);
   }
 
-  static const char *names[] = {"首页", "会话配置", "工作台", "复核导出"};
+  static const char *names[] = {
+      "首页", "会话配置", "工作台", "复核导出", "特征检测台"};
   append_log(
       LogLevel::Info,
       QStringLiteral("› 进入「%1」")
@@ -507,6 +526,7 @@ void MainWindow::setup_central_widget() {
   stack_->addWidget(build_setup_page());
   stack_->addWidget(build_workbench_page());
   stack_->addWidget(build_review_page());
+  stack_->addWidget(build_detect_lab_page());
   root_layout->addWidget(stack_, 1);
 
   auto *log_body = new QWidget;

@@ -1,0 +1,17 @@
+# hs_calib_suite project — Mobile Base 01
+id: mobile_base_01
+display_name: Mobile Base 01
+description: |
+  移动底盘 + 腕部/云台相机。采集时建议底盘刹停。
+notes: |
+  base_frame 用底盘根；先内参再 eye_in_hand。
+parent_frame: wrist_camera_link
+child_frame: wrist_camera_optical
+base_frame: base_link
+gripper_frame: wrist_camera_mount
+image_frame: wrist_camera_optical
+camera_link_frame: wrist_camera_link
+recommended_calibrators:
+  - cam_intrinsics
+  - eye_in_hand
+  - detect_lab

@@ -11,20 +11,22 @@ namespace core {
 
 /// \brief 三面检测预算：实时预览用 Fast，避免卡死；手动检测用 Thorough
 enum class TrihedralChessDetectSpeed {
-  Fast,     ///< 限时、降分辨率；仍会做掩膜再挖，尽量出 ≥2 面
-  Thorough  ///< 更完整 ROI / 子网格 / SB 部分角点
+  Fast,      ///< 限时、降分辨率；仍会做掩膜再挖，尽量出 ≥2 面
+  Thorough,  ///< 更完整 ROI / 子网格 / SB 部分角点
+  Complete   ///< 只要完整面网格，拒绝局部子网格
 };
 
 /// \brief 直角三面**棋盘格**检测器（只认角点，无 ArUco）
 ///
 /// # 设计要点（与单板标定的差别）
-/// - **每面网格允许不完整**：斜视/遮挡时 4×4、5×5 等子网格即可贴面参与求解；
-///   三面几何约束弥补单面信息不足——这正是三面靶相对「拍全一张平面板」的意义。
+/// - **每面网格允许不完整**：斜视/遮挡时可见子网格即可贴面；
+///   约定：方格数 **大于 2×2** 的可见区域，角点应尽量找齐找准（Thorough）。
 /// - OpenCV 一次通常只吐一个网格 → 找一面 → 掩膜 → 再找，最多三面；
 ///   再枚举摆放到模型 XY/XZ/YZ（PnP 残差）。
 /// - 白边帮助检测，**不作分面标签**。
 ///
-/// 约定：squares_x/y = 每面内角点数（正方形面取 max）。
+/// 约定：squares_x/y = 每面内角点数（正方形面取 max）；
+/// 方格数 = 内角点数 + 1。
 class TrihedralChessDetector : public DetectorBase {
 public:
   explicit TrihedralChessDetector(TrihedralTarget target);

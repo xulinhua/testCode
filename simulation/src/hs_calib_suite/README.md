@@ -2,7 +2,8 @@
 
 统一标定软件（ROS 2 Humble / C++17 单功能包）。分层思路参考 [TIER IV CalibrationTools](https://github.com/tier4/CalibrationTools)，代码独立实现。
 
-> 当前可用：`cam_intrinsics`、`trihedral_oneshot`、`eye_in_hand`、`eye_to_hand`，以及 Qt 标定管理界面。
+> 当前可用：`cam_intrinsics`、`stereo_intrinsics`、`stereo_extrinsics`、`trihedral_oneshot`、`eye_in_hand`、`eye_to_hand`、检测台 `detect_lab` / `detect_lab_full`，以及 Qt 标定管理界面。
+> **项目工作区**：一项目一文件夹（`project.yaml` + `config/` + `images/` + `results/`），由 `gui/projects/ProjectWorkspace` 管理；清单扫描见 `ProjectCatalog`。
 > 仿真采图可配合独立扩展 [`isaac_calib_sim`](../isaac_calib_sim/)（无共享代码耦合）。
 
 ---
@@ -64,22 +65,28 @@ hs_calib_suite/
 
 | 标定器 ID             | 靶标                                                            | 说明                                                                            |
 | --------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `cam_intrinsics`    | 平面棋盘 / ChArUco / ArUco 阵列 / 圆点                          | 多姿态 →`calibrateCamera`（或 fisheye）→ 内参 YAML                          |
+| `cam_intrinsics`    | 平面棋盘 / ChArUco / ArUco 阵列 / 圆点                          | 多姿态 → Brown / Kannala–Brandt / CMei → 内参 YAML                          |
+| `stereo_intrinsics` | 同左（左右分侧采集）                                            | 左右目各自多姿态内参 → `camera_left.yaml` + `camera_right.yaml`            |
+| `stereo_extrinsics` | 同左（成对左右观测）                                            | 固定内参 → `stereoCalibrate` + 校正 → `stereo_extrinsics.yaml`              |
 | `trihedral_oneshot` | 直角三面**ChArUco**（推荐）/ 棋盘；正方形面 + 约 1 格白边 | 单帧：≥2 面，搜焦距 + PnP；多帧：`calibrateCamera`；三面可同码，几何聚类分面 |
 | `eye_in_hand`       | 棋盘 + 位姿                                                     | 末端相机：求解 gripper→camera                                                  |
 | `eye_to_hand`       | 棋盘 + 位姿                                                     | 固定相机：求解 base→camera                                                     |
+| `detect_lab`        | 同上 + 三面                                                     | 局部特征检测台：非完整板尽量检出（Thorough/Fast）                               |
+| `detect_lab_full`   | 同上                                                            | 完整标定板检测：残缺帧直接失败                                                   |
 
 手眼位姿来源：离线 CSV（`image,tx,ty,tz,qx,qy,qz,qw`）或在线 TF（`base_frame`→`gripper_frame`）；需求先提供内参 YAML。
 
 默认配置：
 
-| 文件                                                              | 用途         |
-| ----------------------------------------------------------------- | ------------ |
-| [`config/cam_intrinsics.yaml`](config/cam_intrinsics.yaml)       | 单目棋盘参数 |
+| 文件                                                              | 用途                 |
+| ----------------------------------------------------------------- | -------------------- |
+| [`config/cam_intrinsics.yaml`](config/cam_intrinsics.yaml)       | 单目棋盘参数         |
+| [`config/stereo_intrinsics.yaml`](config/stereo_intrinsics.yaml) | 双目各自内参         |
+| [`config/stereo_extrinsics.yaml`](config/stereo_extrinsics.yaml) | 双目相对外参         |
 | [`config/trihedral_oneshot.yaml`](config/trihedral_oneshot.yaml) | 三面 ChArUco（推荐） |
 | [`config/trihedral_chess.yaml`](config/trihedral_chess.yaml)     | 三面纯棋盘（仅角点） |
-| [`config/eye_in_hand.yaml`](config/eye_in_hand.yaml)             | 眼在手上     |
-| [`config/eye_to_hand.yaml`](config/eye_to_hand.yaml)             | 眼在手外     |
+| [`config/eye_in_hand.yaml`](config/eye_in_hand.yaml)             | 眼在手上             |
+| [`config/eye_to_hand.yaml`](config/eye_to_hand.yaml)             | 眼在手外             |
 
 ---
 

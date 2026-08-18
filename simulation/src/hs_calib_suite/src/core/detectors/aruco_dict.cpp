@@ -24,6 +24,8 @@ cv::Ptr<cv::aruco::Dictionary> make_aruco_dictionary(const std::string &name) {
     t = cv::aruco::DICT_6X6_100;
   } else if (name == "DICT_6X6_250") {
     t = cv::aruco::DICT_6X6_250;
+  } else if (name == "DICT_6X6_1000") {
+    t = cv::aruco::DICT_6X6_1000;
   } else if (name == "DICT_7X7_50") {
     t = cv::aruco::DICT_7X7_50;
   } else if (name == "DICT_7X7_100") {
