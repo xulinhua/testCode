@@ -9,7 +9,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <opencv2/aruco.hpp>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -71,12 +70,14 @@ bool marker_center_on_board(
   if (!board) {
     return false;
   }
-  for (size_t i = 0; i < board->ids.size(); ++i) {
-    if (board->ids[i] != local_id || board->objPoints[i].size() < 4) {
+  const auto &ids = board->getIds();
+  const auto &obj_pts = board->getObjPoints();
+  for (size_t i = 0; i < ids.size(); ++i) {
+    if (ids[i] != local_id || obj_pts[i].size() < 4) {
       continue;
     }
     cv::Point3f s(0.f, 0.f, 0.f);
-    for (const auto &p : board->objPoints[i]) {
+    for (const auto &p : obj_pts[i]) {
       s += p;
     }
     s *= 0.25f;
@@ -88,14 +89,14 @@ bool marker_center_on_board(
 
 /// \brief 兼容旧 Isaac 面 ID 段 0/100/200：映射到单板局部 ID
 int to_board_local_id(const cv::Ptr<cv::aruco::CharucoBoard> &board, int raw_id) {
-  if (!board || board->ids.empty()) {
+  if (!board || board->getIds().empty()) {
     return raw_id;
   }
   cv::Point2f tmp;
   if (marker_center_on_board(board, raw_id, &tmp)) {
     return raw_id;
   }
-  const int n = static_cast<int>(board->ids.size());
+  const int n = static_cast<int>(board->getIds().size());
   // 常见：面偏移 100；也容忍任意 mod n（同板重复印刷）
   const int candidates[] = {raw_id % 100, raw_id % std::max(1, n), raw_id};
   for (int c : candidates) {
@@ -195,26 +196,25 @@ void snap_to_chess_saddles(
 }
 
 /// \brief 构造 ArUco 检测参数（亚像素细化等）
-cv::Ptr<cv::aruco::DetectorParameters> make_params() {
-  auto p = cv::aruco::DetectorParameters::create();
-  p->cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
-  p->cornerRefinementWinSize = 5;
-  p->cornerRefinementMaxIterations = 50;
-  p->cornerRefinementMinAccuracy = 0.01;
-  p->adaptiveThreshWinSizeMin = 3;
-  p->adaptiveThreshWinSizeMax = 35;
-  p->adaptiveThreshWinSizeStep = 6;
-  p->adaptiveThreshConstant = 7;
-  p->minMarkerPerimeterRate = 0.012;
-  p->maxMarkerPerimeterRate = 4.5;
-  p->polygonalApproxAccuracyRate = 0.08;
-  p->minCornerDistanceRate = 0.03;
-  p->minDistanceToBorder = 1;
-  p->markerBorderBits = 1;
-  p->perspectiveRemovePixelPerCell = 8;
-  p->perspectiveRemoveIgnoredMarginPerCell = 0.13;
-  p->maxErroneousBitsInBorderRate = 0.45;
-  p->errorCorrectionRate = 0.7;
+cv::aruco::DetectorParameters make_params() {
+  auto p = make_aruco_detector_params();
+  p.cornerRefinementWinSize = 5;
+  p.cornerRefinementMaxIterations = 50;
+  p.cornerRefinementMinAccuracy = 0.01;
+  p.adaptiveThreshWinSizeMin = 3;
+  p.adaptiveThreshWinSizeMax = 35;
+  p.adaptiveThreshWinSizeStep = 6;
+  p.adaptiveThreshConstant = 7;
+  p.minMarkerPerimeterRate = 0.012;
+  p.maxMarkerPerimeterRate = 4.5;
+  p.polygonalApproxAccuracyRate = 0.08;
+  p.minCornerDistanceRate = 0.03;
+  p.minDistanceToBorder = 1;
+  p.markerBorderBits = 1;
+  p.perspectiveRemovePixelPerCell = 8;
+  p.perspectiveRemoveIgnoredMarginPerCell = 0.13;
+  p.maxErroneousBitsInBorderRate = 0.45;
+  p.errorCorrectionRate = 0.7;
   return p;
 }
 
@@ -255,7 +255,7 @@ void merge_markers(
 ///   若「同 ID 多实例」仍少（侧脸多半没解出）→ 水平翻转图再检，
 ///   坐标映回后用空间门控合并（距已有码太近的丢掉，防主面假码）。
 void detect_markers_robust(
-    const cv::Mat &bgr, const cv::Mat &gray, const cv::Ptr<cv::aruco::Dictionary> &dict,
+    const cv::Mat &bgr, const cv::Mat &gray, const cv::aruco::Dictionary &dict,
     std::vector<std::vector<cv::Point2f>> *corners, std::vector<int> *ids, bool fast) {
   corners->clear();
   ids->clear();
@@ -264,7 +264,7 @@ void detect_markers_robust(
   auto run_detect = [&](const cv::Mat &img) {
     std::vector<std::vector<cv::Point2f>> c;
     std::vector<int> i;
-    cv::aruco::detectMarkers(img, dict, c, i, params);
+    aruco_detect_markers(img, dict, c, i, params);
     return std::make_pair(std::move(c), std::move(i));
   };
 
@@ -744,7 +744,7 @@ TrihedralCharucoDetector::TrihedralCharucoDetector(
   if (mk <= 0.f || mk >= sq) {
     mk = sq * 0.72f;
   }
-  local_board_ = cv::aruco::CharucoBoard::create(cells, cells, sq, mk, dict_);
+  local_board_ = make_charuco_board(cells, cells, sq, mk, dict_);
 }
 
 std::vector<Correspondence> TrihedralCharucoDetector::detect(
@@ -779,7 +779,7 @@ Correspondence TrihedralCharucoDetector::detect_merged(
     markers->ids.clear();
     markers->face_ids.clear();
   }
-  if (!local_board_ || !dict_) {
+  if (!local_board_) {
     return empty;
   }
   cv::Mat mat = image_frame_as_mat(frame);
@@ -856,9 +856,9 @@ Correspondence TrihedralCharucoDetector::detect_merged(
     }
 
     const int min_m = hyp.marker_ids.size() >= 6 ? 2 : 1;
-    cv::aruco::interpolateCornersCharuco(
-        hyp.marker_corners, hyp.marker_ids, mat, local_board_, hyp.charuco_corners,
-        hyp.charuco_ids, K, D, min_m);
+    charuco_interpolate_from_markers(
+        *local_board_, mat, K, D, hyp.marker_corners, hyp.marker_ids, hyp.charuco_corners,
+        hyp.charuco_ids, min_m, make_params());
     if (hyp.charuco_ids.size() < 4 ||
         hyp.charuco_corners.size() != hyp.charuco_ids.size()) {
       return false;
@@ -898,10 +898,11 @@ Correspondence TrihedralCharucoDetector::detect_merged(
     std::vector<cv::Point2f> img;
     for (size_t i = 0; i < hyp.charuco_ids.size(); ++i) {
       const int lid = hyp.charuco_ids[i];
-      if (lid < 0 || lid >= static_cast<int>(local_board_->chessboardCorners.size())) {
+      if (lid < 0 ||
+          lid >= static_cast<int>(local_board_->getChessboardCorners().size())) {
         continue;
       }
-      obj.push_back(local_board_->chessboardCorners[static_cast<size_t>(lid)]);
+      obj.push_back(local_board_->getChessboardCorners()[static_cast<size_t>(lid)]);
       img.push_back(hyp.charuco_corners[i]);
     }
     cv::Mat rvec;
@@ -915,10 +916,11 @@ Correspondence TrihedralCharucoDetector::detect_merged(
       img.clear();
       for (size_t i = 0; i < hyp.charuco_ids.size(); ++i) {
         const int lid = hyp.charuco_ids[i];
-        if (lid < 0 || lid >= static_cast<int>(local_board_->chessboardCorners.size())) {
+        if (lid < 0 ||
+            lid >= static_cast<int>(local_board_->getChessboardCorners().size())) {
           continue;
         }
-        obj.push_back(local_board_->chessboardCorners[static_cast<size_t>(lid)]);
+        obj.push_back(local_board_->getChessboardCorners()[static_cast<size_t>(lid)]);
         img.push_back(hyp.charuco_corners[i]);
       }
       if (!pnp_ok(img, obj, &rvec, &tvec, &reproj)) {
@@ -1255,8 +1257,9 @@ Correspondence TrihedralCharucoDetector::detect_merged(
     std::vector<cv::Point2f> cc;
     std::vector<int> ci;
     const int min_m = hyp.marker_ids.size() >= 6 ? 2 : 1;
-    cv::aruco::interpolateCornersCharuco(
-        hyp.marker_corners, hyp.marker_ids, mat, local_board_, cc, ci, K, D, min_m);
+    charuco_interpolate_from_markers(
+        *local_board_, mat, K, D, hyp.marker_corners, hyp.marker_ids, cc, ci, min_m,
+        make_params());
     if (ci.size() >= 4 && ci.size() == cc.size()) {
       hyp.charuco_corners = std::move(cc);
       hyp.charuco_ids = std::move(ci);
@@ -1343,8 +1346,9 @@ Correspondence TrihedralCharucoDetector::detect_merged(
       std::vector<cv::Point2f> cc;
       std::vector<int> ci;
       const int min_m = hyp.marker_ids.size() >= 6 ? 2 : 1;
-      cv::aruco::interpolateCornersCharuco(
-          hyp.marker_corners, hyp.marker_ids, mat, local_board_, cc, ci, K, D, min_m);
+      charuco_interpolate_from_markers(
+          *local_board_, mat, K, D, hyp.marker_corners, hyp.marker_ids, cc, ci, min_m,
+          make_params());
       if (ci.size() >= 4 && ci.size() == cc.size()) {
         hyp.charuco_corners = std::move(cc);
         hyp.charuco_ids = std::move(ci);

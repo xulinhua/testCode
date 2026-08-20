@@ -22,6 +22,8 @@ find_package(rclcpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(cv_bridge REQUIRED)
+find_package(rosbag2_cpp REQUIRED)
+find_package(rosbag2_storage REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(OpenCV REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
@@ -50,6 +52,7 @@ add_library(hs_calib_core SHARED
   src/core/targets/chessboard_target.cpp
   src/core/targets/charuco_target.cpp
   src/core/targets/aruco_grid_target.cpp
+  src/core/targets/aprilgrid_target.cpp
   src/core/targets/circle_grid_target.cpp
   src/core/targets/trihedral_target.cpp
   # detectors/
@@ -57,10 +60,12 @@ add_library(hs_calib_core SHARED
   src/core/detectors/chessboard_detector.cpp
   src/core/detectors/charuco_detector.cpp
   src/core/detectors/aruco_grid_detector.cpp
+  src/core/detectors/aprilgrid_detector.cpp
   src/core/detectors/aruco_marker_detector.cpp
   src/core/detectors/circle_grid_detector.cpp
   src/core/detectors/trihedral_chess_detector.cpp
   src/core/detectors/trihedral_charuco_detector.cpp
+  src/core/detectors/board_type_identifier.cpp
   # calibrators/
   src/core/calibrators/cam_intrinsics_calibrator.cpp
   src/core/calibrators/stereo_intrinsics_calibrator.cpp
@@ -154,6 +159,7 @@ add_executable(hs_calib_gui
   src/gui/panels/launcher_config_panel.cpp
   src/gui/session/session_controller.cpp
   src/gui/bridges/ros_image_bridge.cpp
+  src/gui/bridges/bag_image_loader.cpp
   src/gui/bridges/tf_pose_bridge.cpp
   src/gui/data/pose_csv_store.cpp
   src/gui/projects/project_catalog.cpp
@@ -166,6 +172,7 @@ add_executable(hs_calib_gui
   include/hs_calib_suite/gui/panels/launcher_config_panel.hpp
   include/hs_calib_suite/gui/session/session_controller.hpp
   include/hs_calib_suite/gui/bridges/ros_image_bridge.hpp
+  include/hs_calib_suite/gui/bridges/bag_image_loader.hpp
   include/hs_calib_suite/gui/bridges/tf_pose_bridge.hpp
   include/hs_calib_suite/gui/data/pose_csv_store.hpp
   include/hs_calib_suite/gui/projects/project_catalog.hpp
@@ -186,6 +193,7 @@ target_include_directories(hs_calib_gui PRIVATE
 )
 ament_target_dependencies(hs_calib_gui
   rclcpp sensor_msgs cv_bridge tf2_ros ament_index_cpp
+  rosbag2_cpp rosbag2_storage
 )
 target_link_libraries(hs_calib_gui
   Qt5::Widgets

@@ -344,10 +344,28 @@ QLabel#CalibTileTitle {
   font-weight: 700;
 }
 
+QLabel#CalibTileSubtitle {
+  color: __FG_MUTED__;
+  font-size: 12px;
+}
+
+QLabel#CalibGalleryGlyph {
+  color: __ACCENT__;
+  background-color: __BG_SELECTED__;
+  border-radius: 10px;
+  padding: 6px 0;
+  qproperty-alignment: AlignCenter;
+}
+
 QFrame#CalibTile {
   background-color: __BG_TILE__;
   border: 1px solid __BORDER__;
   border-radius: 8px;
+}
+
+QFrame#CalibTile[gallery="true"] {
+  border-radius: 12px;
+  min-height: 132px;
 }
 
 QFrame#CalibTile:hover {
@@ -385,15 +403,50 @@ QFrame#CalibTile[planned="true"] QFrame#CalibTileAccent {
   background-color: __FG_DISABLED__;
 }
 
+QLabel#CalibTileChevron {
+  color: __FG_MUTED__;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+QFrame#CalibTile[selected="true"] QLabel#CalibTileChevron {
+  color: __ACCENT__;
+}
+
+QPushButton#ProductLineChip {
+  background-color: __BG_BUTTON__;
+  color: __FG_MUTED__;
+  border: 1px solid __BORDER__;
+  border-radius: 8px;
+  padding: 8px 18px;
+  min-height: 24px;
+  min-width: 96px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+QPushButton#ProductLineChip:checked {
+  background-color: __BG_SELECTED__;
+  color: __FG_LIST_SELECTED__;
+  border: 1px solid __ACCENT__;
+}
+
+QPushButton#ProductLineChip:hover {
+  border-color: __BORDER_STRONG__;
+  color: __FG_TITLE__;
+}
+
 QPushButton#CategoryChip {
   background-color: __BG_BUTTON__;
   color: __FG_MUTED__;
   border: 1px solid __BORDER__;
-  border-radius: 16px;
-  padding: 8px 16px;
-  min-height: 20px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 22px;
+  min-width: 72px;
   font-size: 13px;
   font-weight: 650;
+  text-align: left;
 }
 
 QPushButton#CategoryChip:checked {
@@ -405,6 +458,47 @@ QPushButton#CategoryChip:checked {
 QPushButton#CategoryChip:hover {
   border-color: __BORDER_STRONG__;
   color: __FG_TITLE__;
+}
+
+QFrame#HomeCategoryPanel {
+  background-color: __BG_PANEL__;
+  border: 1px solid __BORDER__;
+  border-radius: 14px;
+  min-width: 188px;
+  max-width: 220px;
+}
+
+QLabel#HomeCategoryTitle {
+  color: __FG_TITLE__;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+QToolButton#CategoryNav {
+  background-color: __BG_BUTTON__;
+  color: __FG_TITLE__;
+  border: 1px solid __BORDER__;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+}
+
+QToolButton#CategoryNav:checked {
+  background-color: __BG_SELECTED__;
+  color: __FG_LIST_SELECTED__;
+  border: 1px solid __ACCENT__;
+}
+
+QToolButton#CategoryNav:hover {
+  border-color: __BORDER_STRONG__;
+  background-color: __BG_TILE_HOVER__;
+}
+
+QWidget#HomeCategoryRail {
+  background-color: transparent;
 }
 
 QWidget#HomeTaskHost {
@@ -441,17 +535,21 @@ QFrame#StepRail {
 
 QLabel#StepIdle {
   color: __FG_STEP_IDLE__;
-  padding: 7px 14px;
+  padding: 6px 12px;
   font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
   font-size: 12px;
   font-weight: 600;
+}
+
+QLabel#StepIdle:hover {
+  color: __FG_STEP_DONE__;
 }
 
 QLabel#StepActive {
   color: __FG_STEP_ACTIVE__;
   background-color: __ACCENT__;
   border-radius: 14px;
-  padding: 7px 16px;
+  padding: 6px 14px;
   font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
   font-size: 12px;
   font-weight: 700;
@@ -459,10 +557,14 @@ QLabel#StepActive {
 
 QLabel#StepDone {
   color: __FG_STEP_DONE__;
-  padding: 7px 14px;
+  padding: 6px 12px;
   font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
   font-size: 12px;
   font-weight: 700;
+}
+
+QLabel#StepDone:hover {
+  text-decoration: underline;
 }
 
 QPushButton {
@@ -470,8 +572,9 @@ QPushButton {
   color: __FG_BUTTON__;
   border: 1px solid __BORDER_STRONG__;
   border-radius: 9px;
-  padding: 11px 20px;
-  min-height: 28px;
+  padding: 8px 14px;
+  min-height: 26px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 650;
 }
@@ -500,8 +603,9 @@ QPushButton#PrimaryButton {
   border: 1px solid __BORDER_PRIMARY__;
   font-size: 14px;
   font-weight: 700;
-  padding: 12px 22px;
-  min-height: 30px;
+  padding: 10px 18px;
+  min-height: 28px;
+  min-width: 0;
 }
 
 QPushButton#PrimaryButton:hover {
@@ -519,7 +623,10 @@ QPushButton#GhostButton {
   border: 1px solid __BORDER_STRONG__;
   color: __FG_GHOST__;
   font-weight: 650;
-  min-height: 28px;
+  padding: 6px 12px;
+  min-height: 32px;
+  min-width: 0;
+  font-size: 12px;
 }
 
 QPushButton#GhostButton:hover {
@@ -528,9 +635,114 @@ QPushButton#GhostButton:hover {
   background-color: __BG_TILE_HOVER__;
 }
 
+/* 窄栏 / 多按钮横排：更小内边距，避免中文被裁切 */
+QPushButton#CompactButton {
+  background-color: __BG_GHOST__;
+  border: 1px solid __BORDER_STRONG__;
+  color: __FG_GHOST__;
+  font-weight: 650;
+  padding: 2px 6px;
+  min-height: 0;
+  min-width: 0;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+QPushButton#CompactButton:hover {
+  border-color: __ACCENT__;
+  color: __FG_TITLE__;
+  background-color: __BG_TILE_HOVER__;
+}
+
+/* 工作台顶栏操作条 */
+QWidget#WorkbenchHeaderActions {
+  background-color: __BG_PANEL__;
+  border: 1px solid __BORDER__;
+  border-radius: 14px;
+}
+
+QFrame#WorkbenchActionSep {
+  background-color: __BORDER_STRONG__;
+  border: none;
+  max-width: 1px;
+}
+
+QPushButton#WorkbenchActionButton,
+QPushButton#WorkbenchNavButton,
+QPushButton#WorkbenchActionPrimary {
+  /* 样式表下必须用 min/max-width 锁宽；setFixedSize  alone 会被 padding/字重撑开 */
+  min-width: 108px;
+  max-width: 108px;
+  min-height: 40px;
+  max-height: 40px;
+  padding: 0px;
+  margin: 0px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+QPushButton#WorkbenchActionButton,
+QPushButton#WorkbenchNavButton {
+  background-color: __BG_GHOST__;
+  border: 1px solid __BORDER_STRONG__;
+  color: __FG_TITLE__;
+  font-weight: 700;
+}
+
+QPushButton#WorkbenchActionButton:hover,
+QPushButton#WorkbenchNavButton:hover {
+  border-color: __ACCENT__;
+  background-color: __BG_TILE_HOVER__;
+  color: __FG_TITLE__;
+}
+
+QPushButton#WorkbenchActionButton:pressed,
+QPushButton#WorkbenchNavButton:pressed {
+  background-color: __BG_BUTTON_PRESSED__;
+}
+
+QPushButton#WorkbenchActionButton:disabled,
+QPushButton#WorkbenchNavButton:disabled {
+  color: __FG_DISABLED__;
+  border-color: __BORDER__;
+  background-color: __BG_BUTTON_DISABLED__;
+}
+
+QPushButton#WorkbenchActionPrimary {
+  background-color: qlineargradient(
+    x1:0, y1:0, x2:1, y2:1,
+    stop:0 __BG_PRIMARY_0__, stop:1 __BG_PRIMARY_1__);
+  color: __FG_PRIMARY__;
+  border: 1px solid __BORDER_PRIMARY__;
+  font-weight: 800;
+}
+
+QPushButton#WorkbenchActionPrimary:hover {
+  background-color: __BG_PRIMARY_HOVER__;
+}
+
+QPushButton#WorkbenchActionPrimary:pressed {
+  background-color: __BG_BUTTON_PRESSED__;
+}
+
+QPushButton#WorkbenchActionPrimary:disabled {
+  color: __FG_DISABLED__;
+  border-color: __BORDER__;
+  background-color: __BG_BUTTON_DISABLED__;
+}
+
+QCheckBox#WorkbenchAutoCapture {
+  font-size: 13px;
+  font-weight: 650;
+  color: __FG_TITLE__;
+  spacing: 8px;
+  padding-left: 4px;
+}
+
 QPushButton#ModeChip {
   min-height: 22px;
-  padding: 3px 12px;
+  min-width: 0;
+  padding: 3px 10px;
   font-size: 12px;
   font-weight: 650;
   border-radius: 8px;
@@ -660,7 +872,8 @@ QTextEdit, QPlainTextEdit, QLineEdit {
   border: 1px solid __BORDER__;
   border-radius: 10px;
   selection-background-color: __SELECTION__;
-  padding: 12px 14px;
+  padding: 8px 12px;
+  min-height: 32px;
   font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
   font-size: 13px;
 }
@@ -674,12 +887,18 @@ QComboBox, QSpinBox, QDoubleSpinBox, QAbstractSpinBox {
   color: __FG__;
   border: 1px solid __BORDER__;
   border-radius: 10px;
-  padding: 8px 12px;
-  min-height: 28px;
+  padding: 4px 10px;
+  min-height: 32px;
   selection-background-color: __SELECTION__;
   selection-color: __FG__;
   font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
   font-size: 13px;
+}
+
+/* 给右侧按钮留空，避免内容与箭头重叠 / 底部被裁 */
+QSpinBox, QDoubleSpinBox, QAbstractSpinBox {
+  padding: 2px 26px 2px 10px;
+  min-height: 34px;
 }
 
 QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QAbstractSpinBox:hover {
@@ -749,6 +968,7 @@ QAbstractSpinBox::up-button {
   subcontrol-origin: border;
   subcontrol-position: top right;
   width: 22px;
+  height: 16px;
   border: none;
   border-left: 1px solid __BORDER__;
   background-color: __BG_BUTTON__;
@@ -760,6 +980,7 @@ QAbstractSpinBox::down-button {
   subcontrol-origin: border;
   subcontrol-position: bottom right;
   width: 22px;
+  height: 16px;
   border: none;
   border-left: 1px solid __BORDER__;
   background-color: __BG_BUTTON__;
@@ -841,7 +1062,7 @@ QFrame#MetricCard {
   background-color: __BG_ELEVATED__;
   border: 1px solid __BORDER__;
   border-radius: 12px;
-  min-height: 88px;
+  min-height: 56px;
 }
 
 /* Compact metrics on workbench side rail */
@@ -849,23 +1070,29 @@ QFrame#CompactMetricCard {
   background-color: __BG_ELEVATED__;
   border: 1px solid __BORDER__;
   border-radius: 8px;
-  min-height: 56px;
-  max-height: 72px;
+  min-height: 48px;
 }
 
 QFrame#CompactMetricCard QLabel#MetricValue {
-  font-size: 20px;
+  font-size: 16px;
 }
 
 QFrame#CompactMetricCard QLabel#MetricName {
   font-size: 10px;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.4px;
 }
 
 QFrame#VizStrip {
   background-color: __BG_PANEL__;
   border: 1px solid __BORDER__;
   border-radius: 8px;
+  min-height: 48px;
+}
+
+QFrame#VizStrip QSpinBox,
+QFrame#VizStrip QDoubleSpinBox {
+  min-height: 34px;
+  max-height: 36px;
 }
 
 QScrollArea {
@@ -917,6 +1144,28 @@ QMenu::separator {
   height: 1px;
   background: __SPLITTER__;
   margin: 6px 10px;
+}
+
+QWidget#ModeCorner QToolButton {
+  background-color: transparent;
+  color: __FG_CHROME__;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px;
+  margin: 1px;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+QWidget#ModeCorner QToolButton:hover {
+  background-color: __BG_HOVER__;
+  border-color: __BORDER__;
+}
+
+QWidget#ModeCorner QToolButton:checked,
+QWidget#ModeCorner QToolButton:pressed {
+  background-color: __BG_SELECTED__;
+  border-color: __ACCENT__;
 }
 
 QToolBar {
@@ -1004,6 +1253,17 @@ QLabel#StatusBarPage {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.8px;
+}
+
+QLabel#StatusBarTask {
+  color: __FG_TITLE__;
+  background-color: __BG_SELECTED__;
+  border: 1px solid __BORDER__;
+  border-radius: 10px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 4px;
 }
 )qss");
 

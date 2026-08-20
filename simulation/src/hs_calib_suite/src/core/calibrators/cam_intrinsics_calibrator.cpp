@@ -78,7 +78,8 @@ CalibratorInfo CamIntrinsicsCalibrator::calibrator_info() const {
   info.display_name = "相机内参";
   info.category = "intrinsics";
   info.supported_targets = {
-      "chessboard", "charuco", "aruco_grid", "circles_symmetric", "circles_asymmetric"};
+      "chessboard", "charuco", "aruco_grid", "aprilgrid", "circles_symmetric",
+      "circles_asymmetric"};
   return info;
 }
 

@@ -1,6 +1,7 @@
 #include "hs_calib_suite/gui/session/session_controller.hpp"
 
 #include <QDir>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
@@ -17,10 +18,13 @@
 
 #include <opencv2/aruco.hpp>
 
+#include "hs_calib_suite/core/detectors/board_type_identifier.hpp"
 #include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/detectors/aruco_grid_detector.hpp"
+#include "hs_calib_suite/core/detectors/aprilgrid_detector.hpp"
 #include "hs_calib_suite/core/detectors/aruco_marker_detector.hpp"
 #include "hs_calib_suite/core/targets/aruco_grid_target.hpp"
+#include "hs_calib_suite/core/targets/aprilgrid_target.hpp"
 #include "hs_calib_suite/core/detectors/charuco_detector.hpp"
 #include "hs_calib_suite/core/targets/charuco_target.hpp"
 #include "hs_calib_suite/core/detectors/chessboard_detector.hpp"
@@ -157,16 +161,17 @@ double confidence_from_corners_job(
   const bool is_charuco =
       target_type == "charuco" || target_type == "trihedral_charuco";
   const bool is_aruco_grid = target_type == "aruco_grid";
+  const bool is_aprilgrid = target_type == "aprilgrid";
   int expect_pts = expect_face;
   if (is_charuco) {
     expect_pts = std::max(4, (squares_x - 1) * (squares_y - 1));
-  } else if (is_aruco_grid) {
+  } else if (is_aruco_grid || is_aprilgrid) {
     expect_pts = std::max(4, expect_face * 4);
   }
   // 未指定时：三面/码类允许局部；棋盘/圆点仍要求整面（兼容标定会话）
   const bool partial_ok =
       !require_full &&
-      (trihedral || is_charuco || is_aruco_grid || aruco_loose ||
+      (trihedral || is_charuco || is_aruco_grid || is_aprilgrid || aruco_loose ||
        (force_partial && target_type == "chessboard"));
   if (partial_ok) {
     if (corners.size() < (aruco_loose ? 4u : 6u)) {
@@ -295,9 +300,6 @@ DetectJobOut run_detect_job(DetectJobIn in) {
       if (aruco.face_ids.size() != aruco.ids.size()) {
         aruco.face_ids.assign(aruco.ids.size(), -1);
       }
-      // OpenCV 标准边框（再叠加 ID / 角点强化）
-      cv::aruco::drawDetectedMarkers(in.bgr, aruco.corners, aruco.ids);
-
       for (size_t i = 0; i < aruco.ids.size(); ++i) {
         const int id = aruco.ids[i];
         const int fi = aruco.face_ids[i];
@@ -318,23 +320,22 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         center *= 1.f / static_cast<float>(corners.size());
         const cv::Point *pts = poly.data();
         const int npts = static_cast<int>(poly.size());
-        cv::polylines(in.bgr, &pts, &npts, 1, true, col, 2, cv::LINE_AA);
-        for (size_t k = 0; k < corners.size(); ++k) {
-          const int r = (k == 0) ? 5 : 3;
-          cv::circle(in.bgr, corners[k], r, col, -1, cv::LINE_AA);
-          // 角点序号（核对方向）
-          cv::putText(
-              in.bgr, std::to_string(static_cast<int>(k)),
-              cv::Point(cvRound(corners[k].x) + 4, cvRound(corners[k].y) - 4),
-              cv::FONT_HERSHEY_SIMPLEX, 0.4, col, 1, cv::LINE_AA);
-        }
-        const std::string label = "id=" + std::to_string(id);
-        const cv::Point org(cvRound(center.x) - 18, cvRound(center.y) + 5);
+        // 细边框 + 小号纯数字 ID（不画角序 / 轴向 / "id="）
+        cv::polylines(in.bgr, &pts, &npts, 1, true, col, 1, cv::LINE_AA);
+        const std::string label = std::to_string(id);
+        int baseline = 0;
+        const double font_scale = 0.35;
+        const cv::Size tsz = cv::getTextSize(
+            label, cv::FONT_HERSHEY_SIMPLEX, font_scale, 1, &baseline);
+        const cv::Point org(
+            cvRound(center.x) - tsz.width / 2,
+            cvRound(center.y) + tsz.height / 2);
         cv::putText(
-            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 0, 0), 3,
+            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, font_scale,
+            cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+        cv::putText(
+            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, font_scale, col, 1,
             cv::LINE_AA);
-        cv::putText(
-            in.bgr, label, org, cv::FONT_HERSHEY_SIMPLEX, 0.55, col, 2, cv::LINE_AA);
       }
     };
 
@@ -442,22 +443,20 @@ DetectJobOut run_detect_job(DetectJobIn in) {
       if (in.viz_conf) {
         std::string msg;
         const std::string model_tag = core::camera_model_to_string(mid);
-        if (drawn > 0) {
-          msg = real_K ? ("axes: " + model_tag) : ("axes: guess_K/" + model_tag);
-          if (last_err >= 0.0) {
-            msg += cv::format(" reproj=%.1fpx", last_err);
+        if (n_err > 0 && last_err >= 0.0) {
+          msg = cv::format("reproj=%.1fpx (%s)", last_err, model_tag.c_str());
+          if (!real_K) {
+            msg += " guess_K";
+          } else if (drawn > 0) {
+            msg += " axes";
           }
-        } else if (n_err > 0 && !in.viz_aruco) {
-          msg = cv::format("reproj=%.1fpx (axes off)", last_err);
         } else {
-          msg = last_err >= 0.0
-              ? cv::format("axes: skip reproj=%.1fpx (check marker_length/K)", last_err)
-              : "axes: skip (PnP failed)";
+          msg = "reproj: skip (PnP failed)";
         }
         cv::putText(
             in.bgr, msg, cv::Point(12, in.bgr.rows - 12), cv::FONT_HERSHEY_SIMPLEX, 0.45,
-            drawn > 0 ? (real_K ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 165, 255))
-                      : (last_err >= 0.0 ? cv::Scalar(0, 165, 255) : cv::Scalar(0, 80, 255)),
+            n_err > 0 ? (real_K ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 165, 255))
+                      : cv::Scalar(0, 80, 255),
             1, cv::LINE_AA);
       }
     };
@@ -542,8 +541,16 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         }
       };
       const std::string target_type = opt_str("target", "chessboard");
-      const std::string dictionary = opt_str("dictionary", "DICT_6X6_1000");
-      const double marker_len = opt_double("marker_length", 0.1);
+      const std::string dictionary = opt_str(
+          "dictionary",
+          (target_type == "charuco" || target_type == "trihedral_charuco")
+              ? "DICT_4X4_50"
+              : "DICT_6X6_1000");
+      const double marker_len = opt_double(
+          "marker_length",
+          (target_type == "charuco" || target_type == "trihedral_charuco")
+              ? 0.03
+              : (target_type == "aprilgrid" ? 0.088 : 0.1));
       double marker_sep = opt_double("marker_separation", -1.0);
       if (marker_sep <= 0.0) {
         marker_sep = (in.square_length_m > marker_len)
@@ -556,6 +563,22 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         core::CharucoTarget target(
             in.squares_x, in.squares_y, in.square_length_m, marker_len, dictionary);
         corrs = core::CharucoDetector(target).detect(frame, &aruco);
+        if (corrs.empty()) {
+          draw_aruco_overlay();
+          out.preview = mat_bgr_to_qimage(in.bgr);
+          if (!aruco.empty()) {
+            out.error = QStringLiteral(
+                            "检测到 %1 个 ArUco，但 ChArUco 角点不足。"
+                            "请核对：squares_x/y 是方格数(不是内角点)、dictionary、"
+                            "marker_length < square_length")
+                            .arg(static_cast<int>(aruco.ids.size()));
+          } else {
+            out.error = QStringLiteral(
+                "未检测到 ChArUco 标记。请核对 dictionary"
+                "（常见 DICT_4X4_50 / DICT_5X5_100，默认 DICT_6X6_1000 常不匹配）与光照");
+          }
+          return out;
+        }
       } else if (target_type == "aruco" || target_type == "aruco_single") {
         corrs = core::ArucoMarkerDetector(dictionary, marker_len)
                     .detect(frame, &aruco, in.fast);
@@ -563,12 +586,49 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         core::ArucoGridTarget target(
             in.squares_x, in.squares_y, marker_len, marker_sep, dictionary);
         corrs = core::ArucoGridDetector(target).detect(frame, &aruco);
+      } else if (target_type == "aprilgrid") {
+        // UI 把 tagSpacing 放在 square_length；若未单独写 tag_spacing 则回退
+        double tag_spacing = opt_double("tag_spacing", -1.0);
+        if (tag_spacing < 0.0) {
+          tag_spacing = in.square_length_m;
+        }
+        if (tag_spacing < 0.01 || tag_spacing > 5.0) {
+          tag_spacing = 0.3;
+        }
+        core::AprilgridTarget target(
+            in.squares_x, in.squares_y, marker_len, tag_spacing);
+        corrs = core::AprilgridDetector(target).detect(frame, &aruco);
+        if (corrs.empty()) {
+          draw_aruco_overlay();
+          out.preview = mat_bgr_to_qimage(in.bgr);
+          if (!aruco.empty()) {
+            out.error = QStringLiteral(
+                            "检测到 %1 个 AprilTag，但未落入当前网格"
+                            "（tagCols×tagRows=%2×%3，ID 须为 0..%4）。"
+                            "请核对尺寸；字典固定 DICT_APRILTAG_36h11")
+                            .arg(static_cast<int>(aruco.ids.size()))
+                            .arg(in.squares_x)
+                            .arg(in.squares_y)
+                            .arg(in.squares_x * in.squares_y - 1);
+          } else {
+            out.error = QStringLiteral(
+                "未检测到 AprilTag。Aprilgrid 固定 DICT_APRILTAG_36h11；"
+                "请核对 tagCols/tagRows、tagSize、光照与距离");
+          }
+          return out;
+        }
       } else if (
           target_type == "circles_symmetric" || target_type == "circle_grid" ||
-          target_type == "circles_asymmetric") {
-        const auto pattern = (target_type == "circles_asymmetric")
-            ? core::CircleGridPattern::Asymmetric
-            : core::CircleGridPattern::Symmetric;
+          target_type == "circles" || target_type == "Circles" ||
+          target_type == "circles_asymmetric" ||
+          target_type == "asymmetric_circles" ||
+          target_type == "Asymmetric Circles") {
+        const bool asymmetric =
+            target_type == "circles_asymmetric" ||
+            target_type == "asymmetric_circles" ||
+            target_type == "Asymmetric Circles";
+        const auto pattern = asymmetric ? core::CircleGridPattern::Asymmetric
+                                        : core::CircleGridPattern::Symmetric;
         core::CircleGridTarget target(
             in.squares_x, in.squares_y, in.square_length_m, pattern);
         corrs = core::CircleGridDetector(target).detect(frame);
@@ -662,8 +722,8 @@ DetectJobOut run_detect_job(DetectJobIn in) {
           in.solve_options.count("target") ? in.solve_options.at("target")
                                            : "chessboard";
       if (target_type == "aruco" || target_type == "aruco_single" ||
-          target_type == "aruco_grid" || target_type == "charuco" ||
-          in.trihedral) {
+          target_type == "aruco_grid" || target_type == "aprilgrid" ||
+          target_type == "charuco" || in.trihedral) {
         draw_aruco_axes();
       }
     }
@@ -811,6 +871,10 @@ SessionController::~SessionController() {
 /// \brief 设置标定器 ID，并按类型调整位姿源/最少视角
 void SessionController::set_calibrator_id(const QString &id) {
   calibrator_id_ = id;
+  const DetectLabMode from_id = detect_lab_mode_from_task_id(id);
+  if (from_id != DetectLabMode::None) {
+    detect_lab_mode_ = from_id;
+  }
   if (is_handeye() && pose_source_ == PoseSource::None) {
     pose_source_ = PoseSource::Csv;
   }
@@ -821,6 +885,14 @@ void SessionController::set_calibrator_id(const QString &id) {
     // Default oneshot-friendly; user can raise for multi-view
     min_views_ = 1;
   }
+}
+
+void SessionController::set_detect_lab_mode(DetectLabMode mode) {
+  detect_lab_mode_ = mode;
+}
+
+void SessionController::sync_detect_lab_mode_from_task_id(const QString &task_id) {
+  detect_lab_mode_ = detect_lab_mode_from_task_id(task_id);
 }
 
 /// \brief 是否为手眼标定器
@@ -943,6 +1015,13 @@ void SessionController::set_detect_intrinsics(
   }
   detect_model_ = core::camera_model_to_string(core::parse_camera_model(model));
   detect_xi_ = xi;
+}
+
+void SessionController::clear_detect_intrinsics() {
+  detect_K_ = cv::Mat();
+  detect_D_ = cv::Mat();
+  detect_model_ = "brown_conrady";
+  detect_xi_ = 0.0;
 }
 
 /// \brief 绑定 TF 位姿桥
@@ -1198,6 +1277,130 @@ void SessionController::request_detect(bool fast) {
   start_detect_job(fast);
 }
 
+/// \brief 冻结/离开工作台时：丢掉排队任务并作废进行中的结果
+void SessionController::cancel_pending_detect() {
+  pending_detect_ = false;
+  detect_epoch_.fetch_add(1);
+  // 进行中的线程回主线程后会因 epoch 不匹配直接丢弃；此处先解除 busy，避免 UI 卡在「检测中」
+  detect_busy_.store(false);
+}
+
+/// \brief 请求后台类型识别（忙则忽略，避免与检测队列搅在一起）
+void SessionController::request_identify(
+    const core::BoardTypeIdentifyOptions &options) {
+  if (detect_busy_.load()) {
+    return;
+  }
+  pending_detect_ = false;
+  detect_lab_mode_ = DetectLabMode::Identify;
+  start_identify_job(options);
+}
+
+/// \brief 启动后台类型识别线程
+void SessionController::start_identify_job(
+    const core::BoardTypeIdentifyOptions &options) {
+  cv::Mat bgr = current_bgr().clone();
+  const bool ros_mode = (source_mode_ == SourceMode::RosTopic);
+  if (bgr.empty()) {
+    last_identify_ranked_.clear();
+    last_identify_message_ = ros_mode ? QStringLiteral("尚无 ROS 图像帧")
+                                      : QStringLiteral("无当前图片");
+    last_preview_ = {};
+    emit identify_started();
+    emit identify_finished(false, last_identify_message_);
+    return;
+  }
+  if (detect_thread_.joinable()) {
+    detect_thread_.join();
+  }
+  detect_busy_.store(true);
+  const uint64_t epoch = detect_epoch_.load();
+  emit identify_started();
+  detect_thread_ = std::thread([this, bgr = std::move(bgr), options, epoch]() mutable {
+    const core::BoardTypeIdentifyResult result =
+        core::BoardTypeIdentifier().identify(bgr, options);
+    QImage preview;
+    if (!result.overlay_bgr.empty()) {
+      preview = mat_bgr_to_qimage(result.overlay_bgr);
+    }
+    QMetaObject::invokeMethod(
+        this,
+        [this, result, preview, epoch]() {
+          if (epoch != detect_epoch_.load()) {
+            detect_busy_.store(false);
+            return;
+          }
+          last_identify_ranked_ = result.ranked;
+          last_identify_message_ = QString::fromStdString(result.message);
+          last_preview_ = preview;
+          has_detection_ = false;
+          detect_busy_.store(false);
+          emit identify_finished(result.ok(), last_identify_message_);
+        },
+        Qt::QueuedConnection);
+  });
+}
+
+/// \brief 导出最近一次识别结果 JSON
+bool SessionController::export_identify_json(
+    const QString &path, QString *error_out) const {
+  if (path.trimmed().isEmpty()) {
+    if (error_out) {
+      *error_out = QStringLiteral("路径为空");
+    }
+    return false;
+  }
+  if (last_identify_ranked_.empty()) {
+    if (error_out) {
+      *error_out = QStringLiteral("尚无识别结果可导出");
+    }
+    return false;
+  }
+  QFile f(path);
+  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+    if (error_out) {
+      *error_out = QStringLiteral("无法写入：%1").arg(path);
+    }
+    return false;
+  }
+  const QDateTime now = QDateTime::currentDateTimeUtc();
+  QString json;
+  json += QStringLiteral("{\n");
+  json += QStringLiteral("  \"timestamp_utc\": \"%1\",\n")
+              .arg(now.toString(Qt::ISODate));
+  json += QStringLiteral("  \"source\": \"%1\",\n")
+              .arg(current_path().isEmpty() ? QStringLiteral("live")
+                                            : current_path());
+  json += QStringLiteral("  \"message\": \"%1\",\n")
+              .arg(QString(last_identify_message_)
+                       .replace(QLatin1Char('\\'), QStringLiteral("\\\\"))
+                       .replace(QLatin1Char('"'), QStringLiteral("\\\"")));
+  json += QStringLiteral("  \"hypotheses\": [\n");
+  for (size_t i = 0; i < last_identify_ranked_.size(); ++i) {
+    const auto &h = last_identify_ranked_[i];
+    json += QStringLiteral("    {\n");
+    json += QStringLiteral("      \"type_id\": \"%1\",\n")
+                .arg(QString::fromStdString(h.type_id));
+    json += QStringLiteral("      \"score\": %1,\n")
+                .arg(h.score, 0, 'f', 4);
+    json += QStringLiteral("      \"feature_count\": %1,\n")
+                .arg(h.feature_count);
+    json += QStringLiteral("      \"dict_hint\": \"%1\",\n")
+                .arg(QString::fromStdString(h.dict_hint));
+    json += QStringLiteral("      \"note\": \"%1\"\n")
+                .arg(QString::fromStdString(h.note)
+                         .replace(QLatin1Char('\\'), QStringLiteral("\\\\"))
+                         .replace(QLatin1Char('"'), QStringLiteral("\\\"")));
+    json += QStringLiteral("    }%1\n")
+                .arg(i + 1 < last_identify_ranked_.size() ? QStringLiteral(",")
+                                                          : QString());
+  }
+  json += QStringLiteral("  ]\n}\n");
+  f.write(json.toUtf8());
+  f.close();
+  return true;
+}
+
 /// \brief 启动后台检测线程，结果经信号回主线程
 void SessionController::start_detect_job(bool fast) {
   DetectJobIn in;
@@ -1241,6 +1444,7 @@ void SessionController::start_detect_job(bool fast) {
         [this, out, epoch]() {
           if (epoch != detect_epoch_.load()) {
             detect_busy_.store(false);
+            pending_detect_ = false;
             return;
           }
           last_preview_ = out.preview;
@@ -1261,9 +1465,12 @@ void SessionController::start_detect_job(bool fast) {
           }
           detect_busy_.store(false);
           emit detect_finished(out.ok, out.error);
-          if (pending_detect_) {
+          // 仅在仍排队且 epoch 未被 cancel 作废时续跑
+          if (pending_detect_ && epoch == detect_epoch_.load()) {
             pending_detect_ = false;
             start_detect_job(pending_fast_);
+          } else {
+            pending_detect_ = false;
           }
         },
         Qt::QueuedConnection);
@@ -1313,15 +1520,16 @@ double SessionController::confidence_from_corners(
   const bool is_charuco =
       target_type == "charuco" || target_type == "trihedral_charuco";
   const bool is_aruco_grid = target_type == "aruco_grid";
+  const bool is_aprilgrid = target_type == "aprilgrid";
   int expect_pts = expect_face;
   if (is_charuco) {
     expect_pts = std::max(4, (squares_x_ - 1) * (squares_y_ - 1));
-  } else if (is_aruco_grid) {
+  } else if (is_aruco_grid || is_aprilgrid) {
     expect_pts = std::max(4, expect_face * 4);
   }
   const bool partial_ok =
       !require_full &&
-      (is_trihedral() || is_charuco || is_aruco_grid || aruco_loose ||
+      (is_trihedral() || is_charuco || is_aruco_grid || is_aprilgrid || aruco_loose ||
        (force_partial && target_type == "chessboard"));
   if (partial_ok) {
     if (corners.size() < (aruco_loose ? 4u : 6u)) {
@@ -1637,7 +1845,7 @@ bool SessionController::export_yaml(const QString &path, QString *error_out) con
   return true;
 }
 
-/// \brief 导出结果目录：YAML、会话配置、原图与叠加图
+/// \brief 导出结果目录：YAML、标定设置、原图与叠加图
 bool SessionController::export_bundle(const QString &dir_path, QString *error_out) const {
   if (!last_result_.success) {
     if (error_out) {
@@ -1703,18 +1911,26 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
     }
   }
 
-  // —— 会话配置 ——
+  // —— 标定设置 ——
   const QString cfg_path = out.filePath(QStringLiteral("session_config.yaml"));
   std::ofstream cfg(cfg_path.toStdString());
   if (!cfg) {
     if (error_out) {
-      *error_out = QStringLiteral("无法写入会话配置：%1").arg(cfg_path);
+      *error_out = QStringLiteral("无法写入标定设置：%1").arg(cfg_path);
     }
     return false;
   }
 
   auto source_name = [](SourceMode m) {
-    return m == SourceMode::RosTopic ? "ros_topic" : "offline";
+    switch (m) {
+      case SourceMode::RosTopic:
+        return "ros_topic";
+      case SourceMode::RosBag:
+        return "ros_bag";
+      case SourceMode::Offline:
+      default:
+        return "offline";
+    }
   };
   auto pose_name = [](PoseSource p) {
     if (p == PoseSource::Csv) {
@@ -1838,7 +2054,7 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
 
   if (!cfg) {
     if (error_out) {
-      *error_out = QStringLiteral("写入会话配置失败");
+      *error_out = QStringLiteral("写入标定设置失败");
     }
     return false;
   }

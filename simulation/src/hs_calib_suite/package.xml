@@ -21,6 +21,8 @@
   <depend>std_msgs</depend>
   <depend>builtin_interfaces</depend>
   <depend>tf2_ros</depend>
+  <depend>rosbag2_cpp</depend>
+  <depend>rosbag2_storage</depend>
   <depend>eigen</depend>
   <depend>libopencv-dev</depend>
   <depend>qtbase5-dev</depend>

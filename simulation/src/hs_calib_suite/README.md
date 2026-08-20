@@ -2,7 +2,7 @@
 
 统一标定软件（ROS 2 Humble / C++17 单功能包）。分层思路参考 [TIER IV CalibrationTools](https://github.com/tier4/CalibrationTools)，代码独立实现。
 
-> 当前可用：`cam_intrinsics`、`stereo_intrinsics`、`stereo_extrinsics`、`trihedral_oneshot`、`eye_in_hand`、`eye_to_hand`、检测台 `detect_lab` / `detect_lab_full`，以及 Qt 标定管理界面。
+> 当前可用：`cam_intrinsics`、`stereo_intrinsics`、`stereo_extrinsics`、`trihedral_oneshot`、`eye_in_hand`、`eye_to_hand`、检测调试 `detect_lab_identify` / `detect_lab` / `detect_lab_full`，以及 Qt 标定管理界面。
 > **项目工作区**：一项目一文件夹（`project.yaml` + `config/` + `images/` + `results/`），由 `gui/projects/ProjectWorkspace` 管理；清单扫描见 `ProjectCatalog`。
 > 仿真采图可配合独立扩展 [`isaac_calib_sim`](../isaac_calib_sim/)（无共享代码耦合）。
 
@@ -71,7 +71,8 @@ hs_calib_suite/
 | `trihedral_oneshot` | 直角三面**ChArUco**（推荐）/ 棋盘；正方形面 + 约 1 格白边 | 单帧：≥2 面，搜焦距 + PnP；多帧：`calibrateCamera`；三面可同码，几何聚类分面 |
 | `eye_in_hand`       | 棋盘 + 位姿                                                     | 末端相机：求解 gripper→camera                                                  |
 | `eye_to_hand`       | 棋盘 + 位姿                                                     | 固定相机：求解 base→camera                                                     |
-| `detect_lab`        | 同上 + 三面                                                     | 局部特征检测台：非完整板尽量检出（Thorough/Fast）                               |
+| `detect_lab_identify` | 自动试探 | 标定板类型识别：只判类型，不管尺寸；输出 Top-K |
+| `detect_lab`        | 同上 + 三面                                                     | 局部特征检测：非完整板尽量检出（Thorough/Fast）                               |
 | `detect_lab_full`   | 同上                                                            | 完整标定板检测：残缺帧直接失败                                                   |
 
 手眼位姿来源：离线 CSV（`image,tx,ty,tz,qx,qy,qz,qw`）或在线 TF（`base_frame`→`gripper_frame`）；需求先提供内参 YAML。

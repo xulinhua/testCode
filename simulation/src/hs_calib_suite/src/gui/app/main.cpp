@@ -8,10 +8,66 @@
 #include <QTimer>
 
 #include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <mutex>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rcutils/logging.h>
 
 namespace {
+
+/// \brief 终端日志时间：YYYYMMDD-HHMMSS-mmm（本地时区）
+void format_log_stamp(rcutils_time_point_value_t timestamp_ns, char *out, size_t out_len) {
+  if (out == nullptr || out_len == 0) {
+    return;
+  }
+  const int64_t ns = static_cast<int64_t>(timestamp_ns);
+  const time_t sec = static_cast<time_t>(ns / 1000000000LL);
+  const int ms = static_cast<int>((ns / 1000000LL) % 1000LL);
+  std::tm tm_buf{};
+#if defined(_WIN32)
+  localtime_s(&tm_buf, &sec);
+#else
+  localtime_r(&sec, &tm_buf);
+#endif
+  std::snprintf(
+      out, out_len, "%04d%02d%02d-%02d%02d%02d-%03d", tm_buf.tm_year + 1900, tm_buf.tm_mon + 1,
+      tm_buf.tm_mday, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, ms);
+}
+
+/// \brief 自定义控制台输出：可读时间，替代 epoch 秒
+void hs_calib_console_output_handler(
+    const rcutils_log_location_t * /*location*/, int severity, const char *name,
+    rcutils_time_point_value_t timestamp, const char *format, va_list *args) {
+  static std::mutex mu;
+  std::lock_guard<std::mutex> lock(mu);
+
+  FILE *stream = stdout;
+  if (severity >= RCUTILS_LOG_SEVERITY_WARN) {
+    stream = stderr;
+  }
+
+  const char *severity_string = "UNKNOWN";
+  if (severity >= 0 && severity <= RCUTILS_LOG_SEVERITY_FATAL &&
+      g_rcutils_log_severity_names[severity] != nullptr) {
+    severity_string = g_rcutils_log_severity_names[severity];
+  }
+
+  char stamp[32];
+  format_log_stamp(timestamp, stamp, sizeof(stamp));
+
+  char msg[2048];
+  msg[0] = '\0';
+  if (format != nullptr && args != nullptr) {
+    std::vsnprintf(msg, sizeof(msg), format, *args);
+  }
+
+  std::fprintf(
+      stream, "[%s] [%s] [%s]: %s\n", severity_string, stamp, name != nullptr ? name : "", msg);
+  std::fflush(stream);
+}
 
 /// \brief 本机字体库是否含该族名
 bool has_family(const QString &name) {
@@ -63,6 +119,8 @@ void request_qt_quit() {
 /// \brief 程序入口：初始化 ROS2 / Qt；Ctrl+C 后 Qt 主线程退出事件循环
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
+  // Humble 默认 {time} 为 epoch 秒；改为 YYYYMMDD-HHMMSS-mmm
+  rcutils_logging_set_output_handler(hs_calib_console_output_handler);
   QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
   QApplication app(argc, argv);
   g_qt_app.store(&app, std::memory_order_release);

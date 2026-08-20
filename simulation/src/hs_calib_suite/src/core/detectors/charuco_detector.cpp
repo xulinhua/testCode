@@ -1,9 +1,8 @@
 #include "hs_calib_suite/core/detectors/charuco_detector.hpp"
 
-#include <opencv2/aruco.hpp>
-#include <opencv2/aruco/charuco.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/util/cv_bridge_local.hpp"
 #include "hs_calib_suite/core/util/cv_image_ops.hpp"
 
@@ -20,8 +19,21 @@ std::vector<Correspondence> CharucoDetector::detect(
   return detect(frame, static_cast<DetectedMarkers *>(nullptr));
 }
 
-/// \brief 平面 ChArUco：检码 → interpolateCornersCharuco → 亚像素 → 对应点
-/// \param markers 若非空，写出原始 ArUco 角点/ID（供可视化）
+namespace {
+
+/// \brief 用指定 CharucoBoard 跑一轮检测
+bool run_charuco(
+    const cv::aruco::CharucoBoard &board, const cv::Mat &mat, const cv::Mat &K,
+    const cv::Mat &D, std::vector<cv::Point2f> *charuco_corners,
+    std::vector<int> *charuco_ids, std::vector<std::vector<cv::Point2f>> *marker_corners,
+    std::vector<int> *marker_ids) {
+  return charuco_detect_corners(
+      board, mat, K, D, *charuco_corners, *charuco_ids, marker_corners, marker_ids);
+}
+
+}  // namespace
+
+/// \brief 平面 ChArUco：检码 → 插值角点；失败时仍回传已检出的 ArUco
 std::vector<Correspondence> CharucoDetector::detect(
     const ImageFrame &frame, DetectedMarkers *markers) const {
   std::vector<Correspondence> out;
@@ -30,35 +42,57 @@ std::vector<Correspondence> CharucoDetector::detect(
     return out;
   }
 
-  // —— ArUco 检测 ——
   std::vector<std::vector<cv::Point2f>> marker_corners;
   std::vector<int> marker_ids;
-  auto params = cv::aruco::DetectorParameters::create();
-  params->cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
-  cv::aruco::detectMarkers(
-      mat, target_.board()->dictionary, marker_corners, marker_ids, params);
-  if (markers) {
-    markers->corners = marker_corners;
-    markers->ids = marker_ids;
-  }
-  if (marker_ids.empty()) {
-    return out;
-  }
-
-  // —— 灰度 + 内参初值（插值角点用）——
+  std::vector<cv::Point2f> charuco_corners;
+  std::vector<int> charuco_ids;
   const cv::Mat gray = to_gray(mat);
   const cv::Mat K = guess_K(mat.size());
   const cv::Mat D = cv::Mat::zeros(5, 1, CV_64F);
 
-  std::vector<cv::Point2f> charuco_corners;
-  std::vector<int> charuco_ids;
-  cv::aruco::interpolateCornersCharuco(
-      marker_corners, marker_ids, mat, target_.board(), charuco_corners, charuco_ids, K, D);
-  if (charuco_ids.size() < 4 || charuco_corners.size() != charuco_ids.size()) {
+  bool ok = run_charuco(
+      *target_.board(), mat, K, D, &charuco_corners, &charuco_ids, &marker_corners,
+      &marker_ids);
+
+  // OpenCV≥4.6 新旧印刷布局：现代板失败时再试 legacy（多数下载的 PDF 是旧布局）
+  cv::Ptr<cv::aruco::CharucoBoard> used_board = target_.board();
+  if (!ok) {
+    auto legacy = make_charuco_board(
+        target_.squares_x(), target_.squares_y(),
+        static_cast<float>(target_.square_length_m()),
+        static_cast<float>(target_.marker_length_m()),
+        make_aruco_dictionary(target_.dictionary()), true);
+    std::vector<std::vector<cv::Point2f>> mc2;
+    std::vector<int> mi2;
+    std::vector<cv::Point2f> cc2;
+    std::vector<int> ci2;
+    if (run_charuco(*legacy, mat, K, D, &cc2, &ci2, &mc2, &mi2)) {
+      ok = true;
+      used_board = legacy;
+      charuco_corners = std::move(cc2);
+      charuco_ids = std::move(ci2);
+      // 优先保留检出更多码的那次 marker 结果
+      if (mc2.size() >= marker_corners.size()) {
+        marker_corners = std::move(mc2);
+        marker_ids = std::move(mi2);
+      }
+    } else if (mc2.size() > marker_corners.size()) {
+      marker_corners = std::move(mc2);
+      marker_ids = std::move(mi2);
+    }
+  }
+
+  // 无论角点是否够，先回传 ArUco，便于 UI 提示「有码但网格参数不对」
+  if (markers) {
+    markers->corners = marker_corners;
+    markers->ids = marker_ids;
+    markers->dictionary_name = target_.dictionary();
+  }
+
+  if (!ok || charuco_ids.size() < 4) {
     return out;
   }
 
-  // 码块区域涂灰后再亚像素，减轻码边缘对棋盘角的拉扯
   cv::Mat work = gray.clone();
   for (const auto &mc : marker_corners) {
     if (mc.size() < 4) {
@@ -87,7 +121,7 @@ std::vector<Correspondence> CharucoDetector::detect(
   c.image_points.resize(n, 2);
   c.object_points.resize(n, 3);
   c.ids.resize(static_cast<size_t>(n));
-  const auto &obj_all = target_.board()->chessboardCorners;
+  const auto obj_all = charuco_board_corners(*used_board);
   for (int i = 0; i < n; ++i) {
     const int id = charuco_ids[static_cast<size_t>(i)];
     c.image_points(i, 0) = charuco_corners[static_cast<size_t>(i)].x;

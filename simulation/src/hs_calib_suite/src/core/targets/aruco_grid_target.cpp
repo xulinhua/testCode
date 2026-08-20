@@ -13,11 +13,11 @@ ArucoGridTarget::ArucoGridTarget(
       markers_y_(markers_y),
       marker_length_m_(marker_length_m),
       marker_separation_m_(marker_separation_m),
-      dictionary_(dictionary),
-      dictionary_ptr_(make_aruco_dictionary(dictionary)),
-      board_(cv::aruco::GridBoard::create(
+      dictionary_name_(dictionary),
+      dictionary_(make_aruco_dictionary(dictionary)),
+      board_(make_grid_board(
           markers_x, markers_y, static_cast<float>(marker_length_m),
-          static_cast<float>(marker_separation_m), dictionary_ptr_)) {}
+          static_cast<float>(marker_separation_m), dictionary_)) {}
 
 /// \brief 返回靶标类型标识 "aruco_grid"
 std::string ArucoGridTarget::target_id() const {
@@ -27,7 +27,6 @@ std::string ArucoGridTarget::target_id() const {
 /// \brief 按 ID 查询物点（标定路径由检测器 match 提供，此处返回空）
 Eigen::MatrixXd ArucoGridTarget::object_points(const std::vector<int> &ids) const {
   (void)ids;
-  // 标定路径使用检测器 match 结果；此处返回空表示「按 ID 查询未实现完整展平」
   return Eigen::MatrixXd(0, 3);
 }
 

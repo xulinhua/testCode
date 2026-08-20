@@ -4,6 +4,7 @@
 #   chessboard          — squares_x/y = 内角点列/行；square_length = 方格边长 (m)
 #   charuco             — squares_x/y = 方格数；square_length / marker_length (m)
 #   aruco_grid          — squares_x/y = 标记列/行；marker_length；间距≈square_length-marker_length
+#   aprilgrid           — Kalibr Aprilgrid：squares_x/y=tagCols/Rows，marker_length=tagSize，tag_spacing
 #   circles_symmetric   — squares_x/y = 圆点列/行；square_length = 圆心距 (m)
 #   circles_asymmetric  — 同上，非对称圆点阵列
 #

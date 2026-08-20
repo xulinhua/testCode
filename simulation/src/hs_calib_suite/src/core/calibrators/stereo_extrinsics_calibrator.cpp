@@ -74,7 +74,8 @@ CalibratorInfo StereoExtrinsicsCalibrator::calibrator_info() const {
   info.category = "extrinsics";
   info.required_frames = {"left", "right"};
   info.supported_targets = {
-      "chessboard", "charuco", "aruco_grid", "circles_symmetric", "circles_asymmetric"};
+      "chessboard", "charuco", "aruco_grid", "aprilgrid", "circles_symmetric",
+      "circles_asymmetric"};
   return info;
 }
 

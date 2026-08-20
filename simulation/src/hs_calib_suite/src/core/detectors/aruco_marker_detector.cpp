@@ -3,9 +3,9 @@
 #include <mutex>
 #include <string>
 
-#include <opencv2/aruco.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/util/cv_bridge_local.hpp"
 
 namespace hs_calib {
@@ -16,30 +16,26 @@ namespace {
 std::mutex g_last_dict_mu;
 std::string g_last_hit_dict;
 
-cv::Ptr<cv::aruco::DetectorParameters> make_params() {
-  auto p = cv::makePtr<cv::aruco::DetectorParameters>();
-  p->cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
-  p->cornerRefinementWinSize = 5;
-  p->adaptiveThreshWinSizeMin = 5;
-  p->adaptiveThreshWinSizeMax = 23;
-  p->adaptiveThreshWinSizeStep = 6;
-  p->minMarkerPerimeterRate = 0.02;
-  p->maxMarkerPerimeterRate = 4.0;
-  p->polygonalApproxAccuracyRate = 0.03;
-  p->minMarkerDistanceRate = 0.01;
+cv::aruco::DetectorParameters make_params() {
+  auto p = make_aruco_detector_params();
+  p.cornerRefinementWinSize = 5;
+  p.adaptiveThreshWinSizeMin = 5;
+  p.adaptiveThreshWinSizeMax = 23;
+  p.adaptiveThreshWinSizeStep = 6;
+  p.minMarkerPerimeterRate = 0.02;
+  p.maxMarkerPerimeterRate = 4.0;
+  p.polygonalApproxAccuracyRate = 0.03;
+  p.minMarkerDistanceRate = 0.01;
   return p;
 }
 
 /// \brief 标准实物板：灰度(+CLAHE) → detectMarkers，不做翻转/放大
 bool detect_once(
-    const cv::Mat &bgr,
-    const cv::Ptr<cv::aruco::Dictionary> &dict,
-    bool use_clahe,
-    std::vector<std::vector<cv::Point2f>> *out_corners,
-    std::vector<int> *out_ids) {
+    const cv::Mat &bgr, const cv::aruco::Dictionary &dict, bool use_clahe,
+    std::vector<std::vector<cv::Point2f>> *out_corners, std::vector<int> *out_ids) {
   out_corners->clear();
   out_ids->clear();
-  if (bgr.empty() || !dict) {
+  if (bgr.empty()) {
     return false;
   }
   cv::Mat gray;
@@ -51,7 +47,7 @@ bool detect_once(
     src = eq;
   }
   auto params = make_params();
-  cv::aruco::detectMarkers(src, dict, *out_corners, *out_ids, params);
+  aruco_detect_markers(src, dict, *out_corners, *out_ids, params);
   if (out_ids->empty()) {
     return false;
   }

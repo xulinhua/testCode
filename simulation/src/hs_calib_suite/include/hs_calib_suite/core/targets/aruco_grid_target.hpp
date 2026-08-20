@@ -4,7 +4,8 @@
 #include <vector>
 
 #include <Eigen/Core>
-#include <opencv2/aruco.hpp>
+#include <opencv2/objdetect/aruco_board.hpp>
+#include <opencv2/objdetect/aruco_dictionary.hpp>
 
 #include "hs_calib_suite/core/base/target_model_base.hpp"
 
@@ -33,19 +34,19 @@ public:
   /// \brief 标记间距（米）
   double marker_separation_m() const { return marker_separation_m_; }
   /// \brief 字典名称
-  const std::string &dictionary() const { return dictionary_; }
+  const std::string &dictionary() const { return dictionary_name_; }
   /// \brief OpenCV GridBoard 实例
   cv::Ptr<cv::aruco::GridBoard> board() const { return board_; }
-  /// \brief OpenCV 字典指针
-  cv::Ptr<cv::aruco::Dictionary> dictionary_ptr() const { return dictionary_ptr_; }
+  /// \brief OpenCV 字典
+  const cv::aruco::Dictionary &dictionary_ref() const { return dictionary_; }
 
 private:
   int markers_x_ = 5;
   int markers_y_ = 7;
   double marker_length_m_ = 0.04;
   double marker_separation_m_ = 0.01;
-  std::string dictionary_ = "DICT_4X4_50";
-  cv::Ptr<cv::aruco::Dictionary> dictionary_ptr_;
+  std::string dictionary_name_ = "DICT_4X4_50";
+  cv::aruco::Dictionary dictionary_;
   cv::Ptr<cv::aruco::GridBoard> board_;
 };
 

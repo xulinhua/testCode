@@ -4,7 +4,8 @@
 #include <vector>
 
 #include <Eigen/Core>
-#include <opencv2/aruco/charuco.hpp>
+#include <opencv2/objdetect/aruco_board.hpp>
+#include <opencv2/objdetect/aruco_dictionary.hpp>
 
 #include "hs_calib_suite/core/base/target_model_base.hpp"
 

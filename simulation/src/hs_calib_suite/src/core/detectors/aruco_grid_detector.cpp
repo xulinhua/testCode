@@ -1,7 +1,6 @@
 #include "hs_calib_suite/core/detectors/aruco_grid_detector.hpp"
 
-#include <opencv2/aruco.hpp>
-
+#include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/util/cv_bridge_local.hpp"
 
 namespace hs_calib {
@@ -18,23 +17,18 @@ std::vector<Correspondence> ArucoGridDetector::detect(
   return detect(frame, static_cast<DetectedMarkers *>(nullptr));
 }
 
-/// \brief ArUco 阵列：detectMarkers → getBoardObjectAndImagePoints → 对应点
-/// \param markers 若非空，写出检出码角点/ID
+/// \brief ArUco 阵列：detectMarkers → matchImagePoints → 对应点
 std::vector<Correspondence> ArucoGridDetector::detect(
     const ImageFrame &frame, DetectedMarkers *markers) const {
   std::vector<Correspondence> out;
   cv::Mat mat = image_frame_as_mat(frame);
-  if (mat.empty() || !target_.board() || !target_.dictionary_ptr()) {
+  if (mat.empty() || !target_.board()) {
     return out;
   }
 
   std::vector<std::vector<cv::Point2f>> marker_corners;
   std::vector<int> marker_ids;
-  auto params = cv::aruco::DetectorParameters::create();
-  params->cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
-  params->minMarkerPerimeterRate = 0.01;
-  params->maxErroneousBitsInBorderRate = 0.4;
-  cv::aruco::detectMarkers(mat, target_.dictionary_ptr(), marker_corners, marker_ids, params);
+  aruco_detect_markers(mat, target_.dictionary_ref(), marker_corners, marker_ids);
   if (markers) {
     markers->corners = marker_corners;
     markers->ids = marker_ids;
@@ -43,10 +37,8 @@ std::vector<Correspondence> ArucoGridDetector::detect(
     return out;
   }
 
-  // 板物点与图像点对齐（每码四角）
   cv::Mat obj_mat, img_mat;
-  cv::aruco::getBoardObjectAndImagePoints(
-      target_.board(), marker_corners, marker_ids, obj_mat, img_mat);
+  grid_board_match_points(*target_.board(), marker_corners, marker_ids, obj_mat, img_mat);
   if (obj_mat.empty() || img_mat.empty() || obj_mat.rows != img_mat.rows || obj_mat.rows < 4) {
     return out;
   }

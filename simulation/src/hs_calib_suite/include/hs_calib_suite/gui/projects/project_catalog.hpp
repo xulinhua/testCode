@@ -25,20 +25,20 @@ struct ProjectInfo {
   QString last_calibrator_id;
   QString default_image_subdir;
 
-  QString source_path;   ///< project.yaml 或旧版扁平 yaml 路径
-  QString root_path;     ///< 文件夹项目根；模板为空
+  QString source_path;   ///< project.yaml 路径
+  QString root_path;     ///< 文件夹项目根
   bool is_folder_project = false;
   bool user_writable = false;
-  bool is_template = false;  ///< 包内扁平模板，需实例化成文件夹
+  bool is_template = false;  ///< 保留字段；列表不再展示模板
 };
 
-/// \brief 扫描用户项目文件夹 + 包内模板清单（不做算法）
+/// \brief 扫描用户项目文件夹清单（不做算法）
 class ProjectCatalog {
 public:
-  /// \brief 重新扫描磁盘
+  /// \brief 重新扫描磁盘；若无项目则自动创建默认项目
   void reload();
 
-  /// \brief 当前项目列表（文件夹项目在前，模板在后）
+  /// \brief 当前项目列表（仅用户文件夹项目）
   const QVector<ProjectInfo> &projects() const { return projects_; }
 
   /// \brief 按 id 查找；找不到返回 nullptr
@@ -47,26 +47,24 @@ public:
   /// \brief 用户文件夹项目根（Documents/hs_calib_projects）
   static QString user_projects_dir();
 
-  /// \brief 兼容旧路径（~/.config/.../projects 扁平 yaml）
-  static QString legacy_user_yaml_dir();
-
-  /// \brief 包内模板目录（share/.../config/projects）
-  static QString package_projects_dir();
-
   /// \brief 新建文件夹项目（委托 ProjectWorkspace::create）
   bool create_user_project(const ProjectInfo &info, QString *error_out = nullptr);
 
-  /// \brief 从包内模板实例化为用户文件夹项目
-  bool materialize_template(const QString &template_id, QString *root_out = nullptr,
-                            QString *error_out = nullptr);
+  /// \brief 导入外部项目文件夹到用户项目根（复制整目录）
+  /// \param src_dir 含 project.yaml 的源目录
+  /// \param id_override 非空则作为目标项目 ID；空则用源目录名 / yaml 内 id
+  bool import_user_project(
+      const QString &src_dir, const QString &id_override = QString(),
+      QString *root_out = nullptr, QString *error_out = nullptr);
+
+  /// \brief 删除用户文件夹项目（整目录）
+  bool delete_user_project(const QString &id, QString *error_out = nullptr);
 
   /// \brief 用系统文件管理器打开用户项目根目录
   static void open_user_projects_dir();
 
 private:
   QVector<ProjectInfo> projects_;
-
-  static ProjectInfo builtin_template(const QString &id);
 };
 
 }  // namespace gui

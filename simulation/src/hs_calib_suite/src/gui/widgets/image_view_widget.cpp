@@ -9,6 +9,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QResizeEvent>
+#include <QSizePolicy>
 #include <QTimer>
 #include <QToolButton>
 #include <QWheelEvent>
@@ -266,20 +267,19 @@ void ImageViewWidget::ensure_toolbar() {
   auto *lay = new QHBoxLayout(toolbar_);
   lay->setContentsMargins(6, 4, 6, 4);
   lay->setSpacing(4);
-  auto make_btn = [this](const QString &text, const QString &tip) {
+  auto make_btn = [this](const QString &text, const QString &tip, int min_w = 28) {
     auto *b = new QToolButton(toolbar_);
     b->setText(text);
     b->setToolTip(tip);
     b->setAutoRaise(true);
-    b->setFixedSize(28, 24);
+    b->setMinimumSize(min_w, 24);
+    b->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     return b;
   };
   btn_zoom_in_ = make_btn(QStringLiteral("+"), QStringLiteral("放大"));
   btn_zoom_out_ = make_btn(QStringLiteral("−"), QStringLiteral("缩小"));
-  btn_fit_ = make_btn(QStringLiteral("适应"), QStringLiteral("双击也可适应窗口"));
+  btn_fit_ = make_btn(QStringLiteral("适应"), QStringLiteral("双击也可适应窗口"), 48);
   btn_save_ = make_btn(QStringLiteral("存"), QStringLiteral("保存当前帧"));
-  btn_fit_->setFixedWidth(40);
-  btn_save_->setFixedWidth(28);
   lay->addWidget(btn_zoom_in_);
   lay->addWidget(btn_zoom_out_);
   lay->addWidget(btn_fit_);

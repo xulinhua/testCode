@@ -15,6 +15,7 @@
 
 #include <opencv2/core.hpp>
 
+#include "hs_calib_suite/core/detectors/board_type_identifier.hpp"
 #include "hs_calib_suite/core/types/types.hpp"
 #include "hs_calib_suite/gui/data/pose_csv_store.hpp"
 
@@ -24,8 +25,9 @@ namespace gui {
 class TfPoseBridge;
 
 enum class SourceMode {
-  Offline = 0,
-  RosTopic = 1,
+  Offline = 0,   ///< 离线图片目录
+  RosTopic = 1,  ///< 在线 ROS 图像话题
+  RosBag = 2,    ///< rosbag2 回放导出
 };
 
 enum class PoseSource {
@@ -33,6 +35,42 @@ enum class PoseSource {
   Csv = 1,
   Tf = 2,
 };
+
+/// \brief 检测调试子模式（与首页磁贴 ID 对应；正式标定为 None）
+enum class DetectLabMode {
+  None = 0,
+  Identify,  ///< detect_lab_identify
+  Partial,   ///< detect_lab
+  Full,      ///< detect_lab_full
+};
+
+/// \brief 由任务 ID 解析调试模式
+inline DetectLabMode detect_lab_mode_from_task_id(const QString &id) {
+  if (id == QStringLiteral("detect_lab_identify")) {
+    return DetectLabMode::Identify;
+  }
+  if (id == QStringLiteral("detect_lab_full")) {
+    return DetectLabMode::Full;
+  }
+  if (id == QStringLiteral("detect_lab")) {
+    return DetectLabMode::Partial;
+  }
+  return DetectLabMode::None;
+}
+
+inline QString detect_lab_task_id(DetectLabMode mode) {
+  switch (mode) {
+    case DetectLabMode::Identify:
+      return QStringLiteral("detect_lab_identify");
+    case DetectLabMode::Partial:
+      return QStringLiteral("detect_lab");
+    case DetectLabMode::Full:
+      return QStringLiteral("detect_lab_full");
+    case DetectLabMode::None:
+    default:
+      return {};
+  }
+}
 
 /// \brief 会话编排：单目内参 / 直角三面 / 眼在手上 / 眼在手外
 class SessionController : public QObject {
@@ -60,6 +98,15 @@ public:
   bool is_stereo_side_tagged() const;
   /// \brief 是否为直角三面标定器
   bool is_trihedral() const;
+
+  /// \brief 设置检测调试子模式（正式标定为 None）
+  void set_detect_lab_mode(DetectLabMode mode);
+  /// \brief 当前检测调试子模式
+  DetectLabMode detect_lab_mode() const { return detect_lab_mode_; }
+  /// \brief 是否处于任一检测调试模式
+  bool is_detect_lab() const { return detect_lab_mode_ != DetectLabMode::None; }
+  /// \brief 由任务 ID 同步调试模式（正式 ID 则清为 None）
+  void sync_detect_lab_mode_from_task_id(const QString &task_id);
 
   /// \brief 设置图像源模式（离线/ROS）
   void set_source_mode(SourceMode mode);
@@ -117,6 +164,8 @@ public:
       const cv::Mat &dist_coeffs,
       const std::string &model = "brown_conrady",
       double xi = 0.0);
+  /// \brief 清空检测用内参（回退 guess_K）
+  void clear_detect_intrinsics();
   /// \brief 是否已有检测用内参
   bool has_detect_intrinsics() const { return !detect_K_.empty(); }
   /// \brief 当前检测用畸变模型
@@ -164,8 +213,20 @@ public:
   /// \brief 后台检测：立即返回，结果经 detect_started / detect_finished 回调
   /// \param fast 实时预览用快速路径；手动「检测」用 false
   void request_detect(bool fast = false);
-  /// \brief 后台检测是否忙
+  /// \brief 后台标定板类型识别（与 request_detect 互斥；忽略板尺寸）
+  void request_identify(const core::BoardTypeIdentifyOptions &options = {});
+  /// \brief 取消排队中的检测/识别，并作废进行中的任务（冻结预览时调用）
+  void cancel_pending_detect();
+  /// \brief 后台检测或识别是否忙
   bool detect_busy() const { return detect_busy_.load(); }
+  /// \brief 最近一次类型识别结果（按 score 降序）
+  const std::vector<core::BoardTypeHypothesis> &last_identify_ranked() const {
+    return last_identify_ranked_;
+  }
+  /// \brief 最近一次识别摘要文案
+  QString last_identify_message() const { return last_identify_message_; }
+  /// \brief 导出最近一次识别结果为 JSON 报告
+  bool export_identify_json(const QString &path, QString *error_out = nullptr) const;
   /// \brief 最近一次检出的面数（三面靶）
   int last_faces_found() const { return last_faces_found_; }
   /// \brief 最近一次有效检测的图像点数（失败为 0）
@@ -205,7 +266,7 @@ public:
 
   /// \brief 导出内参或手眼外参 YAML
   bool export_yaml(const QString &path, QString *error_out = nullptr) const;
-  /// \brief 导出结果文件夹：内参/外参 YAML、会话配置、采集原图与检测叠加图
+  /// \brief 导出结果文件夹：内参/外参 YAML、标定设置、采集原图与检测叠加图
   bool export_bundle(const QString &dir_path, QString *error_out = nullptr) const;
 
   /// \brief 组装求解配置字典
@@ -233,13 +294,19 @@ signals:
   void detect_started();
   /// \brief 后台检测结束
   void detect_finished(bool ok, const QString &error);
+  /// \brief 后台类型识别开始
+  void identify_started();
+  /// \brief 后台类型识别结束
+  void identify_finished(bool ok, const QString &error);
 
 private:
   cv::Mat current_bgr() const;
   bool attach_pose_to_observation(core::Observation *obs, QString *error_out);
   void start_detect_job(bool fast);
+  void start_identify_job(const core::BoardTypeIdentifyOptions &options);
 
   QString calibrator_id_ = QStringLiteral("cam_intrinsics");
+  DetectLabMode detect_lab_mode_ = DetectLabMode::None;
   SourceMode source_mode_ = SourceMode::Offline;
   PoseSource pose_source_ = PoseSource::None;
 
@@ -282,6 +349,8 @@ private:
   double last_aruco_reproj_px_ = -1.0;
   int last_faces_found_ = 0;
   QImage last_preview_;
+  std::vector<core::BoardTypeHypothesis> last_identify_ranked_;
+  QString last_identify_message_;
 
   std::atomic<bool> detect_busy_{false};
   std::atomic<uint64_t> detect_epoch_{0};
