@@ -6,6 +6,10 @@
 #include "hs_calib_suite/gui/widgets/image_view_widget.hpp"
 #include "hs_calib_suite/gui/widgets/review_charts_widget.hpp"
 #include "hs_calib_suite/gui/panels/launcher_config_panel.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_data_collector.hpp"
+#include "hs_calib_suite/gui/intrinsics/intrinsics_preview_overlay.hpp"
+#include "hs_calib_suite/gui/intrinsics/intrinsics_workbench_panels.hpp"
+#include "hs_calib_suite/gui/intrinsics/intrinsics_parameter_dialog.hpp"
 #include "hs_calib_suite/gui/bridges/ros_image_bridge.hpp"
 #include "hs_calib_suite/gui/session/session_controller.hpp"
 #include "hs_calib_suite/gui/bridges/tf_pose_bridge.hpp"
@@ -47,9 +51,10 @@
 #include <QListWidgetItem>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSlider>
 #include <QSizePolicy>
 #include <QSpinBox>
-#include <QStackedWidget>
+#include <QTabWidget>
 #include <QStyle>
 #include <QTextEdit>
 #include <QTimer>
@@ -1303,7 +1308,7 @@ QWidget *MainWindow::build_workbench_page() {
   btn_next_ = new QPushButton(QStringLiteral("下一张"), actions);
   btn_detect_ = new QPushButton(QStringLiteral("检测"), actions);
   btn_capture_wb_ = new QPushButton(QStringLiteral("采集帧"), actions);
-  btn_solve_wb_ = new QPushButton(QStringLiteral("求解"), actions);
+  btn_solve_wb_ = new QPushButton(QStringLiteral("标定"), actions);
   btn_solve_wb_->setEnabled(false);
   auto *to_review = new QPushButton(QStringLiteral("复核"), actions);
   chk_auto_capture_ = new QCheckBox(QStringLiteral("自动采集"), actions);
@@ -1384,7 +1389,7 @@ QWidget *MainWindow::build_workbench_page() {
   // ---- Left: preview（缩放显示 640/1280 图，列宽收窄） ----
   auto *preview_col = new QWidget(split);
   preview_col->setMinimumWidth(320);
-  preview_col->setMaximumWidth(640);
+  preview_col->setMaximumWidth(720);
   auto *preview_lay = new QVBoxLayout(preview_col);
   preview_lay->setContentsMargins(0, 0, 0, 0);
   preview_lay->setSpacing(8);
@@ -1393,6 +1398,7 @@ QWidget *MainWindow::build_workbench_page() {
   preview_view_->setMinimumSize(280, 240);
   preview_view_->set_placeholder(QStringLiteral("预览区"));
   preview_view_->set_async_refresh(true, 33);
+  preview_view_->set_toolbar_style(ImageViewToolbarStyle::Hidden);
 
   auto *preview_panel = new QFrame(preview_col);
   preview_panel->setObjectName(QStringLiteral("Panel"));
@@ -1408,6 +1414,39 @@ QWidget *MainWindow::build_workbench_page() {
       make_label(QStringLiteral("实时预览"), QStringLiteral("SectionTitle"), preview_header);
   preview_header_lay->addWidget(preview_title_label_);
   preview_header_lay->addStretch(1);
+  auto make_preview_tool_btn = [preview_header](const QString &text, const QString &tip) {
+    auto *b = new QPushButton(text, preview_header);
+    b->setObjectName(QStringLiteral("CompactButton"));
+    b->setToolTip(tip);
+    b->setFixedHeight(28);
+    b->setMinimumWidth(0);
+    return b;
+  };
+  btn_preview_zoom_in_ =
+      make_preview_tool_btn(QStringLiteral("+"), QStringLiteral("放大"));
+  btn_preview_zoom_out_ =
+      make_preview_tool_btn(QStringLiteral("−"), QStringLiteral("缩小"));
+  btn_preview_fit_ =
+      make_preview_tool_btn(QStringLiteral("适应"), QStringLiteral("适应窗口"));
+  btn_preview_one_to_one_ =
+      make_preview_tool_btn(QStringLiteral("1:1"), QStringLiteral("原始像素 1:1"));
+  btn_preview_save_ =
+      make_preview_tool_btn(QStringLiteral("保存"), QStringLiteral("保存当前帧"));
+  connect(btn_preview_zoom_in_, &QPushButton::clicked, preview_view_, &ImageViewWidget::zoom_in);
+  connect(btn_preview_zoom_out_, &QPushButton::clicked, preview_view_, &ImageViewWidget::zoom_out);
+  connect(btn_preview_fit_, &QPushButton::clicked, preview_view_, &ImageViewWidget::fit_to_window);
+  connect(
+      btn_preview_one_to_one_, &QPushButton::clicked, preview_view_,
+      &ImageViewWidget::reset_view);
+  connect(
+      btn_preview_save_, &QPushButton::clicked, preview_view_,
+      &ImageViewWidget::prompt_save_image);
+  preview_header_lay->addWidget(btn_preview_zoom_in_);
+  preview_header_lay->addWidget(btn_preview_zoom_out_);
+  preview_header_lay->addWidget(btn_preview_fit_);
+  preview_header_lay->addWidget(btn_preview_one_to_one_);
+  preview_header_lay->addWidget(btn_preview_save_);
+  preview_header_lay->addSpacing(8);
   btn_preview_live_ = new QPushButton(QStringLiteral("实时"), preview_header);
   btn_preview_live_->setObjectName(QStringLiteral("ModeChip"));
   btn_preview_live_->setCheckable(true);
@@ -1441,49 +1480,87 @@ QWidget *MainWindow::build_workbench_page() {
 
   auto *viz_strip = new QFrame(preview_col);
   viz_strip->setObjectName(QStringLiteral("VizStrip"));
-  auto *viz_row = new QHBoxLayout(viz_strip);
-  viz_row->setContentsMargins(12, 10, 12, 10);
-  viz_row->setSpacing(14);
+  auto *viz_col = new QVBoxLayout(viz_strip);
+  viz_col->setContentsMargins(10, 8, 10, 8);
+  viz_col->setSpacing(6);
+
+  auto *viz_row1 = new QWidget(viz_strip);
+  viz_classic_row_ = viz_row1;
+  auto *viz_row = new QHBoxLayout(viz_row1);
+  viz_row->setContentsMargins(0, 0, 0, 0);
+  viz_row->setSpacing(10);
   viz_row->setAlignment(Qt::AlignVCenter);
   viz_row->addWidget(make_label(
-      QStringLiteral("叠加显示"), QStringLiteral("SectionTitle"), viz_strip));
-  chk_viz_corners_wb_ = new QCheckBox(QStringLiteral("角点"), viz_strip);
+      QStringLiteral("叠加"), QStringLiteral("SectionTitle"), viz_row1));
+  chk_viz_corners_wb_ = new QCheckBox(QStringLiteral("角点"), viz_row1);
   chk_viz_corners_wb_->setChecked(true);
-  chk_viz_hull_wb_ = new QCheckBox(QStringLiteral("外轮廓"), viz_strip);
+  chk_viz_hull_wb_ = new QCheckBox(QStringLiteral("外轮廓"), viz_row1);
   chk_viz_hull_wb_->setChecked(true);
-  chk_viz_conf_wb_ = new QCheckBox(QStringLiteral("置信度"), viz_strip);
+  chk_viz_conf_wb_ = new QCheckBox(QStringLiteral("置信度"), viz_row1);
   chk_viz_conf_wb_->setChecked(true);
-  chk_viz_aruco_wb_ = new QCheckBox(QStringLiteral("ArUco"), viz_strip);
+  chk_viz_aruco_wb_ = new QCheckBox(QStringLiteral("ArUco"), viz_row1);
   chk_viz_aruco_wb_->setChecked(true);
   chk_viz_aruco_wb_->setToolTip(QStringLiteral("叠加检测到的 ArUco 边框与 ID"));
   viz_row->addWidget(chk_viz_corners_wb_);
   viz_row->addWidget(chk_viz_hull_wb_);
   viz_row->addWidget(chk_viz_conf_wb_);
   viz_row->addWidget(chk_viz_aruco_wb_);
-  viz_row->addSpacing(8);
+  viz_row->addSpacing(6);
   viz_row->addWidget(make_label(
-      QStringLiteral("标记"), QStringLiteral("Muted"), viz_strip));
-  spin_viz_marker_wb_ = new QSpinBox(viz_strip);
+      QStringLiteral("标记"), QStringLiteral("Muted"), viz_row1));
+  spin_viz_marker_wb_ = new QSpinBox(viz_row1);
   spin_viz_marker_wb_->setRange(1, 20);
   spin_viz_marker_wb_->setValue(4);
   spin_viz_marker_wb_->setSuffix(QStringLiteral(" px"));
-  spin_viz_marker_wb_->setFixedWidth(96);
-  spin_viz_marker_wb_->setMinimumHeight(34);
+  spin_viz_marker_wb_->setFixedWidth(88);
+  spin_viz_marker_wb_->setMinimumHeight(32);
   viz_row->addWidget(spin_viz_marker_wb_, 0, Qt::AlignVCenter);
   viz_row->addStretch(1);
+  viz_col->addWidget(viz_row1);
+
+  viz_tier4_row_ = new QWidget(viz_strip);
+  auto *tier4_row = new QHBoxLayout(viz_tier4_row_);
+  tier4_row->setContentsMargins(0, 0, 0, 0);
+  tier4_row->setSpacing(10);
+  tier4_row->addWidget(make_label(
+      QStringLiteral("Tier4 视图"), QStringLiteral("Muted"), viz_tier4_row_));
+  combo_intrinsics_view_mode_ = new QComboBox(viz_tier4_row_);
+  combo_intrinsics_view_mode_->setMinimumHeight(32);
+  combo_intrinsics_view_mode_->setMinimumWidth(140);
+  combo_intrinsics_view_mode_->addItem(
+      QStringLiteral("Source"),
+      static_cast<int>(IntrinsicsImageViewMode::Source));
+  combo_intrinsics_view_mode_->addItem(
+      QStringLiteral("Source rectified"),
+      static_cast<int>(IntrinsicsImageViewMode::SourceRectified));
+  combo_intrinsics_view_mode_->addItem(
+      QStringLiteral("Undistortion alpha"),
+      static_cast<int>(IntrinsicsImageViewMode::UndistortionAlpha));
+  combo_intrinsics_view_mode_->addItem(
+      QStringLiteral("Drawings"),
+      static_cast<int>(IntrinsicsImageViewMode::Drawings));
+  combo_intrinsics_view_mode_->addItem(
+      QStringLiteral("Indicators"),
+      static_cast<int>(IntrinsicsImageViewMode::Indicators));
+  tier4_row->addWidget(combo_intrinsics_view_mode_);
+  btn_tier4_viz_options_wb_ =
+      new QPushButton(QStringLiteral("可视化设置…"), viz_tier4_row_);
+  btn_tier4_viz_options_wb_->setObjectName(QStringLiteral("CompactButton"));
+  btn_tier4_viz_options_wb_->setToolTip(
+      QStringLiteral("打开 Tier4 Visualization options 设置页"));
+  connect(
+      btn_tier4_viz_options_wb_, &QPushButton::clicked, this,
+      &MainWindow::show_intrinsics_viz_options_dialog);
+  tier4_row->addWidget(btn_tier4_viz_options_wb_);
+  tier4_row->addStretch(1);
+  viz_col->addWidget(viz_tier4_row_);
   preview_lay->addWidget(viz_strip, 0);
 
-  auto refresh_viz = [this]() {
-    apply_workbench_viz_to_session();
-    if (session_ == nullptr) {
-      return;
-    }
-    // 离线或冻结时立刻重画；实时模式等下一帧
-    if (session_->source_mode() != SourceMode::RosTopic || !preview_live_) {
-      pending_detect_log_ = false;
-      session_->request_detect(false);
-    }
-  };
+  intrinsics_metrics_strip_ = new IntrinsicsMetricsStrip(preview_col);
+  intrinsics_metrics_strip_->setVisible(false);
+  preview_lay->addWidget(intrinsics_metrics_strip_, 0);
+
+  auto refresh_viz = [this]() { refresh_workbench_preview_viz(); };
   connect(chk_viz_corners_wb_, &QCheckBox::toggled, this, refresh_viz);
   connect(chk_viz_hull_wb_, &QCheckBox::toggled, this, refresh_viz);
   connect(chk_viz_conf_wb_, &QCheckBox::toggled, this, refresh_viz);
@@ -1491,6 +1568,14 @@ QWidget *MainWindow::build_workbench_page() {
   connect(
       spin_viz_marker_wb_, QOverload<int>::of(&QSpinBox::valueChanged), this,
       [refresh_viz](int) { refresh_viz(); });
+  connect(combo_intrinsics_view_mode_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+          [this, refresh_viz](int) {
+            if (session_ != nullptr && combo_intrinsics_view_mode_ != nullptr) {
+              session_->set_intrinsics_image_view_mode(static_cast<IntrinsicsImageViewMode>(
+                  combo_intrinsics_view_mode_->currentData().toInt()));
+            }
+            refresh_viz();
+          });
 
   // ---- Middle: observation / file list (beside preview) ----
   auto *obs_col = new QWidget(split);
@@ -1505,7 +1590,15 @@ QWidget *MainWindow::build_workbench_page() {
   obs_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   obs_list_->setWordWrap(false);
   obs_list_->setTextElideMode(Qt::ElideMiddle);
-  auto *obs_panel = make_panel(QStringLiteral("观测列表"), obs_list_);
+  obs_eval_list_ = new QListWidget(obs_col);
+  obs_eval_list_->setAlternatingRowColors(false);
+  obs_eval_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  obs_eval_list_->setWordWrap(false);
+  obs_eval_list_->setTextElideMode(Qt::ElideMiddle);
+  obs_tabs_ = new QTabWidget(obs_col);
+  obs_tabs_->addTab(obs_list_, QStringLiteral("训练"));
+  obs_tabs_->addTab(obs_eval_list_, QStringLiteral("评估"));
+  auto *obs_panel = make_panel(QStringLiteral("观测列表"), obs_tabs_);
   obs_lay->addWidget(obs_panel, 1);
 
   auto *obs_btns = new QHBoxLayout;
@@ -1515,29 +1608,39 @@ QWidget *MainWindow::build_workbench_page() {
   auto *clear_btn = new QPushButton(QStringLiteral("全部清空"), obs_col);
   clear_btn->setObjectName(QStringLiteral("CompactButton"));
   connect(remove_btn, &QPushButton::clicked, this, [this]() {
-    if (obs_list_ == nullptr || session_ == nullptr) {
+    if (obs_tabs_ == nullptr || session_ == nullptr) {
       return;
     }
-    const int row = obs_list_->currentRow();
+    const bool eval_tab = obs_tabs_->currentIndex() == 1;
+    QListWidget *list = eval_tab ? obs_eval_list_ : obs_list_;
+    const int row = list->currentRow();
     if (row < 0) {
       append_log(LogLevel::Warn, QStringLiteral("› 请先选中一条观测"));
       return;
     }
-    session_->remove_observation(row);
+    if (eval_tab) {
+      session_->remove_intrinsics_sample(core::IntrinsicsSampleSplit::Evaluation, row);
+    } else {
+      session_->remove_observation(row);
+    }
     append_log(LogLevel::Info, QStringLiteral("› 已删除观测"));
+    refresh_workbench_view(false);
   });
   connect(clear_btn, &QPushButton::clicked, this, [this]() {
     if (session_ == nullptr) {
       return;
     }
-    if (session_->observation_count() <= 0) {
+    if (!session_->has_observations()) {
       append_log(LogLevel::Warn, QStringLiteral("› 观测列表已空"));
       return;
     }
+    const int clear_count = session_->uses_tier4_intrinsics()
+        ? session_->training_sample_count() + session_->evaluation_sample_count()
+        : session_->observation_count();
     const auto ret = QMessageBox::question(
         this, QStringLiteral("清空观测"),
         QStringLiteral("确定清空全部 %1 条已采集观测？")
-            .arg(session_->observation_count()),
+            .arg(clear_count),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (ret != QMessageBox::Yes) {
       return;
@@ -1550,16 +1653,45 @@ QWidget *MainWindow::build_workbench_page() {
   obs_btns->addWidget(clear_btn, 1);
   obs_lay->addLayout(obs_btns);
 
-  // ---- Right rail: compact session metrics ----
+  intrinsics_sample_slider_label_ = new QLabel(QStringLiteral("样本浏览：实时"), obs_col);
+  intrinsics_sample_slider_label_->setObjectName(QStringLiteral("Muted"));
+  intrinsics_sample_slider_ = new QSlider(Qt::Horizontal, obs_col);
+  intrinsics_sample_slider_->setRange(-1, 0);
+  intrinsics_sample_slider_->setValue(-1);
+  intrinsics_sample_slider_->setEnabled(false);
+  obs_lay->addWidget(intrinsics_sample_slider_label_);
+  obs_lay->addWidget(intrinsics_sample_slider_);
+  connect(intrinsics_sample_slider_, &QSlider::valueChanged, this, [this](int v) {
+    if (session_ == nullptr || intrinsics_sample_slider_label_ == nullptr) {
+      return;
+    }
+    if (v < 0) {
+      session_->clear_intrinsics_browse();
+      intrinsics_sample_slider_label_->setText(QStringLiteral("样本浏览：实时"));
+    } else {
+      const bool eval_tab = obs_tabs_ != nullptr && obs_tabs_->currentIndex() == 1;
+      session_->set_intrinsics_browse_sample(v, eval_tab);
+      intrinsics_sample_slider_label_->setText(
+          QStringLiteral("样本浏览：%1 #%2").arg(eval_tab ? QStringLiteral("评估")
+                                                          : QStringLiteral("训练"))
+              .arg(v + 1));
+    }
+    refresh_workbench_view(true);
+  });
+
+  // ---- Right rail: default metrics OR Tier4 intrinsics control ----
   auto *right = new QWidget(split);
-  right->setMinimumWidth(118);
-  right->setMaximumWidth(148);
+  right->setMinimumWidth(260);
+  right->setMaximumWidth(420);
   right->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
   auto *right_lay = new QVBoxLayout(right);
   right_lay->setContentsMargins(0, 0, 0, 0);
   right_lay->setSpacing(8);
 
-  auto *metrics_host = new QWidget(right);
+  workbench_default_right_ = new QWidget(right);
+  auto *default_right_lay = new QVBoxLayout(workbench_default_right_);
+  default_right_lay->setContentsMargins(0, 0, 0, 0);
+  auto *metrics_host = new QWidget(workbench_default_right_);
   auto *metrics_layout = new QVBoxLayout(metrics_host);
   metrics_layout->setContentsMargins(0, 0, 0, 0);
   metrics_layout->setSpacing(6);
@@ -1571,8 +1703,34 @@ QWidget *MainWindow::build_workbench_page() {
       make_compact_metric_card(QStringLiteral("重投影"), QStringLiteral("—")));
   metrics_layout->addWidget(
       make_compact_metric_card(QStringLiteral("覆盖提示"), QStringLiteral("—")));
-  right_lay->addWidget(make_panel(QStringLiteral("会话指标"), metrics_host), 0);
-  right_lay->addStretch(1);
+  default_right_lay->addWidget(make_panel(QStringLiteral("会话指标"), metrics_host), 0);
+  default_right_lay->addStretch(1);
+
+  intrinsics_control_rail_ = new IntrinsicsControlRail(right);
+  intrinsics_control_rail_->setVisible(false);
+  connect(intrinsics_control_rail_, &IntrinsicsControlRail::calibration_params_requested,
+          this, [this]() { show_intrinsics_parameter_dialog(0); });
+  connect(intrinsics_control_rail_, &IntrinsicsControlRail::detector_params_requested,
+          this, [this]() { show_intrinsics_parameter_dialog(2); });
+  connect(intrinsics_control_rail_, &IntrinsicsControlRail::collector_params_requested,
+          this, [this]() { show_intrinsics_parameter_dialog(1); });
+  connect(intrinsics_control_rail_, &IntrinsicsControlRail::statistics_requested,
+          this, [this]() { show_intrinsics_stats_dialog(); });
+  connect(intrinsics_control_rail_, &IntrinsicsControlRail::status_details_requested,
+          this, [this]() { show_intrinsics_calibration_status_dialog(); });
+  connect(intrinsics_metrics_strip_, &IntrinsicsMetricsStrip::details_requested, this,
+          [this]() { show_intrinsics_detection_details_dialog(); });
+  connect(intrinsics_control_rail_->solver_combo(),
+          QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+            if (session_ == nullptr || intrinsics_control_rail_ == nullptr) {
+              return;
+            }
+            session_->set_intrinsics_solver_kind(
+                intrinsics_control_rail_->solver_combo()->currentData().toString().toStdString());
+          });
+
+  right_lay->addWidget(workbench_default_right_);
+  right_lay->addWidget(intrinsics_control_rail_);
 
   split->addWidget(preview_col);
   split->addWidget(obs_col);
@@ -1601,12 +1759,18 @@ QWidget *MainWindow::build_review_page() {
       QStringLiteral("残差 · 观测 · 覆盖可视化，确认后导出"),
       QStringLiteral("PageSubtitle"), page));
   header->addLayout(titles, 1);
+  auto *stats_btn = new QPushButton(QStringLiteral("标定统计…"), page);
+  stats_btn->setObjectName(QStringLiteral("GhostButton"));
+  stats_btn->setToolTip(QStringLiteral("重新打开 Tier4 采集统计与标定结果统计图"));
+  connect(stats_btn, &QPushButton::clicked, this,
+          &MainWindow::show_intrinsics_tier4_statistics_dialogs);
   auto *export_btn = new QPushButton(QStringLiteral("导出结果"), page);
   export_btn->setObjectName(QStringLiteral("PrimaryButton"));
   connect(export_btn, &QPushButton::clicked, this, &MainWindow::on_export_yaml);
   auto *done = new QPushButton(QStringLiteral("完成"), page);
   done->setObjectName(QStringLiteral("GhostButton"));
   connect(done, &QPushButton::clicked, this, [this]() { go_to(PageId::Home); });
+  header->addWidget(stats_btn);
   header->addWidget(export_btn);
   header->addWidget(done);
   root->addLayout(header);
@@ -1628,8 +1792,8 @@ QWidget *MainWindow::build_review_page() {
   review_obs_list_->setMinimumWidth(200);
   review_obs_list_->setMaximumWidth(320);
   connect(
-      review_obs_list_, &QListWidget::currentRowChanged, this,
-      [this](int) { on_review_obs_selected(); });
+      review_obs_list_, &QListWidget::itemClicked, this,
+      &MainWindow::on_review_obs_clicked);
   split->addWidget(make_panel(QStringLiteral("观测列表"), review_obs_list_));
 
   review_residual_bars_ = new ResidualBarWidget(split);

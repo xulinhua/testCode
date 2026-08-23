@@ -130,7 +130,22 @@ MainWindow::MainWindow(QWidget *parent)
     }
   });
   connect(session_.get(), &SessionController::observations_changed, this, [this]() {
-    refresh_workbench_view();
+    refresh_workbench_view(false);
+  });
+  connect(session_.get(), &SessionController::intrinsics_state_changed, this,
+          [this]() { refresh_intrinsics_workbench_ui(); });
+  connect(session_.get(), &SessionController::live_preview_updated, this, [this]() {
+    if (session_ == nullptr || stack_ == nullptr ||
+        stack_->currentIndex() != static_cast<int>(PageId::Workbench)) {
+      return;
+    }
+    if (!preview_live_ || session_->detect_busy() || session_->has_current_detection()) {
+      return;
+    }
+    const QImage img = session_->cached_live_preview_qimage();
+    if (!img.isNull()) {
+      show_preview_image(img);
+    }
   });
   connect(session_.get(), &SessionController::result_changed, this, [this]() {
     refresh_review_view();
@@ -150,6 +165,15 @@ MainWindow::MainWindow(QWidget *parent)
   connect(
       session_.get(), &SessionController::identify_finished, this,
       &MainWindow::on_async_identify_finished);
+  connect(
+      session_.get(), &SessionController::solve_started, this,
+      &MainWindow::on_async_solve_started);
+  connect(
+      session_.get(), &SessionController::solve_progress, this,
+      &MainWindow::on_async_solve_progress);
+  connect(
+      session_.get(), &SessionController::solve_finished, this,
+      &MainWindow::on_async_solve_finished);
   connect(
       ros_bridge_.get(), &RosImageBridge::frame_received, this,
       &MainWindow::on_ros_frame);
@@ -569,7 +593,9 @@ void MainWindow::go_to(PageId page) {
     act_capture_->setEnabled(on_work);
   }
   if (act_solve_ != nullptr) {
-    act_solve_->setEnabled(on_work && session_ && session_->observation_count() >= 3);
+    act_solve_->setEnabled(
+        on_work && session_ && !session_->solve_busy() &&
+        session_->observation_count() >= 3);
   }
   if (act_export_ != nullptr) {
     act_export_->setEnabled(session_ && session_->has_result());
@@ -582,6 +608,7 @@ void MainWindow::go_to(PageId page) {
     refresh_handeye_ui();
     refresh_setup_readiness();
   } else if (page == PageId::Workbench) {
+    maybe_clear_observations_on_workbench_enter();
     refresh_workbench_view();
   } else if (page == PageId::Review) {
     refresh_review_view();

@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_config_params.hpp"
 #include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/targets/charuco_target.hpp"
 #include "hs_calib_suite/core/base/detector_base.hpp"
@@ -14,7 +15,7 @@ namespace core {
 class CharucoDetector : public DetectorBase {
 public:
   /// \brief 绑定平面 ChArUco 靶标
-  explicit CharucoDetector(CharucoTarget target);
+  explicit CharucoDetector(CharucoTarget target, CharucoDetectorParams params = {});
 
   /// \brief DetectorBase 接口（忽略外部 target，用成员板）
   std::vector<Correspondence> detect(
@@ -27,6 +28,7 @@ public:
 
 private:
   CharucoTarget target_;
+  CharucoDetectorParams params_;
 };
 
 }  // namespace core

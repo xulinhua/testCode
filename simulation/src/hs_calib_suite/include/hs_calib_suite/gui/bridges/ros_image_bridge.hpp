@@ -57,6 +57,9 @@ public:
   /// \brief 取最新一帧 BGR 拷贝；无帧返回空 Mat
   cv::Mat latest_bgr() const;
 
+  /// \brief 取走最新 BGR 帧（桥内缓存置空，由调用方持有；避免重复 clone）
+  cv::Mat take_latest_bgr();
+
   /// \brief 是否已有缓存帧
   bool has_frame() const;
 

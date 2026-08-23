@@ -24,10 +24,14 @@ class QGridLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QListWidgetItem;
 class QObject;
+class QProgressDialog;
 class QPushButton;
 class QSpinBox;
+class QSlider;
 class QStackedWidget;
+class QTabWidget;
 class QTextEdit;
 class QTimer;
 class QToolButton;
@@ -42,6 +46,15 @@ class LauncherConfigPanel;
 class ImageViewWidget;
 class ResidualBarWidget;
 class CoverageMapWidget;
+class IntrinsicsControlRail;
+class IntrinsicsMetricsStrip;
+class IntrinsicsParameterDialog;
+class IntrinsicsStatsDialog;
+class IntrinsicsCalibrationBarsDialog;
+class IntrinsicsCalibrationRmsDialog;
+class IntrinsicsDetectionDetailsDialog;
+class IntrinsicsVizOptionsDialog;
+class IntrinsicsCalibrationStatusDialog;
 
 /// \brief 标定管理主窗口（单目内参 / 直角三面 / 手眼）
 class MainWindow : public QMainWindow {
@@ -118,6 +131,16 @@ private:
 
   // —— 工作台：预览 / 检测 / 采集 / 求解 ——
   void refresh_workbench_view(bool update_preview = true);
+  void show_intrinsics_parameter_dialog(int kind);
+  void show_intrinsics_stats_dialog();
+  void show_intrinsics_detection_details_dialog();
+  void show_intrinsics_calibration_status_dialog();
+  void show_intrinsics_calibration_bars_dialog();
+  void show_intrinsics_calibration_rms_dialog();
+  void show_intrinsics_tier4_statistics_dialogs();
+  void show_intrinsics_viz_options_dialog();
+  void refresh_intrinsics_workbench_ui();
+  void update_workbench_layout_for_task();
   void refresh_review_view();
   void show_preview_image(const QImage &img);
   void set_preview_live(bool live);
@@ -125,6 +148,10 @@ private:
   void run_live_preview_tick(bool allow_auto_capture);
   void on_async_detect_started();
   void on_async_detect_finished(bool ok, const QString &err);
+  void on_async_solve_started();
+  void on_async_solve_progress(int percent, const QString &message);
+  void on_async_solve_finished(bool ok, const QString &err);
+  void update_solve_action_enabled();
   void update_detect_status_ui();
   void on_browse_image_dir();
   void on_browse_bag();
@@ -140,10 +167,13 @@ private:
   void on_capture_observation();
   void on_solve();
   void on_export_yaml();
+  QString compute_workbench_solve_fingerprint() const;
+  void maybe_clear_observations_on_workbench_enter();
   bool ensure_implemented_calibrator(QString *error_out = nullptr) const;
   void sync_session_from_setup_ui();
   void sync_workbench_viz_from_session();
   void apply_workbench_viz_to_session();
+  void refresh_workbench_preview_viz();
   void on_reload_default_board_config();
   void apply_board_config_from_package();
 
@@ -259,8 +289,28 @@ private:
   QLabel *preview_title_label_ = nullptr;
   QPushButton *btn_preview_live_ = nullptr;
   QPushButton *btn_preview_freeze_ = nullptr;
+  QPushButton *btn_preview_zoom_in_ = nullptr;
+  QPushButton *btn_preview_zoom_out_ = nullptr;
+  QPushButton *btn_preview_fit_ = nullptr;
+  QPushButton *btn_preview_one_to_one_ = nullptr;
+  QPushButton *btn_preview_save_ = nullptr;
   bool preview_live_ = true;
   QListWidget *obs_list_ = nullptr;
+  QListWidget *obs_eval_list_ = nullptr;
+  QTabWidget *obs_tabs_ = nullptr;
+  QWidget *workbench_default_right_ = nullptr;
+  IntrinsicsControlRail *intrinsics_control_rail_ = nullptr;
+  IntrinsicsMetricsStrip *intrinsics_metrics_strip_ = nullptr;
+  IntrinsicsParameterDialog *intrinsics_calib_params_dlg_ = nullptr;
+  IntrinsicsParameterDialog *intrinsics_collector_params_dlg_ = nullptr;
+  IntrinsicsParameterDialog *intrinsics_detector_params_dlg_ = nullptr;
+  IntrinsicsStatsDialog *intrinsics_stats_dlg_ = nullptr;
+  IntrinsicsCalibrationBarsDialog *intrinsics_calibration_bars_dlg_ = nullptr;
+  IntrinsicsCalibrationRmsDialog *intrinsics_calibration_rms_dlg_ = nullptr;
+  IntrinsicsDetectionDetailsDialog *intrinsics_detection_details_dlg_ = nullptr;
+  IntrinsicsCalibrationStatusDialog *intrinsics_calibration_status_dlg_ = nullptr;
+  IntrinsicsVizOptionsDialog *intrinsics_viz_options_dlg_ = nullptr;
+  std::string stats_backend_ = "qt";
   QLabel *metric_frames_ = nullptr;
   QLabel *metric_detect_ = nullptr;
   QLabel *metric_reproj_ = nullptr;
@@ -273,14 +323,23 @@ private:
   QPushButton *btn_detect_ = nullptr;
   QPushButton *btn_capture_wb_ = nullptr;
   QPushButton *btn_solve_wb_ = nullptr;
+  QProgressDialog *solve_progress_dlg_ = nullptr;
+  QString workbench_solve_fingerprint_;
   QCheckBox *chk_auto_capture_ = nullptr;
   QCheckBox *chk_viz_corners_wb_ = nullptr;
   QCheckBox *chk_viz_hull_wb_ = nullptr;
   QCheckBox *chk_viz_conf_wb_ = nullptr;
   QCheckBox *chk_viz_aruco_wb_ = nullptr;
+  QWidget *viz_classic_row_ = nullptr;
+  QComboBox *combo_intrinsics_view_mode_ = nullptr;
+  QWidget *viz_tier4_row_ = nullptr;
+  QPushButton *btn_tier4_viz_options_wb_ = nullptr;
+  QSlider *intrinsics_sample_slider_ = nullptr;
+  QLabel *intrinsics_sample_slider_label_ = nullptr;
   QSpinBox *spin_viz_marker_wb_ = nullptr;
   qint64 last_auto_capture_ms_ = 0;
   qint64 last_live_detect_ms_ = 0;
+  qint64 last_live_raw_preview_ms_ = 0;
   bool pending_detect_log_ = false;
   bool pending_capture_after_detect_ = false;
   bool allow_auto_on_detect_finish_ = false;
@@ -294,7 +353,9 @@ private:
   ResidualBarWidget *review_residual_bars_ = nullptr;
   CoverageMapWidget *review_coverage_map_ = nullptr;
   QLabel *review_diag_label_ = nullptr;
-  void on_review_obs_selected();
+  int review_selected_view_ = -1;
+  void on_review_obs_clicked(QListWidgetItem *item);
+  void apply_review_view_filter();
   void on_review_bar_clicked(int view_index);
 
   // ===== Detect Lab =====

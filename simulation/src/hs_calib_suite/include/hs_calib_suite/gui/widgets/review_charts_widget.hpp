@@ -57,6 +57,8 @@ protected:
 
 private:
   QPointF map_to_content(const QPointF &widget_pos) const;
+  void paint_chart_background(QPainter &p, const QRectF &rc) const;
+  void paint_chart_bars(QPainter &p, const QRectF &rc) const;
   void paint_chart(QPainter &p, const QRectF &rc) const;
   void invalidate_base();
   void ensure_base_pixmap();
@@ -111,6 +113,9 @@ protected:
 private:
   static QColor color_for_error(float err_px, float max_err);
   QPointF map_to_content(const QPointF &widget_pos) const;
+  QRectF plot_frame(const QRectF &rc) const;
+  void paint_chart_background(QPainter &p, const QRectF &rc) const;
+  void paint_chart_points(QPainter &p, const QRectF &rc, int filter_view) const;
   void paint_chart(QPainter &p, const QRectF &rc) const;
   void invalidate_base();
   void ensure_base_pixmap();

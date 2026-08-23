@@ -2,25 +2,32 @@
 
 #include <vector>
 
-#include "hs_calib_suite/core/targets/circle_grid_target.hpp"
 #include "hs_calib_suite/core/base/detector_base.hpp"
+#include "hs_calib_suite/core/detectors/asymmetric_circle_grid_detector.hpp"
+#include "hs_calib_suite/core/detectors/symmetric_circle_grid_detector.hpp"
+#include "hs_calib_suite/core/targets/circle_grid_target.hpp"
 #include "hs_calib_suite/core/types/types.hpp"
 
 namespace hs_calib {
 namespace core {
 
-/// \brief 圆点阵列检测器（findCirclesGrid）
+/// \brief 兼容旧名：按 target.pattern() 分派到对称/非对称检测器
 class CircleGridDetector : public DetectorBase {
 public:
-  /// \brief 构造检测器并绑定圆点阵列靶标
-  explicit CircleGridDetector(CircleGridTarget target);
+  explicit CircleGridDetector(CircleGridTarget target) : target_(std::move(target)) {}
 
-  /// \brief 检测接口（需传入 TargetModelBase）
   std::vector<Correspondence> detect(
-      const ImageFrame &frame, const TargetModelBase &target) const override;
+      const ImageFrame &frame, const TargetModelBase &target) const override {
+    (void)target;
+    return detect(frame);
+  }
 
-  /// \brief 使用构造时绑定的靶标检测
-  std::vector<Correspondence> detect(const ImageFrame &frame) const;
+  std::vector<Correspondence> detect(const ImageFrame &frame) const {
+    if (target_.pattern() == CircleGridPattern::Asymmetric) {
+      return AsymmetricCircleGridDetector(target_).detect(frame);
+    }
+    return SymmetricCircleGridDetector(target_).detect(frame);
+  }
 
 private:
   CircleGridTarget target_;

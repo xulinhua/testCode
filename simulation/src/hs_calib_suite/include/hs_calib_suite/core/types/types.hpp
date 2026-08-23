@@ -16,6 +16,7 @@ struct ImageFrame {
   int width = 0;
   int height = 0;
   int channels = 0;
+  size_t step = 0;  ///< 行字节数；0 表示按 width*channels 紧凑行
   const uint8_t *data = nullptr;  ///< 像素指针（调用方保活）
   std::string encoding;           ///< 如 bgr8 / mono8
 };
@@ -35,6 +36,15 @@ struct Observation {
   int image_width = 0;                      ///< 图像宽
   int image_height = 0;                     ///< 图像高
   std::vector<Correspondence> correspondences;
+  /// \brief 采集时 PnP 板位姿（内参流水线写入，可选）
+  bool has_board_pose = false;
+  Eigen::Vector3d board_rvec = Eigen::Vector3d::Zero();
+  Eigen::Vector3d board_tvec = Eigen::Vector3d::Zero();
+  double board_reproj_rms = -1.0;
+  double board_reproj_max = -1.0;
+  double board_center_x_norm = 0.5;
+  double board_center_y_norm = 0.5;
+  double board_tilt_deg = 0.0;
   /// \brief 是否含机械臂位姿（手眼用）
   bool has_base_gripper = false;
   /// \brief T_base_gripper：把 gripper 系点变到 base（OpenCV gripper2base）

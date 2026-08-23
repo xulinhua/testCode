@@ -71,7 +71,7 @@ CalibratorInfo EyeToHandCalibrator::calibrator_info() const {
   info.display_name = "眼在手外";
   info.category = "handeye";
   info.required_frames = {"base", "gripper", "camera"};
-  info.supported_targets = {"chessboard"};
+  info.supported_targets = {"chessboard", "aruco", "aruco_grid"};
   return info;
 }
 

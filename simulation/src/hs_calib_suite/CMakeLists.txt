@@ -29,6 +29,27 @@ find_package(OpenCV REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 
 # ---------------------------------------------------------------------------
+# Vendored AprilRobotics/apriltag（Kalibr 同系 36h11 检测后端）
+# ---------------------------------------------------------------------------
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_PYTHON_WRAPPER OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(_hs_calib_saved_shared_libs ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+add_subdirectory(third_party/apriltag EXCLUDE_FROM_ALL)
+set(BUILD_SHARED_LIBS ${_hs_calib_saved_shared_libs} CACHE BOOL "Build shared libraries" FORCE)
+# apriltag 目录开了 -Werror，放宽以免 Jetson/gcc 细节失败
+if(TARGET apriltag)
+  target_compile_options(apriltag PRIVATE -Wno-error)
+endif()
+
+# ---------------------------------------------------------------------------
+# Vendored Tier4 ceres_intrinsic_camera_calibrator (Apache-2.0)
+# ---------------------------------------------------------------------------
+find_package(Ceres REQUIRED)
+add_subdirectory(third_party/ceres_intrinsic_camera_calibrator EXCLUDE_FROM_ALL)
+
+# ---------------------------------------------------------------------------
 # Messages / services
 # ---------------------------------------------------------------------------
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -62,12 +83,24 @@ add_library(hs_calib_core SHARED
   src/core/detectors/aruco_grid_detector.cpp
   src/core/detectors/aprilgrid_detector.cpp
   src/core/detectors/aruco_marker_detector.cpp
-  src/core/detectors/circle_grid_detector.cpp
+  src/core/detectors/circle_grid_detect_impl.cpp
+  src/core/detectors/symmetric_circle_grid_detector.cpp
+  src/core/detectors/asymmetric_circle_grid_detector.cpp
   src/core/detectors/trihedral_chess_detector.cpp
   src/core/detectors/trihedral_charuco_detector.cpp
   src/core/detectors/board_type_identifier.cpp
   # calibrators/
   src/core/calibrators/cam_intrinsics_calibrator.cpp
+  src/core/calibrators/intrinsics/intrinsics_profile.cpp
+  src/core/calibrators/intrinsics/intrinsics_reprojection.cpp
+  src/core/calibrators/intrinsics/intrinsics_pipeline.cpp
+  src/core/calibrators/intrinsics/intrinsics_plot_statistics.cpp
+  src/core/calibrators/intrinsics/intrinsics_capture_filter.cpp
+  src/core/calibrators/intrinsics/intrinsics_collector_params.cpp
+  src/core/calibrators/intrinsics/intrinsics_config_params.cpp
+  src/core/calibrators/intrinsics/board_frame_metrics.cpp
+  src/core/calibrators/intrinsics/intrinsics_data_collector.cpp
+  src/core/calibrators/intrinsics/intrinsics_session_state.cpp
   src/core/calibrators/stereo_intrinsics_calibrator.cpp
   src/core/calibrators/stereo_extrinsics_calibrator.cpp
   src/core/calibrators/trihedral_oneshot_calibrator.cpp
@@ -85,6 +118,8 @@ target_include_directories(hs_calib_core PUBLIC
   ${OpenCV_INCLUDE_DIRS}
 )
 target_link_libraries(hs_calib_core PUBLIC Eigen3::Eigen ${OpenCV_LIBS})
+target_link_libraries(hs_calib_core PRIVATE apriltag tier4_ceres_intrinsic)
+target_compile_definitions(hs_calib_core PUBLIC HS_CALIB_HAS_CERES=1)
 # omnidir (CMei) lives in opencv_ccalib; may be missing from OpenCV_LIBS depending on find_package
 find_library(OPENCV_CCALIB_LIB NAMES opencv_ccalib opencv_ccalib.so.4.5d opencv_ccalib.so.4.5
   PATHS ${OpenCV_LIB_DIRS} /usr/lib/x86_64-linux-gnu /usr/local/lib)
@@ -157,9 +192,22 @@ add_executable(hs_calib_gui
   src/gui/widgets/image_view_widget.cpp
   src/gui/widgets/review_charts_widget.cpp
   src/gui/panels/launcher_config_panel.cpp
+  src/gui/intrinsics/intrinsics_workbench_panels.cpp
+  src/gui/intrinsics/intrinsics_dialog_ui.cpp
+  src/gui/intrinsics/intrinsics_param_tooltips.cpp
+  src/gui/intrinsics/intrinsics_preview_overlay.cpp
+  src/gui/intrinsics/intrinsics_parameter_dialog.cpp
+  src/gui/intrinsics/intrinsics_matplotlib_plotter.cpp
+  src/gui/plotting/intrinsics_plot_renderer.cpp
+  src/gui/plotting/intrinsics_plot_session.cpp
+  src/gui/plotting/intrinsics_async_plot_controller.cpp
+  src/gui/plotting/intrinsics_plot_export.cpp
+  src/gui/plotting/intrinsics_calibration_bars_dialog.cpp
+  src/gui/plotting/intrinsics_calibration_rms_dialog.cpp
   src/gui/session/session_controller.cpp
   src/gui/bridges/ros_image_bridge.cpp
   src/gui/bridges/bag_image_loader.cpp
+  src/gui/bridges/ros_bag_frame_reader.cpp
   src/gui/bridges/tf_pose_bridge.cpp
   src/gui/data/pose_csv_store.cpp
   src/gui/projects/project_catalog.cpp
@@ -169,10 +217,22 @@ add_executable(hs_calib_gui
   include/hs_calib_suite/gui/log/app_logger.hpp
   include/hs_calib_suite/gui/widgets/image_view_widget.hpp
   include/hs_calib_suite/gui/widgets/review_charts_widget.hpp
+  include/hs_calib_suite/gui/intrinsics/intrinsics_workbench_panels.hpp
+  include/hs_calib_suite/gui/intrinsics/intrinsics_dialog_ui.hpp
+  include/hs_calib_suite/gui/intrinsics/intrinsics_param_tooltips.hpp
+  include/hs_calib_suite/gui/intrinsics/intrinsics_preview_overlay.hpp
+  include/hs_calib_suite/gui/intrinsics/intrinsics_parameter_dialog.hpp
+  include/hs_calib_suite/gui/intrinsics/intrinsics_matplotlib_plotter.hpp
+  include/hs_calib_suite/gui/plotting/intrinsics_plot_renderer.hpp
+  include/hs_calib_suite/gui/plotting/intrinsics_async_plot_controller.hpp
+  include/hs_calib_suite/gui/plotting/intrinsics_plot_export.hpp
+  include/hs_calib_suite/gui/plotting/intrinsics_calibration_bars_dialog.hpp
+  include/hs_calib_suite/gui/plotting/intrinsics_calibration_rms_dialog.hpp
   include/hs_calib_suite/gui/panels/launcher_config_panel.hpp
   include/hs_calib_suite/gui/session/session_controller.hpp
   include/hs_calib_suite/gui/bridges/ros_image_bridge.hpp
   include/hs_calib_suite/gui/bridges/bag_image_loader.hpp
+  include/hs_calib_suite/gui/bridges/ros_bag_frame_reader.hpp
   include/hs_calib_suite/gui/bridges/tf_pose_bridge.hpp
   include/hs_calib_suite/gui/data/pose_csv_store.hpp
   include/hs_calib_suite/gui/projects/project_catalog.hpp
@@ -213,7 +273,7 @@ install(TARGETS hs_calib_core
 install(TARGETS placeholder_calibrator hs_calib_gui smoke_cam_intrinsics smoke_handeye
   DESTINATION lib/${PROJECT_NAME}
 )
-install(DIRECTORY config docs
+install(DIRECTORY config docs scripts
   DESTINATION share/${PROJECT_NAME}
 )
 install(FILES README.md

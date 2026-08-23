@@ -65,8 +65,8 @@ hs_calib_suite/
 
 | 标定器 ID             | 靶标                                                            | 说明                                                                            |
 | --------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `cam_intrinsics`    | 平面棋盘 / ChArUco / ArUco 阵列 / 圆点                          | 多姿态 → Brown / Kannala–Brandt / CMei → 内参 YAML                          |
-| `stereo_intrinsics` | 同左（左右分侧采集）                                            | 左右目各自多姿态内参 → `camera_left.yaml` + `camera_right.yaml`            |
+| `cam_intrinsics`    | 平面棋盘 / ChArUco / ArUco 阵列 / AprilGrid / 圆点              | Tier4 风格流水线；训练/评估双库采集；工作台 Tier4 右栏（Solver/标定/评估/采集统计）；Rosbag 直接解码 |
+| `stereo_intrinsics` | 同左（左右分侧采集）                                            | 复用内参 Tier4 工作台布局；左右目各自多姿态 → `camera_left.yaml` + `camera_right.yaml` |
 | `stereo_extrinsics` | 同左（成对左右观测）                                            | 固定内参 → `stereoCalibrate` + 校正 → `stereo_extrinsics.yaml`              |
 | `trihedral_oneshot` | 直角三面**ChArUco**（推荐）/ 棋盘；正方形面 + 约 1 格白边 | 单帧：≥2 面，搜焦距 + PnP；多帧：`calibrateCamera`；三面可同码，几何聚类分面 |
 | `eye_in_hand`       | 棋盘 + 位姿                                                     | 末端相机：求解 gripper→camera                                                  |
@@ -93,17 +93,39 @@ hs_calib_suite/
 
 ## 4. 编译
 
+在 **ROS 2 工作空间根目录**（含 `src/hs_calib_suite` 的那一层，例如本机可能是 `~/project/testCode/simulation`）执行：
+
 ```bash
-cd /home/hs/testCode/simulation
+cd <你的 simulation 工作空间根目录>   # 必须成功；pwd 应能看到 src/hs_calib_suite
 source /opt/ros/humble/setup.bash
 colcon build --packages-select hs_calib_suite --symlink-install \
   --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
 ```
 
-依赖：ROS 2 Humble、OpenCV、Eigen3、Qt5 Widgets、`cv_bridge`、`tf2_ros`。
+> **常见误报**：若 `cd` 路径写错，会在 `~` 下执行 `colcon`，扫描到家目录里其他工程（如 `dify-*`）并出现 `ModuleNotFoundError: flask` 等无关错误——与 `hs_calib_suite` 无关，先修正 `cd` 路径即可。
 
----
+依赖：ROS 2 Humble、OpenCV、Eigen3、Qt5 Widgets、`cv_bridge`、`tf2_ros`、**Ceres Solver**（`libceres-dev`，用于 Ceres/C2 内参求解）。
+
+```bash
+# Ubuntu / Jetson（示例）
+sudo apt install libceres-dev
+```
+
+内参 **Brown 模型** 在 GUI「求解预设」可选：
+
+| 预设 | 求解器 | 说明 |
+|------|--------|------|
+| General | OpenCV | k1–k2，采集 RMS≤0.5 px |
+| C1 | OpenCV | k1–k3，采集更严（RMS≤0.3 px） |
+| Ceres | Ceres | k1–k3 + 有理畸变，系数正则 0.2 |
+| C2 | Ceres | 同 Ceres，并启用 FOV 正则 |
+
+Tier4 `ceres_intrinsic_camera_calibrator` 以 Apache-2.0  vendored 于 `third_party/ceres_intrinsic_camera_calibrator/`（仅标定器，无 pybind/ROS 依赖）。
+Kannala–Brandt / CMei 仍走 OpenCV 原生路径。
+
+内参 Tier4 UI 融合说明：[`docs/TIER4_FUSION_PLAN.md`](docs/TIER4_FUSION_PLAN.md)、[`docs/TIER4_INTRINSICS_UI_SPEC.md`](docs/TIER4_INTRINSICS_UI_SPEC.md)。  
+配置 `gui.stats_backend`：`qt`（默认）或 `matplotlib`。
 
 ## 5. 运行
 

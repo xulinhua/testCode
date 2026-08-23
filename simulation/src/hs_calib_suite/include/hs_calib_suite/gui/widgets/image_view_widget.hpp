@@ -23,6 +23,13 @@ class QToolButton;
 namespace hs_calib {
 namespace gui {
 
+/// \brief 内置浮动工具栏样式
+enum class ImageViewToolbarStyle {
+  Hidden,          ///< 不显示（由外部标题栏接管）
+  OverlayZoom,     ///< + / − / 适应 / 1:1
+  OverlayZoomSave, ///< + / − / 适应 / 保存
+};
+
 /// \brief 可缩放平移的图像显示区（滚轮缩放、拖拽、双击适应、Ctrl 取像素）
 class ImageViewWidget : public QWidget {
   Q_OBJECT
@@ -48,8 +55,11 @@ public:
   void set_background_color(const QColor &color);
   /// \brief 开关异步刷新并设定间隔
   void set_async_refresh(bool enabled, int interval_ms = 33);
-  /// \brief 显示/隐藏缩放工具栏
+  /// \brief 显示/隐藏缩放工具栏（兼容旧调用）
   void set_toolbar_visible(bool visible);
+  /// \brief 设置内置浮动工具栏样式
+  void set_toolbar_style(ImageViewToolbarStyle style);
+  ImageViewToolbarStyle toolbar_style() const { return toolbar_style_; }
 
   /// \brief 放大视图
   void zoom_in();
@@ -61,6 +71,8 @@ public:
   void reset_view();
   /// \brief 保存当前帧到路径
   bool save_current_frame(const QString &path, QString *error = nullptr) const;
+  /// \brief 弹出保存对话框
+  void prompt_save_image();
 
 protected:
   void paintEvent(QPaintEvent *event) override;
@@ -74,6 +86,7 @@ protected:
 
 private:
   void ensure_toolbar();
+  void update_toolbar_buttons();
   void update_toolbar_geometry();
   void apply_frame(const QImage &image);
   void commit_pending();
@@ -98,11 +111,12 @@ private:
   QImage pending_;
 
   QLabel *pixel_popup_ = nullptr;
+  ImageViewToolbarStyle toolbar_style_ = ImageViewToolbarStyle::OverlayZoomSave;
   QWidget *toolbar_ = nullptr;
   QToolButton *btn_zoom_in_ = nullptr;
   QToolButton *btn_zoom_out_ = nullptr;
   QToolButton *btn_fit_ = nullptr;
-  QToolButton *btn_save_ = nullptr;
+  QToolButton *btn_reset_ = nullptr;
 };
 
 }  // namespace gui

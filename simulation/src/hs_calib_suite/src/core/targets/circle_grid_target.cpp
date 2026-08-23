@@ -3,34 +3,34 @@
 namespace hs_calib {
 namespace core {
 
-/// \brief 构造圆点阵列靶标（对称或非对称布局）
 CircleGridTarget::CircleGridTarget(
-    int circles_x, int circles_y, double center_distance_m, CircleGridPattern pattern)
+    int circles_x, int circles_y, double center_distance_m, CircleGridPattern pattern,
+    double circle_diameter_m)
     : circles_x_(circles_x),
       circles_y_(circles_y),
       center_distance_m_(center_distance_m),
+      circle_diameter_m_(circle_diameter_m),
       pattern_(pattern) {}
 
-/// \brief 返回靶标类型 ID（对称 / 非对称）
 std::string CircleGridTarget::target_id() const {
   return pattern_ == CircleGridPattern::Asymmetric ? "circles_asymmetric"
                                                    : "circles_symmetric";
 }
 
-/// \brief 生成全部圆心物点（对称或 OpenCV 非对称交错布局）
 Eigen::MatrixXd CircleGridTarget::all_object_points() const {
   const int n = circles_x_ * circles_y_;
   Eigen::MatrixXd pts(n, 3);
+  const double s = center_distance_m_;
   int k = 0;
-  for (int j = 0; j < circles_y_; ++j) {
-    for (int i = 0; i < circles_x_; ++i) {
+  // 与 OpenCV tutorial calcBoardCornerPositions 逐点一致：行 i、列 j
+  for (int i = 0; i < circles_y_; ++i) {
+    for (int j = 0; j < circles_x_; ++j) {
       if (pattern_ == CircleGridPattern::Asymmetric) {
-        // OpenCV 非对称圆点：交错行偏移半格
-        pts(k, 0) = static_cast<double>(2 * i + (j % 2)) * center_distance_m_;
-        pts(k, 1) = static_cast<double>(j) * center_distance_m_;
+        pts(k, 0) = static_cast<double>(2 * j + (i % 2)) * s;
+        pts(k, 1) = static_cast<double>(i) * s;
       } else {
-        pts(k, 0) = static_cast<double>(i) * center_distance_m_;
-        pts(k, 1) = static_cast<double>(j) * center_distance_m_;
+        pts(k, 0) = static_cast<double>(j) * s;
+        pts(k, 1) = static_cast<double>(i) * s;
       }
       pts(k, 2) = 0.0;
       ++k;
@@ -39,7 +39,6 @@ Eigen::MatrixXd CircleGridTarget::all_object_points() const {
   return pts;
 }
 
-/// \brief 按特征 ID 查询物点；空 ID 列表返回全部点
 Eigen::MatrixXd CircleGridTarget::object_points(const std::vector<int> &ids) const {
   const Eigen::MatrixXd all = all_object_points();
   if (ids.empty()) {

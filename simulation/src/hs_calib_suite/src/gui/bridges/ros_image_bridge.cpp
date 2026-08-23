@@ -164,6 +164,17 @@ cv::Mat RosImageBridge::latest_bgr() const {
   return latest_bgr_.empty() ? cv::Mat() : latest_bgr_.clone();
 }
 
+cv::Mat RosImageBridge::take_latest_bgr() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!has_frame_ || latest_bgr_.empty()) {
+    return {};
+  }
+  cv::Mat out = std::move(latest_bgr_);
+  latest_bgr_.release();
+  has_frame_ = false;
+  return out;
+}
+
 /// \brief 是否已有缓存帧
 bool RosImageBridge::has_frame() const {
   std::lock_guard<std::mutex> lock(mutex_);

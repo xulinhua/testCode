@@ -10,7 +10,8 @@ namespace hs_calib {
 namespace core {
 
 /// \brief 绑定平面 ChArUco 靶标（含字典 / 板几何）
-CharucoDetector::CharucoDetector(CharucoTarget target) : target_(std::move(target)) {}
+CharucoDetector::CharucoDetector(CharucoTarget target, CharucoDetectorParams params)
+    : target_(std::move(target)), params_(params) {}
 
 /// \brief DetectorBase 入口：忽略外部 target，使用成员板
 std::vector<Correspondence> CharucoDetector::detect(
@@ -26,9 +27,11 @@ bool run_charuco(
     const cv::aruco::CharucoBoard &board, const cv::Mat &mat, const cv::Mat &K,
     const cv::Mat &D, std::vector<cv::Point2f> *charuco_corners,
     std::vector<int> *charuco_ids, std::vector<std::vector<cv::Point2f>> *marker_corners,
-    std::vector<int> *marker_ids) {
+    std::vector<int> *marker_ids,
+    const cv::aruco::DetectorParameters &det_params) {
   return charuco_detect_corners(
-      board, mat, K, D, *charuco_corners, *charuco_ids, marker_corners, marker_ids);
+      board, mat, K, D, *charuco_corners, *charuco_ids, marker_corners, marker_ids,
+      det_params);
 }
 
 }  // namespace
@@ -49,10 +52,13 @@ std::vector<Correspondence> CharucoDetector::detect(
   const cv::Mat gray = to_gray(mat);
   const cv::Mat K = guess_K(mat.size());
   const cv::Mat D = cv::Mat::zeros(5, 1, CV_64F);
+  cv::aruco::DetectorParameters det_params = make_aruco_detector_params();
+  det_params.adaptiveThreshWinSizeMin = params_.adaptive_thresh_win_size_min;
+  det_params.adaptiveThreshWinSizeMax = params_.adaptive_thresh_win_size_max;
 
-  bool ok = run_charuco(
-      *target_.board(), mat, K, D, &charuco_corners, &charuco_ids, &marker_corners,
-      &marker_ids);
+  bool ok = charuco_detect_corners(
+      *target_.board(), mat, K, D, charuco_corners, charuco_ids, &marker_corners,
+      &marker_ids, det_params);
 
   // OpenCV≥4.6 新旧印刷布局：现代板失败时再试 legacy（多数下载的 PDF 是旧布局）
   cv::Ptr<cv::aruco::CharucoBoard> used_board = target_.board();
@@ -66,7 +72,8 @@ std::vector<Correspondence> CharucoDetector::detect(
     std::vector<int> mi2;
     std::vector<cv::Point2f> cc2;
     std::vector<int> ci2;
-    if (run_charuco(*legacy, mat, K, D, &cc2, &ci2, &mc2, &mi2)) {
+    if (run_charuco(
+            *legacy, mat, K, D, &cc2, &ci2, &mc2, &mi2, det_params)) {
       ok = true;
       used_board = legacy;
       charuco_corners = std::move(cc2);

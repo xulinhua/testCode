@@ -19,7 +19,12 @@ inline cv::Mat image_frame_as_mat(const ImageFrame &frame) {
   }
   const bool mono = (frame.encoding == "mono8" || frame.channels == 1);
   const int type = mono ? CV_8UC1 : CV_8UC3;
-  return cv::Mat(frame.height, frame.width, type, const_cast<uint8_t *>(frame.data));
+  const int elem = mono ? 1 : 3;
+  const size_t step =
+      frame.step > 0 ? frame.step
+                     : static_cast<size_t>(frame.width) * static_cast<size_t>(elem);
+  return cv::Mat(
+      frame.height, frame.width, type, const_cast<uint8_t *>(frame.data), step);
 }
 
 /// \brief 从拥有数据的 cv::Mat 填充 ImageFrame 视图（不拥有；mat 须保活）
@@ -29,6 +34,7 @@ inline ImageFrame mat_as_image_frame(
   f.width = mat.cols;
   f.height = mat.rows;
   f.channels = mat.channels();
+  f.step = mat.step[0];
   f.data = mat.data;
   f.encoding = encoding;
   return f;

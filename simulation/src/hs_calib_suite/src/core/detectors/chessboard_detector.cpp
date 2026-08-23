@@ -191,6 +191,29 @@ int ChessboardDetector::opencv_flags() const {
   return flags;
 }
 
+cv::Rect ChessboardDetector::expand_roi(
+    const cv::Rect &roi, int pad, int w, int h) const {
+  if (roi.width <= 0 || roi.height <= 0) {
+    return cv::Rect(0, 0, w, h);
+  }
+  const int x0 = std::max(0, roi.x - pad);
+  const int y0 = std::max(0, roi.y - pad);
+  const int x1 = std::min(w, roi.x + roi.width + pad);
+  const int y1 = std::min(h, roi.y + roi.height + pad);
+  return cv::Rect(x0, y0, std::max(1, x1 - x0), std::max(1, y1 - y0));
+}
+
+void ChessboardDetector::offset_corners(
+    std::vector<cv::Point2f> *corners, const cv::Point &origin) const {
+  if (corners == nullptr || (origin.x == 0 && origin.y == 0)) {
+    return;
+  }
+  for (auto &p : *corners) {
+    p.x += static_cast<float>(origin.x);
+    p.y += static_cast<float>(origin.y);
+  }
+}
+
 /// \brief 使用构造时绑定的棋盘几何检测
 std::vector<Correspondence> ChessboardDetector::detect(const ImageFrame &frame) const {
   return detect(frame, target_);
@@ -213,33 +236,63 @@ std::vector<Correspondence> ChessboardDetector::detect(
   std::vector<cv::Point2f> corners;
   cv::Size found = pattern;
 
+  const cv::Rect roi = expand_roi(
+      options_.search_roi.width > 0 ? options_.search_roi : last_search_roi_,
+      options_.padding, gray.cols, gray.rows);
+  const cv::Point roi_origin(roi.x, roi.y);
+  cv::Mat roi_gray = gray(roi);
+
+  cv::Mat work_gray = roi_gray;
+  double scale = 1.0;
+  if (options_.resized_detection) {
+    const int max_dim = std::max(work_gray.cols, work_gray.rows);
+    if (max_dim > options_.resized_max_resolution) {
+      scale = static_cast<double>(options_.resized_max_resolution) /
+              static_cast<double>(max_dim);
+      cv::resize(
+          work_gray, work_gray, cv::Size(), scale, scale, cv::INTER_AREA);
+    }
+  }
+
   const int flags = opencv_flags();
-  bool ok = find_full_classic(gray, pattern, flags, &corners);
+  bool ok = find_full_classic(work_gray, pattern, flags, &corners);
   if (!ok && options_.allow_partial && options_.thorough) {
-    ok = find_full_sb(gray, pattern, &corners);
+    ok = find_full_sb(work_gray, pattern, &corners);
   }
 
   if (!ok && options_.allow_partial) {
-    const bool large = gray.total() > static_cast<size_t>(720 * 540);
+    const bool large = work_gray.total() > static_cast<size_t>(720 * 540);
     const int sub_try = large ? (options_.thorough ? 8 : 5) : (options_.thorough ? 12 : 7);
     const bool sb = options_.thorough && !large;
-    if (try_find_subgrid(gray, sx, sy, sub_try, sb, &found, &corners)) {
+    if (try_find_subgrid(work_gray, sx, sy, sub_try, sb, &found, &corners)) {
       ok = true;
     } else {
       const size_t lim = options_.thorough ? static_cast<size_t>(800 * 600)
                                            : static_cast<size_t>(640 * 480);
-      if (gray.total() <= lim &&
-          try_find_partial_sb(gray, sx, sy, &found, &corners)) {
+      if (work_gray.total() <= lim &&
+          try_find_partial_sb(work_gray, sx, sy, &found, &corners)) {
         ok = true;
       }
     }
   }
 
   if (!ok || corners.empty()) {
+    last_search_roi_ = cv::Rect();
     return out;
   }
 
+  if (scale != 1.0) {
+    const float inv = static_cast<float>(1.0 / scale);
+    for (auto &p : corners) {
+      p *= inv;
+    }
+  }
+  offset_corners(&corners, roi_origin);
+
   refine_corners_subpix(gray, &corners, options_.subpix_win);
+
+  const cv::Rect box = cv::boundingRect(corners);
+  last_search_roi_ = expand_roi(box, options_.padding, gray.cols, gray.rows);
 
   Correspondence c;
   const int n = static_cast<int>(corners.size());

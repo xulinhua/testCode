@@ -67,6 +67,8 @@ public:
   QComboBox *combo_target_type() const { return combo_target_type_; }
   QString target_type_id() const;
   QComboBox *combo_camera_model() const { return combo_camera_model_; }
+  QComboBox *combo_intrinsics_mode() const { return combo_intrinsics_mode_; }
+  QComboBox *combo_tier4_profile() const { return combo_tier4_profile_; }
   QComboBox *combo_stereo_side() const { return combo_stereo_side_; }
   QSpinBox *spin_min_views() const { return spin_min_views_; }
 
@@ -81,6 +83,7 @@ public:
   double min_diversity() const;
   int auto_cooldown_ms() const;
   bool auto_capture_default() const;
+  QString stats_backend() const;
 
   /// \brief 显示设置已移至工作台预览；保留接口返回默认值
   bool viz_draw_corners() const;
@@ -125,6 +128,12 @@ private:
   QWidget *make_group(const QString &title, QWidget *body);
   QFormLayout *new_form(QWidget *host);
   void update_board_param_visibility();
+  void update_intrinsics_mode_rows();
+  void apply_tier4_profile_to_solver_flags(const QString &profile_id);
+  bool intrinsics_mode_is_tier4() const;
+  std::string tier4_profile_id() const;
+  /// \brief 按当前标定任务刷新「类型」下拉（平面 / 三面 / 手眼等）
+  void refresh_target_type_options();
   static void set_form_row_visible(QFormLayout *form, QWidget *field, bool visible);
 
   QString calibrator_id_ = QStringLiteral("cam_intrinsics");
@@ -192,11 +201,14 @@ private:
   QDoubleSpinBox *spin_min_diversity_ = nullptr;
   QSpinBox *spin_auto_cooldown_ms_ = nullptr;
   QCheckBox *chk_auto_capture_default_ = nullptr;
+  QComboBox *combo_stats_backend_ = nullptr;
 
   QWidget *solver_intrinsics_block_ = nullptr;
   QFormLayout *form_solver_ = nullptr;
   QWidget *solver_flags_row1_ = nullptr;
   QWidget *solver_flags_row2_ = nullptr;
+  QComboBox *combo_intrinsics_mode_ = nullptr;
+  QComboBox *combo_tier4_profile_ = nullptr;
   QComboBox *combo_camera_model_ = nullptr;
   QCheckBox *chk_fix_principal_ = nullptr;
   QCheckBox *chk_fix_aspect_ = nullptr;

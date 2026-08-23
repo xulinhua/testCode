@@ -74,7 +74,7 @@ void ResidualBarWidget::ensure_base_pixmap() {
   }
   base_pixmap_ = render_chart_base(
       width(), height(), devicePixelRatioF(),
-      [this](QPainter &p, const QRectF &rc) { paint_chart(p, rc); });
+      [this](QPainter &p, const QRectF &rc) { paint_chart_background(p, rc); });
   base_dirty_ = false;
 }
 
@@ -95,7 +95,7 @@ void ResidualBarWidget::set_highlight_view(int view_index) {
     return;
   }
   highlight_view_ = view_index;
-  invalidate_base();
+  update();
 }
 
 void ResidualBarWidget::clear() {
@@ -129,7 +129,7 @@ QPointF ResidualBarWidget::map_to_content(const QPointF &widget_pos) const {
   return (widget_pos - pan_) / zoom_;
 }
 
-void ResidualBarWidget::paint_chart(QPainter &p, const QRectF &rc) const {
+void ResidualBarWidget::paint_chart_background(QPainter &p, const QRectF &rc) const {
   p.setPen(QPen(QColor(50, 62, 80), 1));
   p.setBrush(Qt::NoBrush);
   p.drawRoundedRect(rc, 6, 6);
@@ -159,6 +159,24 @@ void ResidualBarWidget::paint_chart(QPainter &p, const QRectF &rc) const {
     p.setPen(QPen(QColor(40, 50, 66), 1, Qt::DotLine));
   }
 
+  p.setPen(QColor(180, 190, 205));
+  p.drawText(
+      QRectF(left, rc.top(), plot_w, 16), Qt::AlignLeft | Qt::AlignVCenter,
+      QStringLiteral("逐帧重投影 RMS (px)"));
+}
+
+void ResidualBarWidget::paint_chart_bars(QPainter &p, const QRectF &rc) const {
+  if (bars_.empty()) {
+    return;
+  }
+
+  const double left = rc.left() + 36;
+  const double right = rc.right() - 10;
+  const double top = rc.top() + 18;
+  const double bottom = rc.bottom() - 28;
+  const double plot_w = std::max(10.0, right - left);
+  const double plot_h = std::max(10.0, bottom - top);
+
   const int n = static_cast<int>(bars_.size());
   const double gap = 4.0;
   const double bar_w = std::max(4.0, (plot_w - gap * (n + 1)) / n);
@@ -175,14 +193,15 @@ void ResidualBarWidget::paint_chart(QPainter &p, const QRectF &rc) const {
       fill = QColor(230, 140, 70);
     }
     if (hi) {
-      fill = QColor(92, 225, 255);
+      fill = fill.lighter(125);
     }
     p.setPen(Qt::NoPen);
     p.setBrush(fill);
     p.drawRoundedRect(QRectF(x, y, bar_w, h), 2, 2);
 
-    // 标签画进原图；缩放只看位图，避免 zoom 后突然叠一堆字
-    if (n <= 24 || hi) {
+    const bool show_label =
+        highlight_view_ < 0 ? (n <= 24 || hi) : hi;
+    if (show_label) {
       p.setPen(QColor(150, 160, 178));
       p.save();
       p.translate(x + bar_w * 0.5, bottom + 4);
@@ -193,11 +212,11 @@ void ResidualBarWidget::paint_chart(QPainter &p, const QRectF &rc) const {
       p.restore();
     }
   }
+}
 
-  p.setPen(QColor(180, 190, 205));
-  p.drawText(
-      QRectF(left, rc.top(), plot_w, 16), Qt::AlignLeft | Qt::AlignVCenter,
-      QStringLiteral("逐帧重投影 RMS (px)"));
+void ResidualBarWidget::paint_chart(QPainter &p, const QRectF &rc) const {
+  paint_chart_background(p, rc);
+  paint_chart_bars(p, rc);
 }
 
 void ResidualBarWidget::paintEvent(QPaintEvent *) {
@@ -212,6 +231,9 @@ void ResidualBarWidget::paintEvent(QPaintEvent *) {
     p.translate(pan_);
     p.scale(zoom_, zoom_);
     p.drawPixmap(QRect(0, 0, width(), height()), base_pixmap_);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    paint_chart_bars(p, QRectF(rect()).adjusted(8, 8, -8, -8));
     p.restore();
   }
 
@@ -379,7 +401,7 @@ void CoverageMapWidget::ensure_base_pixmap() {
   }
   base_pixmap_ = render_chart_base(
       width(), height(), devicePixelRatioF(),
-      [this](QPainter &p, const QRectF &rc) { paint_chart(p, rc); });
+      [this](QPainter &p, const QRectF &rc) { paint_chart_background(p, rc); });
   base_dirty_ = false;
 }
 
@@ -396,7 +418,7 @@ void CoverageMapWidget::set_points(const std::vector<Point> &points) {
     max_err_ = std::max(max_err_, pt.err_px);
   }
   max_err_ = std::max(max_err_, 1.0f);
-  invalidate_base();
+  update();
 }
 
 void CoverageMapWidget::set_filter_view(int view_index) {
@@ -404,7 +426,7 @@ void CoverageMapWidget::set_filter_view(int view_index) {
     return;
   }
   filter_view_ = view_index;
-  invalidate_base();
+  update();
 }
 
 void CoverageMapWidget::clear() {
@@ -436,17 +458,33 @@ QSize CoverageMapWidget::minimumSizeHint() const { return {200, 140}; }
 
 QColor CoverageMapWidget::color_for_error(float err_px, float max_err) {
   const float t = std::min(1.0f, std::max(0.0f, err_px / std::max(max_err, 1e-3f)));
-  const int r = static_cast<int>(40 + 190 * t);
-  const int g = static_cast<int>(200 - 80 * t);
-  const int b = static_cast<int>(210 - 160 * t);
-  return QColor(r, g, b, 210);
+  // 低残差：绿；高残差：红（线性插值，深色底上可读）
+  const int r = static_cast<int>(48.0f + 207.0f * t);
+  const int g = static_cast<int>(210.0f * (1.0f - t) + 36.0f * t);
+  const int b = static_cast<int>(72.0f * (1.0f - t) + 24.0f * t);
+  return QColor(r, g, b, 240);
 }
 
 QPointF CoverageMapWidget::map_to_content(const QPointF &widget_pos) const {
   return (widget_pos - pan_) / zoom_;
 }
 
-void CoverageMapWidget::paint_chart(QPainter &p, const QRectF &rc) const {
+QRectF CoverageMapWidget::plot_frame(const QRectF &rc) const {
+  const QRectF plot = rc.adjusted(12, 28, -12, -28);
+  if (image_w_ <= 0 || image_h_ <= 0) {
+    return plot;
+  }
+  const double sx = plot.width() / static_cast<double>(image_w_);
+  const double sy = plot.height() / static_cast<double>(image_h_);
+  const double s = std::min(sx, sy);
+  const double dw = image_w_ * s;
+  const double dh = image_h_ * s;
+  return QRectF(
+      plot.left() + (plot.width() - dw) * 0.5,
+      plot.top() + (plot.height() - dh) * 0.5, dw, dh);
+}
+
+void CoverageMapWidget::paint_chart_background(QPainter &p, const QRectF &rc) const {
   p.setPen(QPen(QColor(50, 62, 80), 1));
   p.setBrush(Qt::NoBrush);
   p.drawRoundedRect(rc, 6, 6);
@@ -464,16 +502,8 @@ void CoverageMapWidget::paint_chart(QPainter &p, const QRectF &rc) const {
     return;
   }
 
-  const double sx = plot.width() / static_cast<double>(image_w_);
-  const double sy = plot.height() / static_cast<double>(image_h_);
-  const double s = std::min(sx, sy);
-  const double dw = image_w_ * s;
-  const double dh = image_h_ * s;
-  const QRectF frame(
-      plot.left() + (plot.width() - dw) * 0.5,
-      plot.top() + (plot.height() - dh) * 0.5, dw, dh);
-
-  p.fillRect(frame, QColor(18, 24, 36));
+  const QRectF frame = plot_frame(rc);
+  p.fillRect(frame, QColor(8, 10, 16));
   p.setPen(QPen(QColor(60, 75, 95), 1));
   p.drawRect(frame);
   p.setPen(QPen(QColor(35, 45, 60), 1, Qt::DotLine));
@@ -483,11 +513,19 @@ void CoverageMapWidget::paint_chart(QPainter &p, const QRectF &rc) const {
     p.drawLine(QPointF(x, frame.top()), QPointF(x, frame.bottom()));
     p.drawLine(QPointF(frame.left(), y), QPointF(frame.right(), y));
   }
+}
 
+void CoverageMapWidget::paint_chart_points(
+    QPainter &p, const QRectF &rc, int filter_view) const {
+  if (image_w_ <= 0 || image_h_ <= 0 || points_.empty()) {
+    return;
+  }
+  const QRectF frame = plot_frame(rc);
+  const double s = frame.width() / static_cast<double>(image_w_);
   int drawn = 0;
-  const double r = (filter_view_ >= 0 ? 3.2 : 2.2);
+  const double r = (filter_view >= 0 ? 4.5 : 3.5);
   for (const auto &pt : points_) {
-    if (filter_view_ >= 0 && pt.view_index != filter_view_) {
+    if (filter_view >= 0 && pt.view_index != filter_view) {
       continue;
     }
     const double x = frame.left() + pt.u * s;
@@ -497,6 +535,9 @@ void CoverageMapWidget::paint_chart(QPainter &p, const QRectF &rc) const {
     }
     p.setPen(Qt::NoPen);
     p.setBrush(color_for_error(pt.err_px, max_err_));
+    p.drawEllipse(QPointF(x, y), r + 0.8, r + 0.8);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor(12, 14, 20), 1.2));
     p.drawEllipse(QPointF(x, y), r, r);
     ++drawn;
   }
@@ -506,8 +547,8 @@ void CoverageMapWidget::paint_chart(QPainter &p, const QRectF &rc) const {
                      .arg(image_w_)
                      .arg(image_h_)
                      .arg(drawn);
-  if (filter_view_ >= 0) {
-    foot += QStringLiteral(" · view#%1").arg(filter_view_);
+  if (filter_view >= 0) {
+    foot += QStringLiteral(" · view#%1").arg(filter_view);
   }
   foot += QStringLiteral(" · 色=残差");
   p.drawText(
@@ -517,10 +558,12 @@ void CoverageMapWidget::paint_chart(QPainter &p, const QRectF &rc) const {
   if (drawn == 0 && !points_.empty()) {
     p.setPen(QColor(140, 150, 168));
     p.drawText(frame, Qt::AlignCenter, QStringLiteral("当前筛选无点"));
-  } else if (points_.empty()) {
-    p.setPen(QColor(140, 150, 168));
-    p.drawText(frame, Qt::AlignCenter, QStringLiteral("无残差点"));
   }
+}
+
+void CoverageMapWidget::paint_chart(QPainter &p, const QRectF &rc) const {
+  paint_chart_background(p, rc);
+  paint_chart_points(p, rc, filter_view_);
 }
 
 void CoverageMapWidget::paintEvent(QPaintEvent *) {
@@ -535,6 +578,8 @@ void CoverageMapWidget::paintEvent(QPaintEvent *) {
     p.translate(pan_);
     p.scale(zoom_, zoom_);
     p.drawPixmap(QRect(0, 0, width(), height()), base_pixmap_);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    paint_chart_points(p, QRectF(rect()).adjusted(8, 8, -8, -8), filter_view_);
     p.restore();
   }
 

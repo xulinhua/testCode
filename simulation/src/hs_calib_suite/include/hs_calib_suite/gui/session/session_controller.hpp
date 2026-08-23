@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -16,7 +17,14 @@
 #include <opencv2/core.hpp>
 
 #include "hs_calib_suite/core/detectors/board_type_identifier.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_capture_filter.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_collector_params.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_profile.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_session_state.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/board_frame_metrics.hpp"
+#include "hs_calib_suite/gui/intrinsics/intrinsics_preview_overlay.hpp"
 #include "hs_calib_suite/core/types/types.hpp"
+#include "hs_calib_suite/gui/bridges/ros_bag_frame_reader.hpp"
 #include "hs_calib_suite/gui/data/pose_csv_store.hpp"
 
 namespace hs_calib {
@@ -90,6 +98,11 @@ public:
   bool is_handeye() const;
   /// \brief 是否为单目内参标定器
   bool is_intrinsics() const;
+  /// \brief 是否启用 Tier4 内参流水线（训练/评估分流、RANSAC 等）
+  bool uses_tier4_intrinsics() const;
+  /// \brief 设置内参 profile（classic 或 general/c1/ceres/c2）
+  void set_intrinsics_profile_id(const std::string &profile_id);
+  std::string intrinsics_profile_id() const;
   /// \brief 是否为双目各自内参
   bool is_stereo_intrinsics() const;
   /// \brief 是否为双目相对外参
@@ -187,6 +200,12 @@ public:
 
   /// \brief 扫描目录加载离线图片
   int load_image_dir(const QString &dir_path);
+  /// \brief 直接加载 rosbag 图像话题到内存（不导出 PNG）
+  int load_rosbag(
+      const QString &bag_uri,
+      const QString &topic,
+      int max_frames = 500,
+      QString *error_out = nullptr);
   /// \brief 加载离线位姿 CSV
   bool load_pose_csv(const QString &path, QString *error_out = nullptr);
   /// \brief CSV 位姿条数
@@ -194,6 +213,11 @@ public:
 
   /// \brief 写入在线最新 BGR 帧
   void set_live_bgr(const cv::Mat &bgr);
+  void set_live_bgr(cv::Mat &&bgr);
+  /// \brief 后台将 live BGR 转为 QImage（不阻塞界面线程）
+  void schedule_live_preview_update();
+  /// \brief 最近一次异步生成的裸图预览
+  QImage cached_live_preview_qimage() const;
   /// \brief 是否已有在线帧
   bool has_live_frame() const { return !live_bgr_.empty(); }
 
@@ -213,6 +237,8 @@ public:
   /// \brief 后台检测：立即返回，结果经 detect_started / detect_finished 回调
   /// \param fast 实时预览用快速路径；手动「检测」用 false
   void request_detect(bool fast = false);
+  /// \brief 实时预览检测间隔（ms）；无检出且开启跳帧时降频，与 Tier4 一致
+  int live_detect_interval_ms() const;
   /// \brief 后台标定板类型识别（与 request_detect 互斥；忽略板尺寸）
   void request_identify(const core::BoardTypeIdentifyOptions &options = {});
   /// \brief 取消排队中的检测/识别，并作废进行中的任务（冻结预览时调用）
@@ -249,16 +275,57 @@ public:
   bool add_current_observation(QString *error_out = nullptr);
   /// \brief 删除指定行观测
   void remove_observation(int row);
+  /// \brief 内参：按训练/评估集删除
+  void remove_intrinsics_sample(core::IntrinsicsSampleSplit split, int row);
   /// \brief 清空全部观测
   void clear_observations();
+  /// \brief 是否存在可清空的观测（与列表展示一致）
+  bool has_observations() const;
+  /// \brief 工作台列表用的训练集观测
+  core::ObservationBatch training_observations() const;
 
-  /// \brief 当前观测批次
+  /// \brief 当前观测批次（内参任务为训练集）
   const core::ObservationBatch &batch() const { return batch_; }
-  /// \brief 观测条数
-  int observation_count() const { return static_cast<int>(batch_.items.size()); }
+  /// \brief 内参评估集
+  core::ObservationBatch evaluation_batch() const;
+  /// \brief 观测条数（训练集）
+  int observation_count() const;
+  /// \brief 训练/评估集条数
+  int training_sample_count() const;
+  int evaluation_sample_count() const;
 
-  /// \brief 调用注册表标定器求解
+  /// \brief Tier4 内参会话状态（仅内参任务有效）
+  core::IntrinsicsSessionState &intrinsics_state();
+  const core::IntrinsicsSessionState &intrinsics_state() const;
+  /// \brief 最近一帧检测指标
+  const core::BoardFrameMetrics &last_board_metrics() const {
+    return last_board_metrics_;
+  }
+  /// \brief 覆盖求解器（opencv / ceres），写入 solve_options
+  void set_intrinsics_solver_kind(const std::string &solver);
+  std::string intrinsics_solver_kind() const;
+
+  /// \brief 评估已标定模型（不重新优化）
+  bool evaluate_calibration(QString *error_out = nullptr);
+
+  void set_intrinsics_image_view_mode(IntrinsicsImageViewMode mode);
+  IntrinsicsImageViewMode intrinsics_image_view_mode() const;
+  void set_intrinsics_viz_options(const IntrinsicsVizOptions &options);
+  IntrinsicsVizOptions intrinsics_viz_options() const;
+  void clear_intrinsics_linearity_heatmap();
+  void set_intrinsics_browse_sample(int index, bool evaluation_set);
+  int intrinsics_browse_sample_index() const;
+  bool intrinsics_browse_is_evaluation() const;
+  void clear_intrinsics_browse();
+  QImage decorate_intrinsics_preview(const QImage &preview, bool lightweight = false) const;
+  bool intrinsics_browse_preview(QImage *out) const;
+
+  /// \brief 调用注册表标定器求解（同步，供后台线程调用）
   bool solve(QString *error_out = nullptr);
+  /// \brief 后台标定：立即返回，结果经 solve_started / solve_progress / solve_finished
+  void request_solve();
+  /// \brief 后台标定是否忙
+  bool solve_busy() const { return solve_busy_.load(); }
   /// \brief 最近一次标定结果
   const core::CalibrationResult &last_result() const { return last_result_; }
   /// \brief 是否有成功结果
@@ -290,16 +357,28 @@ signals:
   void observations_changed();
   /// \brief 标定结果变化
   void result_changed();
+  /// \brief 内参采集/指标变化
+  void intrinsics_state_changed();
   /// \brief 后台检测开始
   void detect_started();
   /// \brief 后台检测结束
   void detect_finished(bool ok, const QString &error);
+  /// \brief 异步裸图预览就绪（无检出时刷新画面）
+  void live_preview_updated();
   /// \brief 后台类型识别开始
   void identify_started();
   /// \brief 后台类型识别结束
   void identify_finished(bool ok, const QString &error);
+  /// \brief 后台标定开始
+  void solve_started();
+  /// \brief 后台标定进度（0–100）
+  void solve_progress(int percent, const QString &message);
+  /// \brief 后台标定结束
+  void solve_finished(bool ok, const QString &error);
 
 private:
+  bool validate_solve_preconditions(QString *error_out) const;
+  void start_solve_job();
   cv::Mat current_bgr() const;
   bool attach_pose_to_observation(core::Observation *obs, QString *error_out);
   void start_detect_job(bool fast);
@@ -338,6 +417,9 @@ private:
   int current_index_ = -1;
 
   cv::Mat live_bgr_;
+  mutable std::mutex live_preview_mutex_;
+  QImage cached_live_preview_qimage_;
+  std::atomic<bool> live_preview_busy_{false};
   QString ros_topic_name_;
   int live_seq_ = 0;
 
@@ -358,6 +440,9 @@ private:
   bool pending_detect_ = false;
   bool pending_fast_ = true;
 
+  std::atomic<bool> solve_busy_{false};
+  std::thread solve_thread_;
+
   struct ViewFingerprint {
     double area_ratio = 0.0;
     double cx = 0.5;
@@ -374,16 +459,53 @@ private:
   core::CalibrationResult last_result_;
 
   struct CapturedView {
-    cv::Mat bgr;      ///< 采集时原图
-    QImage overlay;   ///< 检测叠加预览
+    cv::Mat bgr;           ///< 采集时原图（内存，小数据集回退）
+    QString image_path;    ///< 采集时原图磁盘缓存（在线 ROS 等）
+    QImage overlay;        ///< 检测叠加预览
   };
   std::vector<CapturedView> captured_views_;
+
+  QString capture_cache_dir_;
+  QString ensure_capture_cache_dir();
+  void clear_capture_cache();
+  QString save_capture_original(const cv::Mat &bgr, int index);
+  void fill_capture_view(CapturedView *view);
+  static QString resolve_obs_source_path(const QString &source);
 
   ViewFingerprint fingerprint_from_corners(
       const std::vector<cv::Point2f> &corners, int width, int height) const;
   double confidence_from_corners(
       const std::vector<cv::Point2f> &corners, int width, int height) const;
   bool is_diverse_enough(const ViewFingerprint &fp, double min_diversity) const;
+  void refresh_provisional_intrinsics();
+  void request_provisional_intrinsics_refresh(bool force = false);
+  bool uses_intrinsics_capture_filter() const;
+  void configure_intrinsics_engine();
+  void sync_batch_from_intrinsics();
+  void update_board_metrics_after_detect();
+  bool tier4_preview_needs_overlay() const;
+  double compute_pixel_speed() const;
+
+  core::IntrinsicsSessionState intrinsics_state_;
+  core::BoardFrameMetrics last_board_metrics_;
+  cv::Point2f last_frame_centroid_{0.5f, 0.5f};
+  bool has_last_frame_centroid_ = false;
+
+  IntrinsicsImageViewMode intrinsics_view_mode_ = IntrinsicsImageViewMode::Source;
+  IntrinsicsVizOptions intrinsics_viz_options_;
+  std::vector<float> intrinsics_linearity_grid_;
+  int intrinsics_browse_index_ = -1;
+  bool intrinsics_browse_eval_ = false;
+  cv::Rect chess_track_roi_;
+  int chess_lost_frames_ = 0;
+  bool has_chess_track_roi_ = false;
+
+  core::ProvisionalIntrinsics provisional_intrinsics_;
+  std::atomic<bool> provisional_refresh_busy_{false};
+  std::atomic<bool> provisional_refresh_dirty_{false};
+  int last_provisional_sample_count_ = 0;
+  qint64 last_provisional_refresh_ms_ = 0;
+  RosBagFrameReader bag_reader_;
 };
 }  // namespace gui
 }  // namespace hs_calib

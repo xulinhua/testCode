@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QFile>
+#include <QRgb>
 #include <QFileInfo>
 #include <QMetaObject>
 
@@ -14,11 +15,17 @@
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include <opencv2/aruco.hpp>
 
 #include "hs_calib_suite/core/detectors/board_type_identifier.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_reprojection.hpp"
+#include "hs_calib_suite/core/detectors/circle_grid_detect_impl.hpp"
+#include "hs_calib_suite/gui/intrinsics/intrinsics_preview_overlay.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_capture_filter.hpp"
+#include "hs_calib_suite/core/calibrators/intrinsics/board_frame_metrics.hpp"
 #include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/detectors/aruco_grid_detector.hpp"
 #include "hs_calib_suite/core/detectors/aprilgrid_detector.hpp"
@@ -30,6 +37,8 @@
 #include "hs_calib_suite/core/detectors/chessboard_detector.hpp"
 #include "hs_calib_suite/core/targets/chessboard_target.hpp"
 #include "hs_calib_suite/core/detectors/circle_grid_detector.hpp"
+#include "hs_calib_suite/core/detectors/asymmetric_circle_grid_detector.hpp"
+#include "hs_calib_suite/core/detectors/symmetric_circle_grid_detector.hpp"
 #include "hs_calib_suite/core/targets/circle_grid_target.hpp"
 #include "hs_calib_suite/core/util/cv_bridge_local.hpp"
 #include "hs_calib_suite/core/io/export_camera_yaml.hpp"
@@ -106,6 +115,9 @@ struct DetectJobIn {
   cv::Mat dist_coeffs;    ///< 畸变，可空
   std::string camera_model = "brown_conrady";
   double camera_xi = 0.0;
+  cv::Rect chess_roi;
+  int chess_lost_frames = 0;
+  bool has_chess_roi = false;
 };
 
 struct DetectJobOut {
@@ -119,6 +131,9 @@ struct DetectJobOut {
   int height = 0;
   DetectFp fp;
   double aruco_reproj_px = -1.0;  ///< 单码/ArUco 轴位姿平均重投影误差；无效为 -1
+  cv::Rect chess_roi;
+  int chess_lost_frames = 0;
+  bool has_chess_roi = false;
 };
 
 /// \brief 由角点包围盒生成视角指纹（面积/中心/倾角）
@@ -320,11 +335,11 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         center *= 1.f / static_cast<float>(corners.size());
         const cv::Point *pts = poly.data();
         const int npts = static_cast<int>(poly.size());
-        // 细边框 + 小号纯数字 ID（不画角序 / 轴向 / "id="）
-        cv::polylines(in.bgr, &pts, &npts, 1, true, col, 1, cv::LINE_AA);
+        // 细边框略加粗，高分辨率下仍可见
+        cv::polylines(in.bgr, &pts, &npts, 1, true, col, 2, cv::LINE_AA);
         const std::string label = std::to_string(id);
         int baseline = 0;
-        const double font_scale = 0.35;
+        const double font_scale = 0.45;
         const cv::Size tsz = cv::getTextSize(
             label, cv::FONT_HERSHEY_SIMPLEX, font_scale, 1, &baseline);
         const cv::Point org(
@@ -546,7 +561,7 @@ DetectJobOut run_detect_job(DetectJobIn in) {
           (target_type == "charuco" || target_type == "trihedral_charuco")
               ? "DICT_4X4_50"
               : "DICT_6X6_1000");
-      const double marker_len = opt_double(
+      double marker_len = opt_double(
           "marker_length",
           (target_type == "charuco" || target_type == "trihedral_charuco")
               ? 0.03
@@ -560,9 +575,13 @@ DetectJobOut run_detect_job(DetectJobIn in) {
 
       std::vector<core::Correspondence> corrs;
       if (target_type == "charuco") {
+        const auto ch_params = core::charuco_detector_from_config(in.solve_options);
+        if (ch_params.marker_length_m > 1e-6) {
+          marker_len = ch_params.marker_length_m;
+        }
         core::CharucoTarget target(
             in.squares_x, in.squares_y, in.square_length_m, marker_len, dictionary);
-        corrs = core::CharucoDetector(target).detect(frame, &aruco);
+        corrs = core::CharucoDetector(target, ch_params).detect(frame, &aruco);
         if (corrs.empty()) {
           draw_aruco_overlay();
           out.preview = mat_bgr_to_qimage(in.bgr);
@@ -592,28 +611,55 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         if (tag_spacing < 0.0) {
           tag_spacing = in.square_length_m;
         }
-        if (tag_spacing < 0.01 || tag_spacing > 5.0) {
+        // 棋盘残留 0.025 等不合理值钳回 Kalibr 默认 0.3
+        if (tag_spacing < 0.05 || tag_spacing > 2.0) {
           tag_spacing = 0.3;
+        }
+        std::string april_dict = dictionary;
+        if (april_dict.find("APRILTAG") == std::string::npos) {
+          april_dict = "DICT_APRILTAG_36h11";
         }
         core::AprilgridTarget target(
             in.squares_x, in.squares_y, marker_len, tag_spacing);
-        corrs = core::AprilgridDetector(target).detect(frame, &aruco);
+        const auto april_params =
+            core::aprilgrid_detector_from_config(in.solve_options);
+        corrs = core::AprilgridDetector(target, april_dict, april_params)
+                    .detect(frame, &aruco);
         if (corrs.empty()) {
           draw_aruco_overlay();
+          if (aruco.empty()) {
+            cv::putText(
+                in.bgr,
+                "AprilGrid: 0 tags — print on paper (screen moire kills detection)",
+                cv::Point(12, 28), cv::FONT_HERSHEY_SIMPLEX, 0.55,
+                cv::Scalar(0, 80, 255), 2, cv::LINE_AA);
+          } else {
+            cv::putText(
+                in.bgr,
+                cv::format(
+                    "AprilGrid: %d tags outside %dx%d grid (dict=%s)",
+                    static_cast<int>(aruco.ids.size()), in.squares_x, in.squares_y,
+                    aruco.dictionary_name.empty() ? "?" : aruco.dictionary_name.c_str()),
+                cv::Point(12, 28), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                cv::Scalar(0, 200, 255), 2, cv::LINE_AA);
+          }
           out.preview = mat_bgr_to_qimage(in.bgr);
           if (!aruco.empty()) {
             out.error = QStringLiteral(
-                            "检测到 %1 个 AprilTag，但未落入当前网格"
-                            "（tagCols×tagRows=%2×%3，ID 须为 0..%4）。"
-                            "请核对尺寸；字典固定 DICT_APRILTAG_36h11")
+                            "检测到 %1 个 AprilTag（%2），但未落入当前网格"
+                            "（tagCols×tagRows=%3×%4，ID 须为 0..%5）")
                             .arg(static_cast<int>(aruco.ids.size()))
+                            .arg(QString::fromStdString(
+                                aruco.dictionary_name.empty() ? april_dict
+                                                              : aruco.dictionary_name))
                             .arg(in.squares_x)
                             .arg(in.squares_y)
                             .arg(in.squares_x * in.squares_y - 1);
           } else {
             out.error = QStringLiteral(
-                "未检测到 AprilTag。Aprilgrid 固定 DICT_APRILTAG_36h11；"
-                "请核对 tagCols/tagRows、tagSize、光照与距离");
+                "未检测到 AprilTag。请优先用纸质板（屏显摩尔纹极易全灭）。"
+                "核对：Kalibr AprilGrid / tag36h11；列×行；边长与间距；"
+                "字典 DICT_APRILTAG_36h11；对焦清晰");
           }
           return out;
         }
@@ -629,12 +675,41 @@ DetectJobOut run_detect_job(DetectJobIn in) {
             target_type == "Asymmetric Circles";
         const auto pattern = asymmetric ? core::CircleGridPattern::Asymmetric
                                         : core::CircleGridPattern::Symmetric;
+        const double circle_diam = opt_double("circle_diameter", 0.0);
         core::CircleGridTarget target(
-            in.squares_x, in.squares_y, in.square_length_m, pattern);
-        corrs = core::CircleGridDetector(target).detect(frame);
+            in.squares_x, in.squares_y, in.square_length_m, pattern, circle_diam);
+        const auto dot_params = core::dot_detector_from_config(in.solve_options);
+        corrs = core::detect_circle_grid_impl(frame, target, dot_params);
+        if (corrs.empty()) {
+          cv::putText(
+              in.bgr,
+              asymmetric
+                  ? cv::format(
+                        "Asym circles fail: size=(per-row x rows)=%dx%d",
+                        in.squares_x, in.squares_y)
+                  : cv::format(
+                        "Sym circles fail: size=%dx%d", in.squares_x,
+                        in.squares_y),
+              cv::Point(12, 28), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+              cv::Scalar(0, 80, 255), 2, cv::LINE_AA);
+          out.preview = mat_bgr_to_qimage(in.bgr);
+          out.error = asymmetric
+              ? QStringLiteral(
+                    "未检测到非对称圆点阵（当前 %1×%2）。"
+                    "请核对：每行×行数；对角间距（calib.io Diagonal Spacing）；圆直径")
+                    .arg(in.squares_x)
+                    .arg(in.squares_y)
+              : QStringLiteral(
+                    "未检测到对称圆点阵（当前 %1×%2）。请核对列×行、圆心距与圆直径")
+                    .arg(in.squares_x)
+                    .arg(in.squares_y);
+          return out;
+        }
       } else {
         core::ChessboardTarget target(
             in.squares_x, in.squares_y, in.square_length_m);
+        const core::ChessDetectorParams cb_params =
+            core::chess_detector_from_config(in.solve_options);
         core::ChessboardDetectOptions dopts;
         auto flag_on = [&](const char *key, bool def) {
           const auto it = in.solve_options.find(key);
@@ -647,23 +722,46 @@ DetectJobOut run_detect_job(DetectJobIn in) {
         const bool require_full =
             completeness == "full" || completeness == "complete";
         const bool force_partial = completeness == "partial";
-        dopts.adaptive_thresh = flag_on("cb_adaptive", true);
-        dopts.normalize_image = flag_on("cb_normalize", true);
+        dopts.adaptive_thresh = cb_params.adaptive_thresh;
+        dopts.normalize_image = cb_params.normalize_image;
         dopts.filter_quads = flag_on("cb_filter_quads", false);
-        // 完整模式 / 未指定：默认 fast_check；局部检测台关 fast_check
-        dopts.fast_check = flag_on("cb_fast_check", !force_partial);
+        dopts.fast_check = cb_params.fast_check;
+        dopts.resized_detection = cb_params.resized_detection;
+        dopts.resized_max_resolution = cb_params.resized_max_resolution;
+        dopts.padding = cb_params.padding;
+        if (in.has_chess_roi &&
+            in.chess_lost_frames <= cb_params.max_lost_frames) {
+          dopts.search_roi = in.chess_roi;
+        }
         dopts.allow_partial = force_partial && !require_full;
         dopts.thorough = !in.fast;
-        {
+        if (cb_params.sub_pixel_refinement) {
           const auto it = in.solve_options.find("subpix_win");
           if (it != in.solve_options.end()) {
             try {
               dopts.subpix_win = std::stoi(it->second);
             } catch (...) {
+              dopts.subpix_win = 11;
             }
+          } else {
+            dopts.subpix_win = 11;
+          }
+        } else {
+          dopts.subpix_win = 0;
+        }
+        core::ChessboardDetector detector(target, dopts);
+        corrs = detector.detect(frame);
+        if (!corrs.empty()) {
+          out.has_chess_roi = true;
+          out.chess_roi = detector.last_search_roi();
+          out.chess_lost_frames = 0;
+        } else if (in.has_chess_roi) {
+          out.chess_lost_frames = in.chess_lost_frames + 1;
+          if (out.chess_lost_frames <= cb_params.max_lost_frames) {
+            out.has_chess_roi = true;
+            out.chess_roi = in.chess_roi;
           }
         }
-        corrs = core::ChessboardDetector(target, dopts).detect(frame);
       }
       if (corrs.empty()) {
         draw_aruco_overlay();
@@ -866,6 +964,9 @@ SessionController::~SessionController() {
   if (detect_thread_.joinable()) {
     detect_thread_.join();
   }
+  if (solve_thread_.joinable()) {
+    solve_thread_.join();
+  }
 }
 
 /// \brief 设置标定器 ID，并按类型调整位姿源/最少视角
@@ -880,6 +981,9 @@ void SessionController::set_calibrator_id(const QString &id) {
   }
   if (is_intrinsics() || is_trihedral() || is_stereo_extrinsics()) {
     pose_source_ = PoseSource::None;
+  }
+  if (is_intrinsics()) {
+    configure_intrinsics_engine();
   }
   if (is_trihedral() && min_views_ > 1) {
     // Default oneshot-friendly; user can raise for multi-view
@@ -928,6 +1032,11 @@ bool SessionController::is_trihedral() const {
 void SessionController::set_source_mode(SourceMode mode) {
   source_mode_ = mode;
   has_detection_ = false;
+  if (is_intrinsics()) {
+    intrinsics_state_.set_offline_source(
+        mode == SourceMode::Offline || mode == SourceMode::RosBag);
+    configure_intrinsics_engine();
+  }
   emit current_changed();
 }
 
@@ -957,6 +1066,7 @@ void SessionController::set_capture_options(
 /// \brief 设置求解器键值选项
 void SessionController::set_solve_options(const std::map<std::string, std::string> &opts) {
   solve_options_ = opts;
+  configure_intrinsics_engine();
 }
 
 /// \brief 设置检测预览叠加开关
@@ -1046,6 +1156,43 @@ void SessionController::set_live_bgr(const cv::Mat &bgr) {
   }
 }
 
+void SessionController::set_live_bgr(cv::Mat &&bgr) {
+  if (bgr.empty()) {
+    live_bgr_.release();
+  } else {
+    live_bgr_ = std::move(bgr);
+  }
+}
+
+QImage SessionController::cached_live_preview_qimage() const {
+  std::lock_guard<std::mutex> lock(live_preview_mutex_);
+  return cached_live_preview_qimage_;
+}
+
+void SessionController::schedule_live_preview_update() {
+  if (source_mode_ != SourceMode::RosTopic || live_bgr_.empty()) {
+    return;
+  }
+  if (live_preview_busy_.exchange(true)) {
+    return;
+  }
+  cv::Mat bgr = live_bgr_.clone();
+  std::thread([this, bgr = std::move(bgr)]() mutable {
+    QImage img = mat_bgr_to_qimage(bgr);
+    QMetaObject::invokeMethod(
+        this,
+        [this, img = std::move(img)]() {
+          {
+            std::lock_guard<std::mutex> lock(live_preview_mutex_);
+            cached_live_preview_qimage_ = img;
+          }
+          live_preview_busy_.store(false);
+          emit live_preview_updated();
+        },
+        Qt::QueuedConnection);
+  }).detach();
+}
+
 /// \brief 加载离线位姿 CSV
 bool SessionController::load_pose_csv(const QString &path, QString *error_out) {
   return pose_csv_.load(path, error_out);
@@ -1062,8 +1209,10 @@ int SessionController::load_image_dir(const QString &dir_path) {
   last_preview_ = {};
   captured_fps_.clear();
   captured_views_.clear();
+  clear_capture_cache();
   batch_ = {};
   last_result_ = {};
+  bag_reader_.clear();
 
   QDir dir(dir_path);
   if (!dir.exists()) {
@@ -1093,6 +1242,48 @@ int SessionController::load_image_dir(const QString &dir_path) {
   emit observations_changed();
   emit result_changed();
   return image_paths_.size();
+}
+
+int SessionController::load_rosbag(
+    const QString &bag_uri,
+    const QString &topic,
+    int max_frames,
+    QString *error_out) {
+  image_paths_.clear();
+  current_index_ = -1;
+  has_detection_ = false;
+  last_confidence_ = 0.0;
+  last_aruco_reproj_px_ = -1.0;
+  last_preview_ = {};
+  captured_fps_.clear();
+  captured_views_.clear();
+  clear_capture_cache();
+  batch_ = {};
+  last_result_ = {};
+  if (is_intrinsics()) {
+    intrinsics_state_.reset();
+  }
+  bag_reader_.clear();
+
+  const int n = bag_reader_.open(bag_uri, topic, max_frames, error_out);
+  if (n <= 0) {
+    emit images_changed();
+    emit observations_changed();
+    emit result_changed();
+    return 0;
+  }
+  image_paths_.reserve(n);
+  for (int i = 0; i < n; ++i) {
+    image_paths_.push_back(bag_reader_.frame_label(i));
+  }
+  current_index_ = 0;
+  set_ros_topic_name(topic);
+  set_source_mode(SourceMode::RosBag);
+  emit images_changed();
+  emit current_changed();
+  emit observations_changed();
+  emit result_changed();
+  return n;
 }
 
 /// \brief 切换离线当前图片索引
@@ -1134,10 +1325,16 @@ QString SessionController::current_path() const {
   return image_paths_.at(current_index_);
 }
 
-/// \brief 取当前帧 BGR（在线 live / 离线 imread）
+/// \brief 取当前帧 BGR（在线 live / 离线 imread / bag 内存）
 cv::Mat SessionController::current_bgr() const {
   if (source_mode_ == SourceMode::RosTopic) {
     return live_bgr_;
+  }
+  if (source_mode_ == SourceMode::RosBag && !bag_reader_.empty()) {
+    if (current_index_ < 0 || current_index_ >= bag_reader_.size()) {
+      return {};
+    }
+    return bag_reader_.frame(current_index_);
   }
   const QString path = current_path();
   if (path.isEmpty()) {
@@ -1241,6 +1438,9 @@ bool SessionController::detect_current(QImage *preview_out, QString *error_out, 
   in.dist_coeffs = detect_D_.empty() ? cv::Mat() : detect_D_.clone();
   in.camera_model = detect_model_;
   in.camera_xi = detect_xi_;
+  in.has_chess_roi = has_chess_track_roi_;
+  in.chess_roi = chess_track_roi_;
+  in.chess_lost_frames = chess_lost_frames_;
   const DetectJobOut out = run_detect_job(std::move(in));
   last_preview_ = out.preview;
   last_confidence_ = out.confidence;
@@ -1255,9 +1455,17 @@ bool SessionController::detect_current(QImage *preview_out, QString *error_out, 
     last_fp_.cx = out.fp.cx;
     last_fp_.cy = out.fp.cy;
     last_fp_.tilt_deg = out.fp.tilt_deg;
+    has_chess_track_roi_ = out.has_chess_roi;
+    chess_track_roi_ = out.chess_roi;
+    chess_lost_frames_ = out.chess_lost_frames;
   } else {
     has_detection_ = false;
+    has_chess_track_roi_ = out.has_chess_roi;
+    chess_track_roi_ = out.chess_roi;
+    chess_lost_frames_ = out.chess_lost_frames;
   }
+  update_board_metrics_after_detect();
+  last_preview_ = decorate_intrinsics_preview(last_preview_, fast);
   if (preview_out) {
     *preview_out = last_preview_;
   }
@@ -1265,6 +1473,21 @@ bool SessionController::detect_current(QImage *preview_out, QString *error_out, 
     *error_out = out.error;
   }
   return out.ok;
+}
+
+int SessionController::live_detect_interval_ms() const {
+  constexpr int kLiveHz = 200;
+  constexpr int kIdlePollMs = 400;
+  if (!is_intrinsics() || source_mode_ != SourceMode::RosTopic) {
+    return kLiveHz;
+  }
+  const core::IntrinsicsProfile profile =
+      core::profile_from_config_map(solve_options_);
+  const auto params = core::collector_params_from_config(solve_options_, profile);
+  if (params.skip_frames_when_not_detection && !has_detection_) {
+    return kIdlePollMs;
+  }
+  return kLiveHz;
 }
 
 /// \brief 请求后台检测（忙则挂起一次）
@@ -1421,6 +1644,9 @@ void SessionController::start_detect_job(bool fast) {
   in.dist_coeffs = detect_D_.empty() ? cv::Mat() : detect_D_.clone();
   in.camera_model = detect_model_;
   in.camera_xi = detect_xi_;
+  in.has_chess_roi = has_chess_track_roi_;
+  in.chess_roi = chess_track_roi_;
+  in.chess_lost_frames = chess_lost_frames_;
   if (in.bgr.empty()) {
     has_detection_ = false;
     last_preview_ = {};
@@ -1438,10 +1664,11 @@ void SessionController::start_detect_job(bool fast) {
   emit detect_started();
   // —— 后台线程跑检测，结果排队回主线程 ——
   detect_thread_ = std::thread([this, in = std::move(in), epoch]() mutable {
+    const bool fast = in.fast;
     const DetectJobOut out = run_detect_job(std::move(in));
     QMetaObject::invokeMethod(
         this,
-        [this, out, epoch]() {
+        [this, out, epoch, fast]() {
           if (epoch != detect_epoch_.load()) {
             detect_busy_.store(false);
             pending_detect_ = false;
@@ -1460,9 +1687,17 @@ void SessionController::start_detect_job(bool fast) {
             last_fp_.cx = out.fp.cx;
             last_fp_.cy = out.fp.cy;
             last_fp_.tilt_deg = out.fp.tilt_deg;
+            has_chess_track_roi_ = out.has_chess_roi;
+            chess_track_roi_ = out.chess_roi;
+            chess_lost_frames_ = out.chess_lost_frames;
           } else {
             has_detection_ = false;
+            has_chess_track_roi_ = out.has_chess_roi;
+            chess_track_roi_ = out.chess_roi;
+            chess_lost_frames_ = out.chess_lost_frames;
           }
+          update_board_metrics_after_detect();
+          last_preview_ = decorate_intrinsics_preview(last_preview_, fast);
           detect_busy_.store(false);
           emit detect_finished(out.ok, out.error);
           // 仅在仍排队且 epoch 未被 cancel 作废时续跑
@@ -1606,6 +1841,241 @@ bool SessionController::is_diverse_enough(
   return true;
 }
 
+/// \brief 是否对内参任务启用 Tier4 采集过滤
+bool SessionController::uses_intrinsics_capture_filter() const {
+  return uses_tier4_intrinsics();
+}
+
+bool SessionController::uses_tier4_intrinsics() const {
+  if (!is_intrinsics()) {
+    return false;
+  }
+  return core::tier4_intrinsics_enabled(solve_options_);
+}
+
+void SessionController::set_intrinsics_profile_id(const std::string &profile_id) {
+  solve_options_["intrinsics_profile"] = profile_id;
+  configure_intrinsics_engine();
+  emit intrinsics_state_changed();
+}
+
+std::string SessionController::intrinsics_profile_id() const {
+  const auto it = solve_options_.find("intrinsics_profile");
+  if (it != solve_options_.end()) {
+    return it->second;
+  }
+  return "classic";
+}
+
+/// \brief 用已采帧刷新临时内参（供采集过滤）
+void SessionController::refresh_provisional_intrinsics() {
+  request_provisional_intrinsics_refresh(true);
+}
+
+void SessionController::request_provisional_intrinsics_refresh(bool force) {
+  if (!uses_intrinsics_capture_filter() || detect_width_ <= 0 ||
+      detect_height_ <= 0) {
+    provisional_intrinsics_.valid = false;
+    return;
+  }
+  const int count = observation_count();
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  constexpr qint64 kMinIntervalMs = 2500;
+  if (!force && count < 6) {
+    return;
+  }
+  if (!force && now - last_provisional_refresh_ms_ < kMinIntervalMs) {
+    provisional_refresh_dirty_.store(true);
+    return;
+  }
+  if (provisional_refresh_busy_.exchange(true)) {
+    provisional_refresh_dirty_.store(true);
+    return;
+  }
+  last_provisional_sample_count_ = count;
+  last_provisional_refresh_ms_ = now;
+
+  const int w = detect_width_;
+  const int h = detect_height_;
+  core::ObservationBatch batch =
+      is_intrinsics() && uses_tier4_intrinsics()
+          ? intrinsics_state_.training_batch()
+          : batch_;
+  const core::IntrinsicsProfile profile =
+      core::profile_from_config_map(solve_options_);
+  const auto params = core::collector_params_from_config(solve_options_, profile);
+  const int max_fast = params.max_fast_calibration_samples;
+
+  std::thread([this, batch = std::move(batch), w, h, profile, max_fast]() {
+    core::ProvisionalIntrinsics prov;
+    core::update_provisional_intrinsics(
+        batch, w, h, profile, &prov, max_fast);
+    QMetaObject::invokeMethod(
+        this,
+        [this, prov]() {
+          provisional_intrinsics_ = prov;
+          if (is_intrinsics()) {
+            intrinsics_state_.set_provisional_model(prov);
+          }
+          provisional_refresh_busy_.store(false);
+          if (provisional_refresh_dirty_.exchange(false)) {
+            request_provisional_intrinsics_refresh(true);
+            return;
+          }
+          emit intrinsics_state_changed();
+        },
+        Qt::QueuedConnection);
+  }).detach();
+}
+
+core::IntrinsicsSessionState &SessionController::intrinsics_state() {
+  return intrinsics_state_;
+}
+
+const core::IntrinsicsSessionState &SessionController::intrinsics_state() const {
+  return intrinsics_state_;
+}
+
+core::ObservationBatch SessionController::evaluation_batch() const {
+  if (!is_intrinsics()) {
+    return {};
+  }
+  return intrinsics_state_.evaluation_batch();
+}
+
+int SessionController::observation_count() const {
+  if (is_intrinsics() && uses_tier4_intrinsics()) {
+    return intrinsics_state_.collector().training_count();
+  }
+  return static_cast<int>(batch_.items.size());
+}
+
+int SessionController::training_sample_count() const {
+  return is_intrinsics() && uses_tier4_intrinsics()
+             ? intrinsics_state_.collector().training_count()
+             : static_cast<int>(batch_.items.size());
+}
+
+int SessionController::evaluation_sample_count() const {
+  return is_intrinsics() && uses_tier4_intrinsics()
+             ? intrinsics_state_.collector().evaluation_count()
+             : 0;
+}
+
+void SessionController::set_intrinsics_solver_kind(const std::string &solver) {
+  solve_options_["intrinsics_solver"] = solver;
+  configure_intrinsics_engine();
+}
+
+std::string SessionController::intrinsics_solver_kind() const {
+  const auto it = solve_options_.find("intrinsics_solver");
+  if (it != solve_options_.end()) {
+    return it->second;
+  }
+  const core::IntrinsicsProfile profile =
+      core::profile_from_config_map(solve_options_);
+  return profile.solver == core::IntrinsicsSolverKind::Ceres ? "ceres" : "opencv";
+}
+
+void SessionController::configure_intrinsics_engine() {
+  if (!is_intrinsics()) {
+    return;
+  }
+  if (!uses_tier4_intrinsics()) {
+    return;
+  }
+  core::merge_tier4_intrinsics_defaults(&solve_options_);
+  if (source_mode_ == SourceMode::RosTopic) {
+    solve_options_["collector_filter_speed"] = "false";
+  }
+  core::IntrinsicsProfile profile =
+      core::profile_from_config_map(solve_options_);
+  const auto it_solver = solve_options_.find("intrinsics_solver");
+  if (it_solver != solve_options_.end()) {
+    const std::string s = it_solver->second;
+    if (s == "ceres" || s == "Ceres") {
+      profile.solver = core::IntrinsicsSolverKind::Ceres;
+    } else {
+      profile.solver = core::IntrinsicsSolverKind::OpenCV;
+    }
+  }
+  const auto collector_params =
+      core::collector_params_from_config(solve_options_, profile);
+  intrinsics_state_.configure(
+      profile, collector_params, solve_config_map());
+  intrinsics_state_.set_offline_source(
+      source_mode_ == SourceMode::Offline || source_mode_ == SourceMode::RosBag);
+}
+
+void SessionController::sync_batch_from_intrinsics() {
+  if (!is_intrinsics()) {
+    return;
+  }
+  batch_ = intrinsics_state_.training_batch();
+}
+
+double SessionController::compute_pixel_speed() const {
+  if (!has_last_frame_centroid_ || detect_width_ <= 0 || detect_height_ <= 0) {
+    return 0.0;
+  }
+  const double cx = last_fp_.cx * detect_width_;
+  const double cy = last_fp_.cy * detect_height_;
+  const double dx = cx - last_frame_centroid_.x;
+  const double dy = cy - last_frame_centroid_.y;
+  return std::hypot(dx, dy);
+}
+
+void SessionController::update_board_metrics_after_detect() {
+  if (!uses_tier4_intrinsics()) {
+    return;
+  }
+  if (!has_detection_) {
+    last_board_metrics_ = {};
+    emit intrinsics_state_changed();
+    return;
+  }
+  intrinsics_state_.update_frame_metrics(
+      current_corr_, detect_width_, detect_height_, square_length_m_);
+  last_board_metrics_ = intrinsics_state_.last_metrics();
+  const int cells = std::max(
+      4, intrinsics_state_.collector().params().heatmap_cells);
+  accumulate_linearity_heatmap(
+      current_corr_, detect_width_, detect_height_, cells,
+      &intrinsics_linearity_grid_);
+  emit intrinsics_state_changed();
+}
+
+bool SessionController::tier4_preview_needs_overlay() const {
+  if (!uses_tier4_intrinsics()) {
+    return false;
+  }
+  const auto &v = intrinsics_viz_options_;
+  return v.draw_training_points || v.draw_evaluation_points ||
+         v.draw_training_occupancy || v.draw_evaluation_occupancy ||
+         v.draw_linearity_error || v.draw_indicators ||
+         intrinsics_view_mode_ != IntrinsicsImageViewMode::Source;
+}
+
+bool SessionController::evaluate_calibration(QString *error_out) {
+  if (!is_intrinsics()) {
+    if (error_out) {
+      *error_out = QStringLiteral("仅内参任务支持评估");
+    }
+    return false;
+  }
+  std::string err;
+  if (!intrinsics_state_.evaluate(&err)) {
+    if (error_out) {
+      *error_out = QString::fromStdString(err);
+    }
+    return false;
+  }
+  last_result_ = intrinsics_state_.last_result();
+  emit intrinsics_state_changed();
+  emit result_changed();
+  return true;
+}
+
 /// \brief 高置信且多样时自动入库当前观测
 bool SessionController::try_auto_capture(
     double min_confidence, double min_diversity, QString *error_out) {
@@ -1615,16 +2085,16 @@ bool SessionController::try_auto_capture(
     }
     return false;
   }
+  if (uses_tier4_intrinsics()) {
+    return add_current_observation(error_out);
+  }
   if (!is_diverse_enough(last_fp_, min_diversity)) {
     if (error_out) {
       *error_out = QStringLiteral("与已采集姿态过于相似");
     }
     return false;
   }
-  if (!add_current_observation(error_out)) {
-    return false;
-  }
-  return true;
+  return add_current_observation(error_out);
 }
 
 /// \brief 手眼：从 CSV/TF 附加 T_base_gripper
@@ -1724,16 +2194,93 @@ bool SessionController::add_current_observation(QString *error_out) {
   obs.image_width = detect_width_;
   obs.image_height = detect_height_;
   obs.correspondences = {current_corr_};
+  if (uses_intrinsics_capture_filter()) {
+    const core::IntrinsicsProfile profile =
+        core::profile_from_config_map(solve_options_);
+    cv::Mat K = provisional_intrinsics_.valid
+        ? provisional_intrinsics_.camera_matrix
+        : core::make_initial_camera_matrix(detect_width_, detect_height_);
+    cv::Mat D = provisional_intrinsics_.valid
+        ? provisional_intrinsics_.dist_coeffs
+        : core::make_initial_dist_coeffs(profile.rational_coeffs);
+    core::IntrinsicsView view;
+    view.object_points.reserve(static_cast<size_t>(current_corr_.image_points.rows()));
+    view.image_points.reserve(static_cast<size_t>(current_corr_.image_points.rows()));
+    for (int r = 0; r < current_corr_.image_points.rows(); ++r) {
+      view.object_points.emplace_back(
+          static_cast<float>(current_corr_.object_points(r, 0)),
+          static_cast<float>(current_corr_.object_points(r, 1)),
+          static_cast<float>(current_corr_.object_points(r, 2)));
+      view.image_points.emplace_back(
+          static_cast<float>(current_corr_.image_points(r, 0)),
+          static_cast<float>(current_corr_.image_points(r, 1)));
+    }
+    core::fill_view_fingerprint(&view, detect_width_, detect_height_);
+    cv::Mat rv, tv;
+    if (core::solve_board_pose(view, K, D, &rv, &tv)) {
+      const auto stats = core::compute_reprojection_stats(view, K, D, rv, tv);
+      obs.has_board_pose = true;
+      for (int i = 0; i < 3; ++i) {
+        obs.board_rvec(i) = rv.at<double>(i, 0);
+        obs.board_tvec(i) = tv.at<double>(i, 0);
+      }
+      obs.board_reproj_rms = stats.rms;
+      obs.board_reproj_max = stats.max;
+      obs.board_center_x_norm = view.centroid_x;
+      obs.board_center_y_norm = view.centroid_y;
+      obs.board_tilt_deg = view.tilt_deg;
+    }
+  }
   if (!attach_pose_to_observation(&obs, error_out)) {
     return false;
   }
+
+  if (is_intrinsics() && uses_tier4_intrinsics()) {
+    core::BoardFrameFingerprint fp =
+        core::fingerprint_from_correspondence(
+            current_corr_, detect_width_, detect_height_);
+    if (obs.has_board_pose) {
+      fp.has_pose = true;
+      fp.position_m = cv::Vec3d(
+          obs.board_tvec.x(), obs.board_tvec.y(), obs.board_tvec.z());
+      fp.tilt_deg = obs.board_tilt_deg;
+      fp.rough_angle_x_deg = obs.board_rvec.x() * 180.0 / CV_PI;
+      fp.rough_angle_y_deg = obs.board_rvec.y() * 180.0 / CV_PI;
+    }
+    core::IntrinsicsSampleSplit split = core::IntrinsicsSampleSplit::Training;
+    const auto reason = intrinsics_state_.try_capture(
+        std::move(obs), fp, compute_pixel_speed(), &split);
+    if (reason != core::CollectorRejectReason::Accepted) {
+      if (error_out) {
+        *error_out = QString::fromStdString(core::collector_reject_reason_text(reason));
+      }
+      return false;
+    }
+    sync_batch_from_intrinsics();
+    request_provisional_intrinsics_refresh();
+    CapturedView view;
+    fill_capture_view(&view);
+    captured_views_.push_back(std::move(view));
+    captured_fps_.push_back(last_fp_);
+    has_last_frame_centroid_ = true;
+    last_frame_centroid_ = cv::Point2f(
+        static_cast<float>(last_fp_.cx * detect_width_),
+        static_cast<float>(last_fp_.cy * detect_height_));
+    if (source_mode_ == SourceMode::RosTopic) {
+      has_detection_ = false;
+    }
+    emit observations_changed();
+    emit intrinsics_state_changed();
+    return true;
+  }
+
   batch_.items.push_back(std::move(obs));
   if (has_detection_) {
     captured_fps_.push_back(last_fp_);
   }
+  request_provisional_intrinsics_refresh();
   CapturedView view;
-  view.bgr = current_bgr().clone();
-  view.overlay = last_preview_;
+  fill_capture_view(&view);
   captured_views_.push_back(std::move(view));
   if (source_mode_ == SourceMode::RosTopic) {
     has_detection_ = false;
@@ -1744,6 +2291,10 @@ bool SessionController::add_current_observation(QString *error_out) {
 
 /// \brief 删除指定行观测及相关缓存
 void SessionController::remove_observation(int row) {
+  if (is_intrinsics() && uses_tier4_intrinsics()) {
+    remove_intrinsics_sample(core::IntrinsicsSampleSplit::Training, row);
+    return;
+  }
   if (row < 0 || row >= static_cast<int>(batch_.items.size())) {
     return;
   }
@@ -1758,7 +2309,29 @@ void SessionController::remove_observation(int row) {
   } else if (captured_views_.size() > batch_.items.size()) {
     captured_views_.resize(batch_.items.size());
   }
+  refresh_provisional_intrinsics();
   emit observations_changed();
+}
+
+void SessionController::remove_intrinsics_sample(
+    core::IntrinsicsSampleSplit split, int row) {
+  if (!is_intrinsics()) {
+    return;
+  }
+  if (!intrinsics_state_.collector().remove(split, row)) {
+    return;
+  }
+  sync_batch_from_intrinsics();
+  if (split == core::IntrinsicsSampleSplit::Training && row >= 0 &&
+      row < static_cast<int>(captured_views_.size())) {
+    captured_views_.erase(captured_views_.begin() + row);
+    if (row < static_cast<int>(captured_fps_.size())) {
+      captured_fps_.erase(captured_fps_.begin() + row);
+    }
+  }
+  refresh_provisional_intrinsics();
+  emit observations_changed();
+  emit intrinsics_state_changed();
 }
 
 /// \brief 清空全部观测与采集缓存
@@ -1766,11 +2339,106 @@ void SessionController::clear_observations() {
   batch_.items.clear();
   captured_fps_.clear();
   captured_views_.clear();
+  clear_capture_cache();
+  provisional_intrinsics_.valid = false;
+  if (is_intrinsics()) {
+    intrinsics_state_.reset();
+    has_last_frame_centroid_ = false;
+    intrinsics_linearity_grid_.clear();
+    emit intrinsics_state_changed();
+  }
   emit observations_changed();
 }
 
-/// \brief 调用注册表标定器求解
-bool SessionController::solve(QString *error_out) {
+bool SessionController::has_observations() const {
+  if (is_intrinsics() && uses_tier4_intrinsics()) {
+    const auto &collector = intrinsics_state_.collector();
+    if (collector.training_count() > 0 || collector.evaluation_count() > 0) {
+      return true;
+    }
+    return !batch_.items.empty();
+  }
+  return !batch_.items.empty();
+}
+
+core::ObservationBatch SessionController::training_observations() const {
+  if (is_intrinsics() && uses_tier4_intrinsics()) {
+    return intrinsics_state_.training_batch();
+  }
+  return batch_;
+}
+
+QString SessionController::ensure_capture_cache_dir() {
+  if (!capture_cache_dir_.isEmpty()) {
+    QDir dir(capture_cache_dir_);
+    if (dir.exists()) {
+      return capture_cache_dir_;
+    }
+    capture_cache_dir_.clear();
+  }
+  const QString dir_path = QDir::temp().filePath(
+      QStringLiteral("hs_calib_capture_%1").arg(QDateTime::currentMSecsSinceEpoch()));
+  if (!QDir().mkpath(dir_path)) {
+    return {};
+  }
+  capture_cache_dir_ = dir_path;
+  return capture_cache_dir_;
+}
+
+void SessionController::clear_capture_cache() {
+  if (capture_cache_dir_.isEmpty()) {
+    return;
+  }
+  QDir dir(capture_cache_dir_);
+  dir.removeRecursively();
+  capture_cache_dir_.clear();
+}
+
+QString SessionController::save_capture_original(const cv::Mat &bgr, int index) {
+  if (bgr.empty()) {
+    return {};
+  }
+  const QString dir = ensure_capture_cache_dir();
+  if (dir.isEmpty()) {
+    return {};
+  }
+  const QString path =
+      QDir(dir).filePath(QStringLiteral("%1.png").arg(index, 4, 10, QChar('0')));
+  if (cv::imwrite(path.toStdString(), bgr)) {
+    return path;
+  }
+  return {};
+}
+
+void SessionController::fill_capture_view(CapturedView *view) {
+  if (view == nullptr) {
+    return;
+  }
+  view->overlay = last_preview_;
+  const cv::Mat bgr = current_bgr();
+  if (source_mode_ == SourceMode::RosTopic) {
+    view->bgr = cv::Mat();
+    view->image_path = save_capture_original(bgr, static_cast<int>(captured_views_.size()));
+    return;
+  }
+  view->image_path.clear();
+  view->bgr = bgr.clone();
+}
+
+QString SessionController::resolve_obs_source_path(const QString &source) {
+  QString path = source;
+  if (path.startsWith(QStringLiteral("left:"))) {
+    path = path.mid(5);
+  } else if (path.startsWith(QStringLiteral("right:"))) {
+    path = path.mid(6);
+  }
+  if (path.startsWith(QStringLiteral("ros://"))) {
+    return {};
+  }
+  return path;
+}
+
+bool SessionController::validate_solve_preconditions(QString *error_out) const {
   if (is_handeye() && camera_yaml_.isEmpty()) {
     if (error_out) {
       *error_out = QStringLiteral("手眼标定需要先指定相机内参 YAML");
@@ -1792,10 +2460,86 @@ bool SessionController::solve(QString *error_out) {
       return false;
     }
   }
+  return true;
+}
+
+void SessionController::request_solve() {
+  if (solve_busy_.load()) {
+    return;
+  }
+  QString err;
+  if (!validate_solve_preconditions(&err)) {
+    emit solve_finished(false, err);
+    return;
+  }
+  start_solve_job();
+}
+
+void SessionController::start_solve_job() {
+  if (solve_thread_.joinable()) {
+    solve_thread_.join();
+  }
+  solve_busy_.store(true);
+  emit solve_started();
+  emit solve_progress(5, QStringLiteral("准备观测数据…"));
+  solve_thread_ = std::thread([this]() {
+    auto report = [this](int percent, const QString &message) {
+      QMetaObject::invokeMethod(
+          this,
+          [this, percent, message]() { emit solve_progress(percent, message); },
+          Qt::QueuedConnection);
+    };
+    QString err;
+    bool ok = false;
+    try {
+      report(20, QStringLiteral("校验参数…"));
+      report(35, QStringLiteral("标定求解中，请稍候…"));
+      ok = solve(&err);
+      report(90, QStringLiteral("整理结果…"));
+    } catch (const std::exception &ex) {
+      err = QString::fromStdString(ex.what());
+      ok = false;
+    } catch (...) {
+      err = QStringLiteral("标定过程发生未知错误");
+      ok = false;
+    }
+    QMetaObject::invokeMethod(
+        this,
+        [this, ok, err]() {
+          solve_busy_.store(false);
+          emit solve_progress(
+              100, ok ? QStringLiteral("完成") : QStringLiteral("失败"));
+          emit solve_finished(ok, err);
+        },
+        Qt::QueuedConnection);
+  });
+}
+
+/// \brief 调用注册表标定器求解
+bool SessionController::solve(QString *error_out) {
+  if (!validate_solve_preconditions(error_out)) {
+    return false;
+  }
   try {
-    auto calibrator =
-        core::CalibratorRegistry::instance().create(calibrator_id_.toStdString());
-    last_result_ = calibrator->calibrate(batch_, solve_config_map());
+    if (is_intrinsics() && uses_tier4_intrinsics()) {
+      std::string err;
+      if (!intrinsics_state_.calibrate(&err)) {
+        last_result_ = intrinsics_state_.last_result();
+        if (error_out) {
+          *error_out = err.empty() ? QStringLiteral("标定失败")
+                                   : QString::fromStdString(err);
+        }
+        emit result_changed();
+        emit intrinsics_state_changed();
+        return false;
+      }
+      last_result_ = intrinsics_state_.last_result();
+      sync_batch_from_intrinsics();
+    } else {
+      auto calibrator =
+          core::CalibratorRegistry::instance().create(calibrator_id_.toStdString());
+      last_result_ = calibrator->calibrate(batch_, solve_config_map());
+    }
   } catch (const std::exception &ex) {
     last_result_ = {};
     last_result_.success = false;
@@ -2009,8 +2753,15 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
     if (i < captured_views_.size() && !captured_views_[i].bgr.empty()) {
       wrote_img = cv::imwrite(abs_img.toStdString(), captured_views_[i].bgr);
     }
+    if (!wrote_img && i < captured_views_.size() &&
+        !captured_views_[i].image_path.isEmpty()) {
+      const QString &cache = captured_views_[i].image_path;
+      if (QFileInfo::exists(cache) && QFile::copy(cache, abs_img)) {
+        wrote_img = true;
+      }
+    }
     if (!wrote_img) {
-      const QString src = QString::fromStdString(obs.source_path);
+      const QString src = resolve_obs_source_path(QString::fromStdString(obs.source_path));
       if (QFileInfo::exists(src) && QFile::copy(src, abs_img)) {
         wrote_img = true;
       }
@@ -2063,6 +2814,111 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
                      .arg(missing_images);
   }
   return true;
+}
+
+void SessionController::set_intrinsics_image_view_mode(IntrinsicsImageViewMode mode) {
+  intrinsics_view_mode_ = mode;
+}
+
+IntrinsicsImageViewMode SessionController::intrinsics_image_view_mode() const {
+  return intrinsics_view_mode_;
+}
+
+void SessionController::set_intrinsics_viz_options(const IntrinsicsVizOptions &options) {
+  intrinsics_viz_options_ = options;
+}
+
+IntrinsicsVizOptions SessionController::intrinsics_viz_options() const {
+  return intrinsics_viz_options_;
+}
+
+void SessionController::clear_intrinsics_linearity_heatmap() {
+  intrinsics_linearity_grid_.clear();
+}
+
+void SessionController::set_intrinsics_browse_sample(int index, bool evaluation_set) {
+  intrinsics_browse_index_ = index;
+  intrinsics_browse_eval_ = evaluation_set;
+}
+
+int SessionController::intrinsics_browse_sample_index() const {
+  return intrinsics_browse_index_;
+}
+
+bool SessionController::intrinsics_browse_is_evaluation() const {
+  return intrinsics_browse_eval_;
+}
+
+void SessionController::clear_intrinsics_browse() {
+  intrinsics_browse_index_ = -1;
+}
+
+QImage SessionController::decorate_intrinsics_preview(
+    const QImage &preview, bool lightweight) const {
+  if (!is_intrinsics() || preview.isNull() || !uses_tier4_intrinsics()) {
+    return preview;
+  }
+  const bool need_overlay = tier4_preview_needs_overlay();
+  if (lightweight && !need_overlay && intrinsics_viz_options_.draw_detection) {
+    return preview;
+  }
+
+  QImage base = preview;
+  if (!intrinsics_viz_options_.draw_detection) {
+    const cv::Mat raw = current_bgr();
+    if (!raw.empty()) {
+      const QImage raw_img = cv_bgr_to_qimage(raw);
+      if (!raw_img.isNull()) {
+        base = raw_img;
+      }
+    }
+  }
+
+  cv::Mat bgr = qimage_to_cv_bgr(base);
+  if (bgr.empty()) {
+    return preview;
+  }
+  const auto extras = core::calibration_extras_from_config(solve_options_);
+  apply_intrinsics_preview_overlay(
+      &bgr, intrinsics_view_mode_, intrinsics_viz_options_,
+      intrinsics_state_.collector(), last_board_metrics_,
+      intrinsics_linearity_grid_, extras.viz_pixel_cells);
+  QImage img = cv_bgr_to_qimage(bgr);
+  if (img.isNull()) {
+    return preview;
+  }
+  const cv::Mat K = intrinsics_state_.has_calibrated_model()
+      ? intrinsics_state_.calibrated_K()
+      : intrinsics_state_.provisional_model().camera_matrix;
+  const cv::Mat D = intrinsics_state_.has_calibrated_model()
+      ? intrinsics_state_.calibrated_D()
+      : intrinsics_state_.provisional_model().dist_coeffs;
+  if (intrinsics_view_mode_ == IntrinsicsImageViewMode::Source) {
+    return img;
+  }
+  return apply_intrinsics_view_mode(img, intrinsics_view_mode_, K, D, 0.0);
+}
+
+bool SessionController::intrinsics_browse_preview(QImage *out) const {
+  if (out == nullptr || !uses_tier4_intrinsics() || intrinsics_browse_index_ < 0) {
+    return false;
+  }
+  const auto &pool = intrinsics_browse_eval_
+                         ? intrinsics_state_.collector().evaluation()
+                         : intrinsics_state_.collector().training();
+  if (intrinsics_browse_index_ >= static_cast<int>(pool.size())) {
+    return false;
+  }
+  const auto &obs = pool[static_cast<size_t>(intrinsics_browse_index_)].observation;
+  if (obs.source_path.empty()) {
+    return false;
+  }
+  const cv::Mat bgr = cv::imread(obs.source_path, cv::IMREAD_COLOR);
+  if (bgr.empty()) {
+    return false;
+  }
+  *out = cv_bgr_to_qimage(bgr);
+  return !out->isNull();
 }
 
 }  // namespace gui

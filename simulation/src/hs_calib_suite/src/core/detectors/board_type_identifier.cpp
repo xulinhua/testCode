@@ -458,8 +458,9 @@ void try_circles(
 
   run("circles_symmetric", CircleGridPattern::Symmetric,
       {{7, 7}, {8, 8}, {9, 9}, {6, 6}, {5, 5}});
+  // OpenCV patternSize=(每行圆点数, 行数)；含常见 3×6 / 4×11
   run("circles_asymmetric", CircleGridPattern::Asymmetric,
-      {{4, 11}, {3, 9}, {5, 13}, {4, 9}});
+      {{3, 6}, {4, 11}, {3, 9}, {4, 9}, {5, 13}, {4, 5}, {5, 4}, {3, 5}});
 }
 
 void try_trihedral(

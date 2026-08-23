@@ -1,7 +1,9 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
+#include "hs_calib_suite/core/calibrators/intrinsics/intrinsics_config_params.hpp"
 #include "hs_calib_suite/core/base/detector_base.hpp"
 #include "hs_calib_suite/core/detectors/aruco_dict.hpp"
 #include "hs_calib_suite/core/targets/aprilgrid_target.hpp"
@@ -10,11 +12,16 @@
 namespace hs_calib {
 namespace core {
 
-/// \brief Kalibr Aprilgrid 检测器（AprilTag 36h11 + Kalibr 角点索引）
+/// \brief Kalibr 风格 Aprilgrid 检测（官方 AprilTag 库单次检测 + cornerSubPix）
 class AprilgridDetector : public DetectorBase {
 public:
-  /// \brief 构造并绑定 Aprilgrid 几何
-  explicit AprilgridDetector(AprilgridTarget target);
+  /// \param dictionary_name 映射到 AprilTag family，默认 DICT_APRILTAG_36h11
+  explicit AprilgridDetector(
+      AprilgridTarget target,
+      std::string dictionary_name = "DICT_APRILTAG_36h11",
+      AprilgridDetectorParams params = {});
+
+  const AprilgridDetectorParams &params() const { return params_; }
 
   /// \brief DetectorBase 入口
   std::vector<Correspondence> detect(
@@ -26,6 +33,8 @@ public:
 
 private:
   AprilgridTarget target_;
+  std::string dictionary_name_;
+  AprilgridDetectorParams params_;
 };
 
 }  // namespace core

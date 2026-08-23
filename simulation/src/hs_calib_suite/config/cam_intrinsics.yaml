@@ -1,4 +1,4 @@
-# hs_calib_suite — cam_intrinsics 默认参数（离线 GUI / 节点共用键名）
+# hs_calib_suite — cam_intrinsics 默认参数（对齐 Tier4 General profile）
 #
 # target:
 #   chessboard          — squares_x/y = 内角点列/行；square_length = 方格边长 (m)
@@ -9,8 +9,6 @@
 #   circles_asymmetric  — 同上，非对称圆点阵列
 #
 #model: brown_conrady | kannala_brandt | cmei
-#        （兼容别名 pinhole / fisheye / plumb_bob / equidistant / mei / omnidir）
-# dictionary: 仅 charuco / aruco_grid 使用
 
 squares_x: 9
 squares_y: 6
@@ -19,3 +17,26 @@ marker_length: 0.018
 target: chessboard
 dictionary: DICT_4X4_50
 model: brown_conrady
+intrinsics_profile: general
+intrinsics_solver: opencv
+
+# Tier4 chess_board_detector（YAML profile 默认多为 false）
+cb_adaptive: false
+cb_normalize: false
+cb_fast_check: false
+cb_resized_detection: false
+cb_resized_max_resolution: 1000
+cb_sub_pixel_refinement: true
+subpix_win: 11
+cb_max_lost_frames: 3
+cb_padding: 120
+
+# 采集门槛（General）
+min_confidence: 0.40
+min_diversity: 0.08
+collector_filter_speed: true
+collector_max_pixel_speed: 25.0
+collector_filter_reproj: true
+max_allowed_max_reprojection_error: 2.0
+max_allowed_rms_reprojection_error: 0.5
+gui.stats_backend: qt

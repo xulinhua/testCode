@@ -98,10 +98,29 @@ void ImageViewWidget::set_async_refresh(bool enabled, int interval_ms) {
 
 /// \brief 显示/隐藏缩放工具栏
 void ImageViewWidget::set_toolbar_visible(bool visible) {
-  ensure_toolbar();
-  if (toolbar_ != nullptr) {
-    toolbar_->setVisible(visible);
+  if (!visible) {
+    set_toolbar_style(ImageViewToolbarStyle::Hidden);
+    return;
   }
+  if (toolbar_style_ == ImageViewToolbarStyle::Hidden) {
+    set_toolbar_style(ImageViewToolbarStyle::OverlayZoomSave);
+  } else if (toolbar_ != nullptr) {
+    toolbar_->setVisible(true);
+  }
+}
+
+void ImageViewWidget::set_toolbar_style(ImageViewToolbarStyle style) {
+  toolbar_style_ = style;
+  if (style == ImageViewToolbarStyle::Hidden) {
+    if (toolbar_ != nullptr) {
+      toolbar_->setVisible(false);
+    }
+    return;
+  }
+  ensure_toolbar();
+  update_toolbar_buttons();
+  toolbar_->setVisible(true);
+  update_toolbar_geometry();
 }
 
 /// \brief 放大视图
@@ -279,17 +298,34 @@ void ImageViewWidget::ensure_toolbar() {
   btn_zoom_in_ = make_btn(QStringLiteral("+"), QStringLiteral("放大"));
   btn_zoom_out_ = make_btn(QStringLiteral("−"), QStringLiteral("缩小"));
   btn_fit_ = make_btn(QStringLiteral("适应"), QStringLiteral("双击也可适应窗口"), 48);
-  btn_save_ = make_btn(QStringLiteral("存"), QStringLiteral("保存当前帧"));
+  btn_reset_ = make_btn(QStringLiteral("1:1"), QStringLiteral("原始像素 1:1 显示"), 40);
   lay->addWidget(btn_zoom_in_);
   lay->addWidget(btn_zoom_out_);
   lay->addWidget(btn_fit_);
-  lay->addWidget(btn_save_);
+  lay->addWidget(btn_reset_);
   connect(btn_zoom_in_, &QToolButton::clicked, this, &ImageViewWidget::zoom_in);
   connect(btn_zoom_out_, &QToolButton::clicked, this, &ImageViewWidget::zoom_out);
   connect(btn_fit_, &QToolButton::clicked, this, &ImageViewWidget::fit_to_window);
-  connect(btn_save_, &QToolButton::clicked, this, &ImageViewWidget::on_save_clicked);
+  update_toolbar_buttons();
   toolbar_->adjustSize();
   update_toolbar_geometry();
+}
+
+void ImageViewWidget::update_toolbar_buttons() {
+  if (btn_reset_ == nullptr) {
+    return;
+  }
+  if (toolbar_style_ == ImageViewToolbarStyle::OverlayZoomSave) {
+    btn_reset_->setText(QStringLiteral("保存"));
+    btn_reset_->setToolTip(QStringLiteral("保存当前帧"));
+    disconnect(btn_reset_, nullptr, this, nullptr);
+    connect(btn_reset_, &QToolButton::clicked, this, &ImageViewWidget::prompt_save_image);
+  } else {
+    btn_reset_->setText(QStringLiteral("1:1"));
+    btn_reset_->setToolTip(QStringLiteral("原始像素 1:1 显示"));
+    disconnect(btn_reset_, nullptr, this, nullptr);
+    connect(btn_reset_, &QToolButton::clicked, this, &ImageViewWidget::reset_view);
+  }
 }
 
 /// \brief 将工具栏放到左上角
@@ -382,6 +418,11 @@ void ImageViewWidget::hide_pixel_info() {
   if (pixel_popup_ != nullptr) {
     pixel_popup_->hide();
   }
+}
+
+/// \brief 弹出保存对话框写当前帧
+void ImageViewWidget::prompt_save_image() {
+  on_save_clicked();
 }
 
 /// \brief 弹出保存对话框写当前帧

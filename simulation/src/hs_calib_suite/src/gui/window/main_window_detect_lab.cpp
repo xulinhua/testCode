@@ -7,6 +7,7 @@
 #include "hs_calib_suite/gui/panels/launcher_config_panel.hpp"
 #include "hs_calib_suite/gui/session/session_controller.hpp"
 
+#include <cmath>
 #include <map>
 #include <string>
 
@@ -49,7 +50,10 @@ bool lab_target_needs_tag_spacing(const QString &target) {
 }
 
 bool lab_target_needs_marker_len(const QString &target) {
-  return lab_target_needs_dictionary(target) || lab_target_needs_tag_spacing(target);
+  return lab_target_needs_dictionary(target) || lab_target_needs_tag_spacing(target) ||
+         target == QStringLiteral("circles_symmetric") ||
+         target == QStringLiteral("circles_asymmetric") ||
+         target == QStringLiteral("circle_grid");
 }
 
 bool lab_target_is_trihedral(const QString &target) {
@@ -74,6 +78,22 @@ void harden_form_field(QWidget *w) {
   w->setMinimumHeight(34);
   w->setMaximumHeight(40);
   w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+/// 标定板长度：UI 毫米，整数/小数各 4 位（与 launcher 一致）
+constexpr double kLabLenMmMin = 0.0001;
+constexpr double kLabLenMmMax = 9999.9999;
+constexpr int kLabLenMmDecimals = 4;
+constexpr double kLabLenMmStep = 0.1;
+
+void configure_lab_length_mm_spin(QDoubleSpinBox *s) {
+  if (s == nullptr) {
+    return;
+  }
+  s->setSuffix(QStringLiteral(" mm"));
+  s->setDecimals(kLabLenMmDecimals);
+  s->setRange(kLabLenMmMin, kLabLenMmMax);
+  s->setSingleStep(kLabLenMmStep);
 }
 
 }  // namespace
@@ -284,14 +304,25 @@ void MainWindow::apply_lab_params_to_session() {
   session_->set_calibrator_id(
       lab_target_is_trihedral(target) ? QStringLiteral("trihedral_oneshot")
                                       : QStringLiteral("cam_intrinsics"));
+  double square_for_session = 0.025;
+  if (spin_lab_square_len_ != nullptr) {
+    if (lab_target_needs_tag_spacing(target)) {
+      const double tag_mm =
+          spin_lab_marker_len_ != nullptr ? spin_lab_marker_len_->value() : 88.0;
+      square_for_session =
+          tag_mm > 1e-6 ? (spin_lab_square_len_->value() / tag_mm) : 0.3;
+    } else if (target == QStringLiteral("circles_asymmetric")) {
+      // UI：calib.io Diagonal Spacing → OpenCV squareSize = d/√2
+      square_for_session =
+          (spin_lab_square_len_->value() / 1000.0) / std::sqrt(2.0);
+    } else {
+      square_for_session = spin_lab_square_len_->value() / 1000.0;
+    }
+  }
   session_->set_board_params(
       spin_lab_squares_x_ != nullptr ? spin_lab_squares_x_->value() : 8,
       spin_lab_squares_y_ != nullptr ? spin_lab_squares_y_->value() : 8,
-      spin_lab_square_len_ != nullptr
-          ? (lab_target_needs_tag_spacing(target)
-                 ? spin_lab_square_len_->value()              // AprilGrid: 无量纲间距
-                 : spin_lab_square_len_->value() / 1000.0)    // UI mm → m
-          : 0.025);
+      square_for_session);
 
   std::map<std::string, std::string> opts = session_->solve_options();
   opts["target"] = target.toStdString();
@@ -303,8 +334,19 @@ void MainWindow::apply_lab_params_to_session() {
     opts["marker_length"] =
         std::to_string(spin_lab_marker_len_->value() / 1000.0);  // UI mm → m
   }
+  if (spin_lab_marker_len_ != nullptr &&
+      (target == QStringLiteral("circles_symmetric") ||
+       target == QStringLiteral("circles_asymmetric") ||
+       target == QStringLiteral("circle_grid"))) {
+    opts["circle_diameter"] =
+        std::to_string(spin_lab_marker_len_->value() / 1000.0);
+  }
   if (spin_lab_square_len_ != nullptr && lab_target_needs_tag_spacing(target)) {
-    opts["tag_spacing"] = std::to_string(spin_lab_square_len_->value());
+    const double tag_mm =
+        spin_lab_marker_len_ != nullptr ? spin_lab_marker_len_->value() : 88.0;
+    const double ratio =
+        tag_mm > 1e-6 ? (spin_lab_square_len_->value() / tag_mm) : 0.3;
+    opts["tag_spacing"] = std::to_string(ratio);
   }
   // 局部棋盘：关 fast_check；完整：开 fast_check
   if (target == QStringLiteral("chessboard")) {
@@ -327,24 +369,11 @@ void MainWindow::sync_lab_target_defaults() {
   }
   if (spin_lab_marker_len_ != nullptr) {
     spin_lab_marker_len_->setEnabled(need_marker);
-    spin_lab_marker_len_->setSuffix(QStringLiteral(" mm"));
-    spin_lab_marker_len_->setDecimals(2);
-    spin_lab_marker_len_->setRange(1.0, 1000.0);
-    spin_lab_marker_len_->setSingleStep(0.5);
+    configure_lab_length_mm_spin(spin_lab_marker_len_);
   }
   if (spin_lab_square_len_ != nullptr) {
     spin_lab_square_len_->setEnabled(true);
-    if (lab_target_needs_tag_spacing(target)) {
-      spin_lab_square_len_->setSuffix(QString());
-      spin_lab_square_len_->setDecimals(3);
-      spin_lab_square_len_->setRange(0.01, 2.0);
-      spin_lab_square_len_->setSingleStep(0.05);
-    } else {
-      spin_lab_square_len_->setSuffix(QStringLiteral(" mm"));
-      spin_lab_square_len_->setDecimals(2);
-      spin_lab_square_len_->setRange(1.0, 1000.0);
-      spin_lab_square_len_->setSingleStep(0.5);
-    }
+    configure_lab_length_mm_spin(spin_lab_square_len_);
   }
 
   if (spin_lab_squares_x_ == nullptr || spin_lab_squares_y_ == nullptr) {
@@ -363,13 +392,25 @@ void MainWindow::sync_lab_target_defaults() {
     spin_lab_squares_x_->setValue(9);
     spin_lab_squares_y_->setValue(6);
   } else if (target == QStringLiteral("circles_asymmetric")) {
-    spin_lab_squares_x_->setValue(4);
-    spin_lab_squares_y_->setValue(11);
+    spin_lab_squares_x_->setValue(3);  // 每行圆点数
+    spin_lab_squares_y_->setValue(6);  // 行数
+    if (spin_lab_square_len_ != nullptr) {
+      spin_lab_square_len_->setValue(12.0);  // calib.io Diagonal Spacing
+    }
+    if (spin_lab_marker_len_ != nullptr) {
+      spin_lab_marker_len_->setValue(5.0);  // 直径
+    }
   } else if (
       target == QStringLiteral("circles_symmetric") ||
       target == QStringLiteral("circle_grid")) {
     spin_lab_squares_x_->setValue(7);
     spin_lab_squares_y_->setValue(7);
+    if (spin_lab_square_len_ != nullptr) {
+      spin_lab_square_len_->setValue(40.0);
+    }
+    if (spin_lab_marker_len_ != nullptr) {
+      spin_lab_marker_len_->setValue(20.0);
+    }
   } else if (target == QStringLiteral("aruco")) {
     if (combo_lab_dictionary_ != nullptr) {
       const int didx = combo_lab_dictionary_->findText(QStringLiteral("DICT_6X6_1000"));
@@ -390,7 +431,14 @@ void MainWindow::sync_lab_target_defaults() {
       spin_lab_marker_len_->setValue(88.0);
     }
     if (spin_lab_square_len_ != nullptr) {
-      spin_lab_square_len_->setValue(0.3);  // tagSpacing 无量纲
+      spin_lab_square_len_->setValue(0.3 * 88.0);  // 空白边距 mm
+    }
+    if (combo_lab_dictionary_ != nullptr) {
+      const int didx =
+          combo_lab_dictionary_->findText(QStringLiteral("DICT_APRILTAG_36h11"));
+      if (didx >= 0) {
+        combo_lab_dictionary_->setCurrentIndex(didx);
+      }
     }
   } else if (target == QStringLiteral("charuco")) {
     spin_lab_squares_x_->setValue(5);
@@ -784,7 +832,10 @@ QWidget *MainWindow::build_lab_board_form(QWidget *parent) {
        QStringLiteral("DICT_5X5_100"), QStringLiteral("DICT_5X5_250"),
        QStringLiteral("DICT_6X6_50"), QStringLiteral("DICT_7X7_1000"),
        QStringLiteral("DICT_ARUCO_ORIGINAL"),
-       QStringLiteral("DICT_APRILTAG_36h11")});
+       QStringLiteral("DICT_APRILTAG_36h11"),
+       QStringLiteral("DICT_APRILTAG_36h10"),
+       QStringLiteral("DICT_APRILTAG_25h9"),
+       QStringLiteral("DICT_APRILTAG_16h5")});
   harden_form_field(combo_lab_dictionary_);
   form->addRow(QStringLiteral("字典"), combo_lab_dictionary_);
 
@@ -801,20 +852,14 @@ QWidget *MainWindow::build_lab_board_form(QWidget *parent) {
   form->addRow(QStringLiteral("squares_y"), spin_lab_squares_y_);
 
   spin_lab_square_len_ = new QDoubleSpinBox(form_host);
-  spin_lab_square_len_->setDecimals(2);
-  spin_lab_square_len_->setRange(1.0, 1000.0);
-  spin_lab_square_len_->setSingleStep(0.5);
   spin_lab_square_len_->setValue(25.0);
-  spin_lab_square_len_->setSuffix(QStringLiteral(" mm"));
+  configure_lab_length_mm_spin(spin_lab_square_len_);
   harden_form_field(spin_lab_square_len_);
   form->addRow(QStringLiteral("方格边长"), spin_lab_square_len_);
 
   spin_lab_marker_len_ = new QDoubleSpinBox(form_host);
-  spin_lab_marker_len_->setDecimals(2);
-  spin_lab_marker_len_->setRange(1.0, 1000.0);
-  spin_lab_marker_len_->setSingleStep(0.5);
   spin_lab_marker_len_->setValue(18.0);
-  spin_lab_marker_len_->setSuffix(QStringLiteral(" mm"));
+  configure_lab_length_mm_spin(spin_lab_marker_len_);
   harden_form_field(spin_lab_marker_len_);
   form->addRow(QStringLiteral("码边长"), spin_lab_marker_len_);
 

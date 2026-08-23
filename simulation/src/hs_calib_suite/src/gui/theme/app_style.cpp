@@ -1,6 +1,12 @@
 #include "hs_calib_suite/gui/theme/app_style.hpp"
 
+#include <QColor>
+#include <QDir>
+#include <QImage>
+#include <QPainter>
+#include <QPolygonF>
 #include <QSettings>
+#include <QStandardPaths>
 
 namespace hs_calib {
 namespace gui {
@@ -280,8 +286,54 @@ ThemePalette palette_for(ThemeId id) {
   }
 }
 
+/// \brief 用 QPainter 生成 PNG 小三角（Qt QSS 对 SVG/CSS 三角都不稳）
+QString ensure_chevron_png(const QString &name, const QString &fill, bool point_up) {
+  const QString dir =
+      QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
+      QStringLiteral("/hs_calib_suite/theme");
+  QDir().mkpath(dir);
+  const QString path = dir + QLatin1Char('/') + name + QStringLiteral(".png");
+
+  QColor color(fill);
+  if (!color.isValid()) {
+    color = QColor(120, 130, 145);
+  }
+
+  QImage img(20, 20, QImage::Format_ARGB32_Premultiplied);
+  img.fill(Qt::transparent);
+  {
+    QPainter painter(&img);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    QPolygonF poly;
+    if (point_up) {
+      poly << QPointF(10.0, 5.0) << QPointF(15.5, 13.0) << QPointF(4.5, 13.0);
+    } else {
+      poly << QPointF(4.5, 7.0) << QPointF(15.5, 7.0) << QPointF(10.0, 15.0);
+    }
+    painter.drawPolygon(poly);
+  }
+  img.save(path, "PNG");
+  // QSS 更吃本地路径；带空格时用引号包住
+  return path;
+}
+
 /// \brief 用色板填充应用级 QSS 模板
 QString fill_template(const ThemePalette &p) {
+  const QString spin_up =
+      ensure_chevron_png(QStringLiteral("spin_up"), p.fg_muted, true);
+  const QString spin_down =
+      ensure_chevron_png(QStringLiteral("spin_down"), p.fg_muted, false);
+  const QString spin_up_hover =
+      ensure_chevron_png(QStringLiteral("spin_up_hover"), p.fg, true);
+  const QString spin_down_hover =
+      ensure_chevron_png(QStringLiteral("spin_down_hover"), p.fg, false);
+  const QString combo_down =
+      ensure_chevron_png(QStringLiteral("combo_down"), p.fg_muted, false);
+  const QString combo_down_hover =
+      ensure_chevron_png(QStringLiteral("combo_down_hover"), p.fg, false);
+
   QString qss = QStringLiteral(R"qss(
 * {
   font-family: "Noto Sans CJK SC", "Noto Sans", "DejaVu Sans",
@@ -866,6 +918,73 @@ QGroupBox#LauncherGroup QCheckBox {
   font-weight: 400;
 }
 
+/* Intrinsics parameter / detail dialogs */
+QDialog#IntrinsicsParamDialog {
+  background-color: __BG__;
+}
+
+QDialog#IntrinsicsParamDialog QLabel#PageTitle {
+  font-size: 18px;
+  font-weight: 700;
+  padding-bottom: 0;
+}
+
+QDialog#IntrinsicsParamDialog QLabel#PageSubtitle {
+  font-size: 12px;
+  padding-bottom: 0;
+}
+
+QFrame#DialogDivider {
+  background-color: __BORDER__;
+  border: none;
+  max-height: 1px;
+}
+
+QLabel#ParamFieldLabel {
+  color: __FG_MUTED__;
+  font-size: 12px;
+  min-width: 140px;
+}
+
+QLabel#ParamValueLabel {
+  color: __FG__;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+}
+
+QScrollArea#IntrinsicsDialogScroll {
+  background-color: transparent;
+  border: none;
+}
+
+QDialog#IntrinsicsParamDialog QGroupBox#LauncherGroup {
+  padding: 12px 14px 14px 14px;
+}
+
+QDialog#IntrinsicsParamDialog QSpinBox,
+QDialog#IntrinsicsParamDialog QDoubleSpinBox,
+QDialog#IntrinsicsParamDialog QComboBox {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+QDialog#IntrinsicsParamDialog QCheckBox {
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+QStackedWidget#IntrinsicsDetectorStack {
+  background-color: transparent;
+}
+
+QLabel#StatsPlot {
+  background-color: __BG_INPUT__;
+  border: 1px solid __BORDER__;
+  border-radius: 8px;
+  padding: 4px;
+}
+
 QTextEdit, QPlainTextEdit, QLineEdit {
   background-color: __BG_INPUT__;
   color: __FG__;
@@ -928,12 +1047,17 @@ QComboBox::drop-down {
 }
 
 QComboBox::down-arrow {
-  width: 0px;
-  height: 0px;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid __FG_MUTED__;
-  margin-right: 8px;
+  image: url("__COMBO_DOWN__");
+  width: 12px;
+  height: 12px;
+}
+
+QComboBox::drop-down:hover {
+  background-color: __BG_BUTTON_HOVER__;
+}
+
+QComboBox::down-arrow:on {
+  image: url("__COMBO_DOWN_HOVER__");
 }
 
 QComboBox QAbstractItemView {
@@ -967,8 +1091,8 @@ QSpinBox::up-button, QDoubleSpinBox::up-button,
 QAbstractSpinBox::up-button {
   subcontrol-origin: border;
   subcontrol-position: top right;
-  width: 22px;
-  height: 16px;
+  width: 24px;
+  height: 18px;
   border: none;
   border-left: 1px solid __BORDER__;
   background-color: __BG_BUTTON__;
@@ -979,8 +1103,8 @@ QSpinBox::down-button, QDoubleSpinBox::down-button,
 QAbstractSpinBox::down-button {
   subcontrol-origin: border;
   subcontrol-position: bottom right;
-  width: 22px;
-  height: 16px;
+  width: 24px;
+  height: 18px;
   border: none;
   border-left: 1px solid __BORDER__;
   background-color: __BG_BUTTON__;
@@ -994,20 +1118,32 @@ QAbstractSpinBox::down-button:hover {
   background-color: __BG_BUTTON_HOVER__;
 }
 
+QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed,
+QAbstractSpinBox::up-button:pressed,
+QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed,
+QAbstractSpinBox::down-button:pressed {
+  background-color: __BG_BUTTON_PRESSED__;
+}
+
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow, QAbstractSpinBox::up-arrow {
-  width: 0px;
-  height: 0px;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-bottom: 5px solid __FG_MUTED__;
+  image: url("__SPIN_UP__");
+  width: 12px;
+  height: 12px;
 }
 
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow, QAbstractSpinBox::down-arrow {
-  width: 0px;
-  height: 0px;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid __FG_MUTED__;
+  image: url("__SPIN_DOWN__");
+  width: 12px;
+  height: 12px;
+}
+
+QSpinBox::up-arrow:hover, QDoubleSpinBox::up-arrow:hover, QAbstractSpinBox::up-arrow:hover {
+  image: url("__SPIN_UP_HOVER__");
+}
+
+QSpinBox::down-arrow:hover, QDoubleSpinBox::down-arrow:hover,
+QAbstractSpinBox::down-arrow:hover {
+  image: url("__SPIN_DOWN_HOVER__");
 }
 
 QSplitter::handle {
@@ -1324,6 +1460,12 @@ QLabel#StatusBarTask {
   put("__ACCENT__", p.accent);
   put("__SELECTION__", p.selection);
   put("__SPLITTER__", p.splitter);
+  put("__SPIN_UP__", spin_up);
+  put("__SPIN_DOWN__", spin_down);
+  put("__SPIN_UP_HOVER__", spin_up_hover);
+  put("__SPIN_DOWN_HOVER__", spin_down_hover);
+  put("__COMBO_DOWN__", combo_down);
+  put("__COMBO_DOWN_HOVER__", combo_down_hover);
   return qss;
 }
 
