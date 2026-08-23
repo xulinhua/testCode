@@ -8,6 +8,8 @@
 
 #include <Eigen/Core>
 
+#include <rclcpp/rclcpp.hpp>
+
 namespace hs_calib {
 namespace gui {
 
@@ -37,6 +39,8 @@ public:
 
   /// \brief 泵一次 TF 节点回调
   void spin_some();
+
+  rclcpp::Node::SharedPtr ros_node() const;
 
 private:
   struct Impl;

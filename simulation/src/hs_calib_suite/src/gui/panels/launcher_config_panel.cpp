@@ -2,6 +2,7 @@
 #include "hs_calib_suite/gui/panels/launcher_config_panel.hpp"
 
 #include "hs_calib_suite/gui/session/session_controller.hpp"
+#include "hs_calib_suite/gui/task_flow/task_flow.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStringList>
 #include <QVBoxLayout>
 
@@ -214,6 +216,54 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     auto *topic_lay = new QHBoxLayout(topic_row_);
     pack_field_row(topic_lay, combo_image_topic_, btn_refresh_topics_);
 
+    combo_left_image_topic_ = new QComboBox(host);
+    combo_left_image_topic_->setEditable(true);
+    combo_left_image_topic_->setInsertPolicy(QComboBox::NoInsert);
+    combo_left_image_topic_->lineEdit()->setPlaceholderText(
+        QStringLiteral("/cam_left/color/image_raw"));
+    combo_right_image_topic_ = new QComboBox(host);
+    combo_right_image_topic_->setEditable(true);
+    combo_right_image_topic_->setInsertPolicy(QComboBox::NoInsert);
+    combo_right_image_topic_->lineEdit()->setPlaceholderText(
+        QStringLiteral("/cam_right/color/image_raw"));
+    connect(
+        combo_left_image_topic_, &QComboBox::currentTextChanged, this,
+        &LauncherConfigPanel::image_topic_changed);
+    connect(
+        combo_right_image_topic_, &QComboBox::currentTextChanged, this,
+        &LauncherConfigPanel::image_topic_changed);
+    stereo_topic_row_ = new QWidget(host);
+    auto *stereo_lay = new QVBoxLayout(stereo_topic_row_);
+    stereo_lay->setContentsMargins(0, 0, 0, 0);
+    stereo_lay->setSpacing(6);
+    auto *left_row = new QWidget(host);
+    auto *left_lay = new QHBoxLayout(left_row);
+    left_lay->setContentsMargins(0, 0, 0, 0);
+    auto *left_lbl = new QLabel(QStringLiteral("左目"), host);
+    left_lbl->setObjectName(QStringLiteral("Muted"));
+    left_lay->addWidget(left_lbl);
+    left_lay->addWidget(combo_left_image_topic_, 1);
+    auto *right_row = new QWidget(host);
+    auto *right_lay = new QHBoxLayout(right_row);
+    right_lay->setContentsMargins(0, 0, 0, 0);
+    auto *right_lbl = new QLabel(QStringLiteral("右目"), host);
+    right_lbl->setObjectName(QStringLiteral("Muted"));
+    right_lay->addWidget(right_lbl);
+    right_lay->addWidget(combo_right_image_topic_, 1);
+    auto *stereo_refresh_row = new QWidget(host);
+    auto *stereo_refresh_lay = new QHBoxLayout(stereo_refresh_row);
+    stereo_refresh_lay->setContentsMargins(0, 0, 0, 0);
+    stereo_refresh_lay->addStretch(1);
+    auto *btn_refresh_stereo = new QPushButton(QStringLiteral("刷新"), host);
+    btn_refresh_stereo->setObjectName(QStringLiteral("GhostButton"));
+    connect(
+        btn_refresh_stereo, &QPushButton::clicked, this,
+        &LauncherConfigPanel::refresh_topics_clicked);
+    stereo_refresh_lay->addWidget(btn_refresh_stereo);
+    stereo_lay->addWidget(left_row);
+    stereo_lay->addWidget(right_row);
+    stereo_lay->addWidget(stereo_refresh_row);
+
     chk_use_rectified_ = new QCheckBox(QStringLiteral("图像已去畸变"), host);
     chk_use_rectified_->setChecked(false);
 
@@ -245,11 +295,13 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     add_form_row(form, QStringLiteral("模式"), combo_source_mode_);
     add_form_row(form, QStringLiteral("图片目录"), offline_row_);
     add_form_row(form, QStringLiteral("图像话题"), topic_row_);
+    add_form_row(form, QStringLiteral("双目话题"), stereo_topic_row_);
     add_form_row(form, QStringLiteral("Bag 路径"), bag_path_row_);
     add_form_row(form, QStringLiteral("Bag 话题"), bag_topic_row_);
     add_form_row(form, QStringLiteral("最多导出"), spin_bag_max_frames_);
     add_form_row(form, QStringLiteral("图像标记"), chk_use_rectified_);
-    ds_root->addWidget(make_group(QStringLiteral("图像源"), host));
+    image_source_group_ = make_group(QStringLiteral("图像源"), host);
+    ds_root->addWidget(image_source_group_);
     refresh_source_mode_rows();
   }
 
@@ -353,7 +405,6 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     stereo_extrinsics_group_ =
         make_group(QStringLiteral("双目内参 YAML"), stereo_extrinsics_block_);
     ds_root->addWidget(stereo_extrinsics_group_);
-    stereo_extrinsics_group_->setVisible(false);
   }
 
   // ---- TF / 位姿源（手眼等；内参标定不显示）----
@@ -435,9 +486,7 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     add_form_row(form, QStringLiteral("结果 frames"), export_tf_row_);
     tf_source_block_ = make_group(QStringLiteral("TF / 位姿"), host);
     ds_root->addWidget(tf_source_block_);
-    tf_source_block_->setVisible(false);
   }
-  ds_root->addStretch(1);
 
   // ========== 标定设置页：三块 ==========
 
@@ -732,6 +781,10 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     combo_stereo_side_ = new QComboBox(host);
     combo_stereo_side_->addItem(QStringLiteral("left"), QStringLiteral("left"));
     combo_stereo_side_->addItem(QStringLiteral("right"), QStringLiteral("right"));
+    chk_stereo_joint_refine_ = new QCheckBox(QStringLiteral("联合精化内参 (stereoCalibrate)"), host);
+    chk_stereo_joint_refine_->setChecked(false);
+    chk_stereo_joint_refine_->setToolTip(
+        QStringLiteral("开启后 stereoCalibrate 同时优化左右内参；默认固定已标定内参"));
     edit_export_path_ = new QLineEdit(host);
     edit_export_path_->setPlaceholderText(QStringLiteral("~/calib_out"));
 
@@ -742,6 +795,7 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     add_form_row(form, QString(), solver_flags_row2_);
     add_form_row(form, QStringLiteral("手眼算法"), combo_handeye_method_);
     add_form_row(form, QStringLiteral("双目采集侧"), combo_stereo_side_);
+    add_form_row(form, QStringLiteral("立体联合精化"), chk_stereo_joint_refine_);
     add_form_row(form, QStringLiteral("导出目录"), edit_export_path_);
     solver_intrinsics_block_ = make_group(QStringLiteral("② 相机模型与求解"), host);
     root->addWidget(solver_intrinsics_block_);
@@ -785,7 +839,8 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     root->addWidget(capture_criteria_block_);
   }
 
-  root->addStretch(1);
+  finalize_task_flow_layout();
+  apply_task_flow_layout();
   update_board_param_visibility();
 }
 
@@ -828,6 +883,7 @@ void LauncherConfigPanel::refresh_source_mode_rows() {
   set_form_row_visible(form_ros_, spin_bag_max_frames_, bag);
   // 去畸变标记与图像内容相关，各模式均可选
   set_form_row_visible(form_ros_, chk_use_rectified_, true);
+  refresh_image_topic_rows();
 }
 
 /// \brief 按内参源模式显隐 CameraInfo / YAML 行
@@ -1109,15 +1165,13 @@ void LauncherConfigPanel::set_calibrator_id(const QString &id) {
   const bool needs_tf = he || tri;
 
   if (intrinsics_source_block_ != nullptr) {
-    intrinsics_source_block_->setVisible(!se);
+    (void)intrinsic;
   }
   if (stereo_extrinsics_group_ != nullptr) {
-    stereo_extrinsics_group_->setVisible(se);
-  } else if (stereo_extrinsics_block_ != nullptr) {
-    stereo_extrinsics_block_->setVisible(se);
+    (void)se;
   }
   if (tf_source_block_ != nullptr) {
-    tf_source_block_->setVisible(needs_tf);
+    (void)needs_tf;
   }
 
   if (form_solver_ != nullptr) {
@@ -1129,6 +1183,30 @@ void LauncherConfigPanel::set_calibrator_id(const QString &id) {
     set_form_row_visible(form_solver_, solver_flags_row2_, intrinsic);
     set_form_row_visible(form_solver_, combo_handeye_method_, he);
     set_form_row_visible(form_solver_, combo_stereo_side_, stereo);
+    set_form_row_visible(form_solver_, chk_stereo_joint_refine_, stereo && !se);
+    if (combo_stereo_side_) {
+      combo_stereo_side_->blockSignals(true);
+      const QString prev = combo_stereo_side_->currentData().toString();
+      combo_stereo_side_->clear();
+      if (id == QStringLiteral("stereo_intrinsics")) {
+        combo_stereo_side_->addItem(
+            QStringLiteral("成对采集"), QStringLiteral("paired"));
+        combo_stereo_side_->addItem(
+            QStringLiteral("左目补采"), QStringLiteral("left"));
+        combo_stereo_side_->addItem(
+            QStringLiteral("右目补采"), QStringLiteral("right"));
+        const int pidx = combo_stereo_side_->findData(
+            prev.isEmpty() ? QStringLiteral("paired") : prev);
+        combo_stereo_side_->setCurrentIndex(pidx >= 0 ? pidx : 0);
+      } else if (se) {
+        combo_stereo_side_->addItem(QStringLiteral("left"), QStringLiteral("left"));
+        combo_stereo_side_->addItem(QStringLiteral("right"), QStringLiteral("right"));
+        const int pidx = combo_stereo_side_->findData(
+            prev.isEmpty() ? QStringLiteral("left") : prev);
+        combo_stereo_side_->setCurrentIndex(pidx >= 0 ? pidx : 0);
+      }
+      combo_stereo_side_->blockSignals(false);
+    }
   }
 
   const bool entering_tri = tri && prev != id;
@@ -1181,6 +1259,7 @@ void LauncherConfigPanel::set_calibrator_id(const QString &id) {
     }
   }
   update_board_param_visibility();
+  apply_task_flow_layout();
 }
 
 bool LauncherConfigPanel::intrinsics_mode_is_tier4() const {
@@ -1303,16 +1382,47 @@ std::map<std::string, std::string> LauncherConfigPanel::to_config_map() const {
          }
          return tier4_profile_id();
        }()},
+      {"stereo_capture_mode",
+       [&]() -> std::string {
+         if (!combo_stereo_side_) {
+           return "paired";
+         }
+         const QVariant d = combo_stereo_side_->currentData();
+         if (d.isValid() && !d.toString().isEmpty()) {
+           return d.toString().toStdString();
+         }
+         return "paired";
+       }()},
       {"stereo_side",
        [&]() -> std::string {
          if (!combo_stereo_side_) {
            return "left";
          }
          const QVariant d = combo_stereo_side_->currentData();
-         if (d.isValid() && !d.toString().isEmpty()) {
-           return d.toString().toStdString();
+         const QString mode =
+             d.isValid() && !d.toString().isEmpty() ? d.toString() : QStringLiteral("left");
+         if (mode == QStringLiteral("paired")) {
+           return "left";
          }
-         return "left";
+         return mode.toStdString();
+       }()},
+      {"generate_stereo_rectified", "true"},
+      {"stereo_joint_refine",
+       chk_stereo_joint_refine_ && chk_stereo_joint_refine_->isChecked() ? "true" : "false"},
+      {"stereo_max_sync_ms", "30"},
+      {"left_image_topic",
+       [&]() -> std::string {
+         if (!combo_left_image_topic_) {
+           return {};
+         }
+         return combo_left_image_topic_->currentText().trimmed().toStdString();
+       }()},
+      {"right_image_topic",
+       [&]() -> std::string {
+         if (!combo_right_image_topic_) {
+           return {};
+         }
+         return combo_right_image_topic_->currentText().trimmed().toStdString();
        }()},
       {"min_views", std::to_string(min_views())},
       {"min_confidence", std::to_string(min_confidence())},
@@ -1568,6 +1678,162 @@ void LauncherConfigPanel::apply_project_frames(
 /// \brief 导出目录提示路径
 QString LauncherConfigPanel::export_dir_hint() const {
   return edit_export_path_ ? edit_export_path_->text().trimmed() : QString();
+}
+
+void LauncherConfigPanel::move_block_to_page(QWidget *block, QWidget *page) {
+  if (block == nullptr || page == nullptr) {
+    return;
+  }
+  if (block->parentWidget() == page) {
+    return;
+  }
+  block->setParent(page);
+  if (auto *lay = qobject_cast<QVBoxLayout *>(page->layout())) {
+    lay->addWidget(block);
+  }
+}
+
+void LauncherConfigPanel::finalize_task_flow_layout() {
+  auto *ds_root = qobject_cast<QVBoxLayout *>(data_source_panel_->layout());
+  if (ds_root == nullptr) {
+    return;
+  }
+
+  task_data_source_title_ = new QLabel(data_source_panel_);
+  task_data_source_title_->setObjectName(QStringLiteral("TaskFlowTitle"));
+  task_data_source_title_->setWordWrap(true);
+
+  ds_root->removeWidget(intrinsics_source_block_);
+  ds_root->removeWidget(stereo_extrinsics_group_);
+  ds_root->removeWidget(tf_source_block_);
+
+  data_source_stack_ = new QStackedWidget(data_source_panel_);
+  auto *page_intrinsics = new QWidget(data_source_panel_);
+  page_intrinsics->setLayout(new QVBoxLayout());
+  page_intrinsics->layout()->setContentsMargins(0, 0, 0, 0);
+  move_block_to_page(intrinsics_source_block_, page_intrinsics);
+
+  auto *page_stereo_yaml = new QWidget(data_source_panel_);
+  page_stereo_yaml->setLayout(new QVBoxLayout());
+  page_stereo_yaml->layout()->setContentsMargins(0, 0, 0, 0);
+  move_block_to_page(stereo_extrinsics_group_, page_stereo_yaml);
+
+  auto *page_placeholder = new QWidget(data_source_panel_);
+  auto *placeholder_lay = new QVBoxLayout(page_placeholder);
+  placeholder_lay->addStretch(1);
+  data_source_stack_->addWidget(page_intrinsics);
+  data_source_stack_->addWidget(page_stereo_yaml);
+  data_source_stack_->addWidget(page_placeholder);
+
+  ds_root->insertWidget(0, task_data_source_title_);
+  ds_root->insertWidget(2, data_source_stack_);
+  ds_root->addWidget(tf_source_block_);
+  ds_root->addStretch(1);
+
+  auto *root = qobject_cast<QVBoxLayout *>(layout());
+  if (root == nullptr) {
+    return;
+  }
+  task_setup_title_ = new QLabel(this);
+  task_setup_title_->setObjectName(QStringLiteral("TaskFlowTitle"));
+  task_setup_title_->setWordWrap(true);
+
+  root->removeWidget(board_params_block_);
+  root->removeWidget(solver_intrinsics_block_);
+  root->removeWidget(capture_criteria_block_);
+
+  setup_stack_ = new QStackedWidget(this);
+  setup_stack_pages_.clear();
+  for (int i = 0; i < 5; ++i) {
+    auto *page = new QWidget(this);
+    page->setLayout(new QVBoxLayout());
+    page->layout()->setContentsMargins(0, 0, 0, 0);
+    setup_stack_pages_.push_back(page);
+    setup_stack_->addWidget(page);
+  }
+  move_block_to_page(board_params_block_, setup_stack_pages_[0]);
+  move_block_to_page(solver_intrinsics_block_, setup_stack_pages_[0]);
+  move_block_to_page(capture_criteria_block_, setup_stack_pages_[0]);
+
+  root->insertWidget(0, task_setup_title_);
+  root->insertWidget(1, setup_stack_, 1);
+  root->addStretch(1);
+}
+
+bool LauncherConfigPanel::uses_stereo_dual_topics() const {
+  return calibrator_id_ == QStringLiteral("stereo_intrinsics");
+}
+
+void LauncherConfigPanel::refresh_image_topic_rows() {
+  const int mode =
+      combo_source_mode_ != nullptr ? combo_source_mode_->currentData().toInt()
+                                    : static_cast<int>(SourceMode::Offline);
+  const bool ros = mode == static_cast<int>(SourceMode::RosTopic);
+  const bool bag = mode == static_cast<int>(SourceMode::RosBag);
+  const bool dual = uses_stereo_dual_topics() && (ros || bag);
+  set_form_row_visible(form_ros_, topic_row_, ros && !dual);
+  set_form_row_visible(form_ros_, stereo_topic_row_, dual);
+  set_form_row_visible(form_ros_, bag_topic_row_, bag && !dual);
+}
+
+QString LauncherConfigPanel::active_image_topic() const {
+  if (uses_stereo_dual_topics() && combo_left_image_topic_ != nullptr &&
+      combo_right_image_topic_ != nullptr && combo_stereo_side_ != nullptr) {
+    const QString side = combo_stereo_side_->currentData().toString();
+    if (side == QStringLiteral("right")) {
+      return combo_right_image_topic_->currentText().trimmed();
+    }
+    return combo_left_image_topic_->currentText().trimmed();
+  }
+  if (combo_image_topic_ == nullptr) {
+    return {};
+  }
+  return combo_image_topic_->currentText().trimmed();
+}
+
+void LauncherConfigPanel::apply_task_flow_layout() {
+  const TaskFlowKind flow = task_flow_from_calibrator_id(calibrator_id_);
+  if (task_data_source_title_ != nullptr) {
+    task_data_source_title_->setText(
+        task_flow_step_title(flow, QStringLiteral("数据源设置")));
+  }
+  if (task_setup_title_ != nullptr) {
+    task_setup_title_->setText(
+        task_flow_step_title(flow, QStringLiteral("标定设置")));
+  }
+
+  refresh_image_topic_rows();
+
+  if (data_source_stack_ != nullptr) {
+    switch (flow) {
+      case TaskFlowKind::MonoIntrinsics:
+      case TaskFlowKind::StereoIntrinsics:
+      case TaskFlowKind::HandEye:
+        data_source_stack_->setCurrentIndex(0);
+        break;
+      case TaskFlowKind::StereoExtrinsics:
+        data_source_stack_->setCurrentIndex(1);
+        break;
+      case TaskFlowKind::Trihedral:
+        data_source_stack_->setCurrentIndex(2);
+        break;
+    }
+  }
+
+  if (tf_source_block_ != nullptr) {
+    tf_source_block_->setVisible(
+        flow == TaskFlowKind::Trihedral || flow == TaskFlowKind::HandEye);
+  }
+
+  if (setup_stack_ != nullptr && !setup_stack_pages_.empty()) {
+    const int idx = static_cast<int>(flow);
+    setup_stack_->setCurrentIndex(idx);
+    if (idx >= 0 && idx < setup_stack_pages_.size()) {
+      move_block_to_page(board_params_block_, setup_stack_pages_[idx]);
+      move_block_to_page(solver_intrinsics_block_, setup_stack_pages_[idx]);
+      move_block_to_page(capture_criteria_block_, setup_stack_pages_[idx]);
+    }
+  }
 }
 
 }  // namespace gui

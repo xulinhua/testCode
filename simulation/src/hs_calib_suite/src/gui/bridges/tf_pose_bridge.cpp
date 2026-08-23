@@ -53,9 +53,11 @@ void TfPoseBridge::set_frames(const QString &base_frame, const QString &gripper_
 
 /// \brief 泵一次 TF 节点回调
 void TfPoseBridge::spin_some() {
-  if (impl_ && impl_->node && rclcpp::ok()) {
-    rclcpp::spin_some(impl_->node);
-  }
+  // 回调由 RosExecutorHub 后台 MultiThreadedExecutor 驱动
+}
+
+rclcpp::Node::SharedPtr TfPoseBridge::ros_node() const {
+  return impl_ ? impl_->node : nullptr;
 }
 
 /// \brief 查询最新 base→gripper 变换

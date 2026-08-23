@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <atomic>
 
 #include <QMainWindow>
 #include <QStackedWidget>
@@ -11,6 +12,9 @@
 #include "hs_calib_suite/gui/session/session_controller.hpp"
 #include "hs_calib_suite/gui/projects/project_catalog.hpp"
 #include "hs_calib_suite/gui/projects/project_workspace.hpp"
+#include "hs_calib_suite/gui/bridges/bag_image_loader.hpp"
+#include "hs_calib_suite/gui/bridges/ros_bag_frame_reader.hpp"
+#include "hs_calib_suite/core/review/review_diagnostics.hpp"
 
 class QAction;
 class QActionGroup;
@@ -41,6 +45,8 @@ namespace hs_calib {
 namespace gui {
 
 class RosImageBridge;
+class RosStereoImageBridge;
+class RosExecutorHub;
 class TfPoseBridge;
 class LauncherConfigPanel;
 class ImageViewWidget;
@@ -75,8 +81,9 @@ private:
     DataSource = 1,   ///< 2 数据源设置
     Setup = 2,        ///< 3 标定设置
     Workbench = 3,    ///< 4 采集求解
-    Review = 4,       ///< 5 复核导出
-    DetectLab = 5,    ///< 特征检测台（不计入步骤条）
+    StereoRectify = 4, ///< 5 校正验证（仅双目内参）
+    Review = 5,       ///< 5/6 复核导出
+    DetectLab = 6,    ///< 特征检测台（不计入步骤条）
   };
 
   // —— 窗口壳：菜单 / 工具栏 / 主题 / 导航 ——
@@ -94,6 +101,9 @@ private:
   void go_to(PageId page);
   void update_step_rail(PageId page);
   void update_status_bar(PageId page);
+  bool uses_stereo_rectify_flow() const;
+  PageId page_id_for_step_index(int step) const;
+  int step_index_for_page(PageId page) const;
   void refresh_status_task();
   QString current_task_status_text() const;
   void set_online_mode(bool online);
@@ -121,11 +131,26 @@ private:
   void set_workbench_path_text(const QString &text);
   void refresh_handeye_ui();
   void refresh_topic_list();
+  void apply_refreshed_topics(const QStringList &image_topics,
+                              const QStringList &info_topics);
+  void sync_ros_image_subscription();
+  void schedule_ros_image_subscription();
+  void sync_ros_stereo_subscription();
+  void sync_pending_ros_topics();
+  bool needs_ros_image_subscription() const;
+  void start_ros_image_pipeline();
+  void stop_ros_image_pipeline();
+  void clear_workbench_live_previews();
+  void refresh_task_flow_chrome();
   void on_source_mode_changed(int index);
   void on_topic_changed(const QString &topic);
   void on_camera_info_topic_changed(const QString &topic);
   void on_intrinsics_source_changed(int mode);
   void on_ros_frame();
+  void on_stereo_ros_frames();
+  void run_stereo_live_preview_tick(bool allow_auto_capture);
+  void apply_stereo_raw_previews();
+  void on_capture_paired_observation();
   void sync_detect_intrinsics_from_sources();
   void apply_intrinsics_source_subscription();
 
@@ -142,6 +167,9 @@ private:
   void refresh_intrinsics_workbench_ui();
   void update_workbench_layout_for_task();
   void refresh_review_view();
+  void refresh_stereo_rectify_view();
+  void schedule_review_diagnostics_async();
+  void apply_review_diagnostics(const core::ReviewDiagnostics &diag);
   void show_preview_image(const QImage &img);
   void set_preview_live(bool live);
   void update_preview_mode_ui();
@@ -157,6 +185,18 @@ private:
   void on_browse_bag();
   void on_load_bag();
   void refresh_bag_topic_list();
+  void apply_refreshed_bag_topics(const QList<BagTopicInfo> &topics, const QString &err);
+  void apply_bag_load_result(
+      int loaded, const QString &err, const QString &topic, RosBagFrameReader reader);
+  void apply_stereo_bag_load_result(
+      int loaded,
+      const QString &err,
+      const QString &left_topic,
+      const QString &right_topic,
+      RosBagStereoFrameReader reader);
+  void apply_image_dir_scan(const QString &dir, const QStringList &paths);
+  void schedule_workbench_view_refresh(bool update_preview);
+  void schedule_workbench_preview_load();
   void on_browse_intrinsics_yaml();
   void on_browse_camera_yaml();
   void on_browse_left_camera_yaml();
@@ -216,6 +256,7 @@ private:
   QWidget *build_data_source_page();
   QWidget *build_setup_page();
   QWidget *build_workbench_page();
+  QWidget *build_stereo_rectify_page();
   QWidget *build_review_page();
   QWidget *build_detect_lab_page();
   void wire_launcher_panel_once();
@@ -230,7 +271,8 @@ private:
   QStackedWidget *stack_ = nullptr;
   QTextEdit *log_ = nullptr;
   QWidget *log_panel_host_ = nullptr;
-  QLabel *step_labels_[5] = {};
+  QLabel *step_labels_[6] = {};
+  QLabel *step_arrows_[5] = {};
   bool launcher_wired_ = false;
   QFrame *selected_tile_ = nullptr;
   QLabel *home_selection_ = nullptr;
@@ -251,8 +293,12 @@ private:
   LauncherConfigPanel *launcher_panel_ = nullptr;
   std::unique_ptr<SessionController> session_;
   std::unique_ptr<RosImageBridge> ros_bridge_;
+  std::unique_ptr<RosStereoImageBridge> ros_stereo_bridge_;
+  std::unique_ptr<RosExecutorHub> ros_executor_hub_;
   std::unique_ptr<TfPoseBridge> tf_bridge_;
-  QTimer *ros_spin_timer_ = nullptr;
+  QTimer *ros_stereo_sub_debounce_ = nullptr;
+  QTimer *workbench_refresh_timer_ = nullptr;
+  bool workbench_refresh_update_preview_ = false;
 
   // ===== Setup =====
   QComboBox *combo_source_mode_ = nullptr;
@@ -286,6 +332,11 @@ private:
 
   // ===== Workbench =====
   ImageViewWidget *preview_view_ = nullptr;
+  QWidget *mono_preview_host_ = nullptr;
+  QWidget *stereo_preview_host_ = nullptr;
+  ImageViewWidget *stereo_preview_left_ = nullptr;
+  ImageViewWidget *stereo_preview_right_ = nullptr;
+  QLabel *stereo_sync_label_ = nullptr;
   QLabel *preview_title_label_ = nullptr;
   QPushButton *btn_preview_live_ = nullptr;
   QPushButton *btn_preview_freeze_ = nullptr;
@@ -340,6 +391,14 @@ private:
   qint64 last_auto_capture_ms_ = 0;
   qint64 last_live_detect_ms_ = 0;
   qint64 last_live_raw_preview_ms_ = 0;
+  qint64 last_stereo_raw_preview_ms_ = 0;
+  qint64 last_stereo_sync_label_ms_ = 0;
+  qint64 last_stereo_detect_ui_ms_ = 0;
+  qint64 last_intrinsics_ui_refresh_ms_ = 0;
+  qint64 last_stereo_preview_apply_ms_ = 0;
+  qint64 last_readiness_refresh_ms_ = 0;
+  QString workbench_layout_task_token_;
+  uint64_t review_diag_epoch_ = 0;
   bool pending_detect_log_ = false;
   bool pending_capture_after_detect_ = false;
   bool allow_auto_on_detect_finish_ = false;
@@ -422,9 +481,25 @@ private:
   QLabel *status_page_ = nullptr;
   QLabel *status_hint_ = nullptr;
   QLabel *status_task_ = nullptr;
+  QLabel *flow_workbench_title_ = nullptr;
+  QLabel *flow_review_title_ = nullptr;
+  QLabel *flow_rectify_title_ = nullptr;
+  ImageViewWidget *rectify_preview_left_ = nullptr;
+  ImageViewWidget *rectify_preview_right_ = nullptr;
+  QLabel *rectify_path_label_ = nullptr;
+  QLabel *rectify_metric_baseline_ = nullptr;
+  QLabel *rectify_metric_rms_ = nullptr;
+  QLabel *rectify_metric_brightness_ = nullptr;
+  QLabel *rectify_hint_label_ = nullptr;
+  QSlider *rectify_pair_slider_ = nullptr;
+  QLabel *rectify_pair_slider_label_ = nullptr;
 
   ThemeId theme_id_ = ThemeId::Dark;
   bool online_mode_ = false;
+  std::atomic<bool> topic_refresh_busy_{false};
+  std::atomic<bool> bag_topic_refresh_busy_{false};
+  std::atomic<bool> bag_load_busy_{false};
+  std::atomic<bool> image_dir_load_busy_{false};
 };
 
 }  // namespace gui

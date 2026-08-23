@@ -35,6 +35,10 @@ bool export_camera_yaml(const CalibrationResult &result, const std::string &path
 bool export_camera_yaml_prefixed(
     const CalibrationResult &result, const std::string &prefix, const std::string &path);
 
+/// \brief 导出立体校正参数（P1/P2/Q/R/T 等，需 stereo_rectified=true）
+bool export_stereo_rectified_yaml(
+    const CalibrationResult &result, const std::string &path);
+
 /// \brief 格式化内参结果为文本
 std::string format_intrinsics_text(const CalibrationResult &result);
 

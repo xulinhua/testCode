@@ -235,6 +235,7 @@ add_executable(hs_calib_gui
   src/gui/widgets/image_view_widget.cpp
   src/gui/widgets/review_charts_widget.cpp
   src/gui/panels/launcher_config_panel.cpp
+  src/gui/task_flow/task_flow.cpp
   src/gui/intrinsics/intrinsics_workbench_panels.cpp
   src/gui/intrinsics/intrinsics_dialog_ui.cpp
   src/gui/intrinsics/intrinsics_param_tooltips.cpp
@@ -248,9 +249,14 @@ add_executable(hs_calib_gui
   src/gui/plotting/intrinsics_calibration_bars_dialog.cpp
   src/gui/plotting/intrinsics_calibration_rms_dialog.cpp
   src/gui/session/session_controller.cpp
+  src/gui/session/session_controller_stereo.cpp
   src/gui/bridges/ros_image_bridge.cpp
+  src/gui/bridges/ros_stereo_image_bridge.cpp
+  src/gui/bridges/ros_executor_hub.cpp
+  src/gui/bridges/stereo_image_loader.cpp
   src/gui/bridges/bag_image_loader.cpp
   src/gui/bridges/ros_bag_frame_reader.cpp
+  src/gui/bridges/ros_bag_stereo_frame_reader.cpp
   src/gui/bridges/tf_pose_bridge.cpp
   src/gui/data/pose_csv_store.cpp
   src/gui/projects/project_catalog.cpp
@@ -274,8 +280,12 @@ add_executable(hs_calib_gui
   include/hs_calib_suite/gui/panels/launcher_config_panel.hpp
   include/hs_calib_suite/gui/session/session_controller.hpp
   include/hs_calib_suite/gui/bridges/ros_image_bridge.hpp
+  include/hs_calib_suite/gui/bridges/ros_stereo_image_bridge.hpp
+  include/hs_calib_suite/gui/bridges/ros_executor_hub.hpp
+  include/hs_calib_suite/gui/bridges/stereo_image_loader.hpp
   include/hs_calib_suite/gui/bridges/bag_image_loader.hpp
   include/hs_calib_suite/gui/bridges/ros_bag_frame_reader.hpp
+  include/hs_calib_suite/gui/bridges/ros_bag_stereo_frame_reader.hpp
   include/hs_calib_suite/gui/bridges/tf_pose_bridge.hpp
   include/hs_calib_suite/gui/data/pose_csv_store.hpp
   include/hs_calib_suite/gui/projects/project_catalog.hpp

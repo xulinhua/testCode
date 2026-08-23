@@ -6,6 +6,8 @@
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/imgproc.hpp>
 
+#include <QMetaObject>
+
 namespace hs_calib {
 namespace gui {
 
@@ -206,9 +208,7 @@ QString RosImageBridge::distortion_model() const {
 
 /// \brief 泵一次 ROS 回调
 void RosImageBridge::spin_some() {
-  if (node_ && rclcpp::ok()) {
-    rclcpp::spin_some(node_);
-  }
+  // 回调由 RosExecutorHub 后台 MultiThreadedExecutor 驱动
 }
 
 /// \brief 图像回调：解码为 BGR 并通知
@@ -241,7 +241,8 @@ void RosImageBridge::on_image(const sensor_msgs::msg::Image::SharedPtr msg) {
           msg->width, msg->height, msg->encoding.c_str(),
           subscribed_topic_.toStdString().c_str());
     }
-    emit frame_received();
+    QMetaObject::invokeMethod(
+        this, [this]() { emit frame_received(); }, Qt::QueuedConnection);
   } catch (const std::exception &ex) {
     if (node_) {
       RCLCPP_WARN_THROTTLE(

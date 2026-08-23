@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -25,12 +26,23 @@
 #include "hs_calib_suite/gui/intrinsics/intrinsics_preview_overlay.hpp"
 #include "hs_calib_suite/core/types/types.hpp"
 #include "hs_calib_suite/gui/bridges/ros_bag_frame_reader.hpp"
+#include "hs_calib_suite/gui/bridges/ros_bag_stereo_frame_reader.hpp"
 #include "hs_calib_suite/gui/data/pose_csv_store.hpp"
 
 namespace hs_calib {
 namespace gui {
 
 class TfPoseBridge;
+
+/// \brief 成对采集记录（左右各一条观测，共享 pair_id）
+struct StereoPairRecord {
+  int pair_id = 0;
+  std::string left_source_path;
+  std::string right_source_path;
+  std::string left_image_path;   ///< 离线/缓存原图（校正预览用）
+  std::string right_image_path;
+  int64_t timestamp_delta_ms = 0;
+};
 
 enum class SourceMode {
   Offline = 0,   ///< 离线图片目录
@@ -109,6 +121,68 @@ public:
   bool is_stereo_extrinsics() const;
   /// \brief 是否为需左右侧标记的双目流程（内参分侧 / 外参成对）
   bool is_stereo_side_tagged() const;
+  /// \brief 双目内参：独立左右会话与成对采集
+  bool uses_stereo_dual_session() const;
+  /// \brief 采集模式：paired / left / right（补采）
+  QString stereo_capture_mode() const;
+  /// \brief 成对记录
+  const std::vector<StereoPairRecord> &stereo_pairs() const { return stereo_pairs_; }
+  int stereo_pair_count() const { return static_cast<int>(stereo_pairs_.size()); }
+  int stereo_rectify_pair_count() const;
+  int stereo_left_sample_count() const;
+  int stereo_right_sample_count() const;
+  int64_t last_stereo_sync_delta_ms() const { return last_stereo_sync_delta_ms_; }
+  /// \brief 分侧 Tier4 状态
+  core::IntrinsicsSessionState &intrinsics_state_for_side(const QString &side);
+  const core::IntrinsicsSessionState &intrinsics_state_for_side(const QString &side) const;
+  /// \brief 写入在线立体帧（带同步 Δt）
+  void set_live_stereo_bgr(
+      const cv::Mat &left, const cv::Mat &right, int64_t sync_delta_ms);
+  void set_live_stereo_bgr(
+      cv::Mat &&left, cv::Mat &&right, int64_t sync_delta_ms);
+  /// \brief 成对采集（主流程）
+  bool capture_paired_observation(QString *error_out = nullptr);
+  /// \brief 扫描 left/right 子目录或 *_L/*_R 命名
+  int load_stereo_image_dir(
+      const QString &root_or_left_dir, const QString &right_dir = QString());
+  /// \brief Bag 双话题时间戳配对加载
+  int load_stereo_rosbag(
+      const QString &bag_uri,
+      const QString &left_topic,
+      const QString &right_topic,
+      int max_pairs = 500,
+      QString *error_out = nullptr);
+  /// \brief 应用后台解码完成的立体 bag 帧（主线程）
+  int apply_loaded_stereo_bag(
+      RosBagStereoFrameReader reader,
+      const QString &left_topic,
+      const QString &right_topic);
+  const QStringList &stereo_left_image_paths() const { return stereo_left_paths_; }
+  const QStringList &stereo_right_image_paths() const { return stereo_right_paths_; }
+  int stereo_pair_index() const { return stereo_pair_index_; }
+  void set_stereo_pair_index(int index);
+  /// \brief 左右目检测预览
+  QImage last_stereo_left_preview() const;
+  QImage last_stereo_right_preview() const;
+  bool stereo_left_has_detection() const;
+  bool stereo_right_has_detection() const;
+  /// \brief 后台检测左右目当前帧
+  void request_stereo_detect(bool fast = false);
+  bool stereo_detect_busy() const { return stereo_detect_busy_.load(); }
+  /// \brief 成对自动采集（diversity + Δt）
+  bool try_auto_capture_paired(
+      double min_confidence, double min_diversity, QString *error_out = nullptr);
+  /// \brief 是否已有立体校正参数
+  bool has_stereo_rectified() const;
+  bool has_stereo_rectify_maps() const { return has_stereo_rectify_maps_; }
+  /// \brief 标定成功后补建立体校正（兼容旧会话）
+  bool ensure_stereo_rectification();
+  void backfill_stereo_pair_image_paths();
+  bool load_stereo_pair_bgr(int index, cv::Mat *left, cv::Mat *right) const;
+  /// \brief 校正后左右预览（含极线）；需先标定成功
+  bool stereo_rectified_preview(QImage *left_out, QImage *right_out) const;
+  int stereo_loaded_pair_count() const;
+  QString stereo_pair_brightness_hint() const;
   /// \brief 是否为直角三面标定器
   bool is_trihedral() const;
 
@@ -200,12 +274,16 @@ public:
 
   /// \brief 扫描目录加载离线图片
   int load_image_dir(const QString &dir_path);
+  /// \brief 应用已扫描的离线图片路径（主线程；扫描在后台完成）
+  int apply_image_paths(const QString &dir_path, const QStringList &paths);
   /// \brief 直接加载 rosbag 图像话题到内存（不导出 PNG）
   int load_rosbag(
       const QString &bag_uri,
       const QString &topic,
       int max_frames = 500,
       QString *error_out = nullptr);
+  /// \brief 应用后台解码完成的 bag 帧（主线程）
+  int apply_loaded_bag(RosBagFrameReader reader, const QString &topic);
   /// \brief 加载离线位姿 CSV
   bool load_pose_csv(const QString &path, QString *error_out = nullptr);
   /// \brief CSV 位姿条数
@@ -216,8 +294,15 @@ public:
   void set_live_bgr(cv::Mat &&bgr);
   /// \brief 后台将 live BGR 转为 QImage（不阻塞界面线程）
   void schedule_live_preview_update();
+  /// \brief 后台将立体 live BGR 转为 QImage（不阻塞界面线程）
+  void schedule_stereo_live_preview_update();
+  /// \brief 后台加载当前离线帧并转 QImage
+  void schedule_offline_preview_update();
   /// \brief 最近一次异步生成的裸图预览
   QImage cached_live_preview_qimage() const;
+  QImage cached_stereo_live_preview_left() const;
+  QImage cached_stereo_live_preview_right() const;
+  QImage cached_offline_preview_qimage() const;
   /// \brief 是否已有在线帧
   bool has_live_frame() const { return !live_bgr_.empty(); }
 
@@ -243,6 +328,8 @@ public:
   void request_identify(const core::BoardTypeIdentifyOptions &options = {});
   /// \brief 取消排队中的检测/识别，并作废进行中的任务（冻结预览时调用）
   void cancel_pending_detect();
+  /// \brief 离开采集页时清空在线帧与预览缓存
+  void clear_live_ros_frames();
   /// \brief 后台检测或识别是否忙
   bool detect_busy() const { return detect_busy_.load(); }
   /// \brief 最近一次类型识别结果（按 score 降序）
@@ -290,6 +377,11 @@ public:
   core::ObservationBatch evaluation_batch() const;
   /// \brief 观测条数（训练集）
   int observation_count() const;
+  /// \brief 是否满足求解/标定按钮启用条件
+  bool can_solve() const;
+  /// \brief 离线模式：后台检测并入库全部已加载图片（无观测时）
+  void request_offline_batch_ingest();
+  bool offline_ingest_busy() const { return offline_ingest_busy_.load(); }
   /// \brief 训练/评估集条数
   int training_sample_count() const;
   int evaluation_sample_count() const;
@@ -342,6 +434,8 @@ public:
   QImage load_current_qimage() const;
   /// \brief 记录 ROS 图像话题名（展示用）
   void set_ros_topic_name(const QString &topic);
+  /// \brief 仅更新双目 ROS 话题名（不触发 configure 引擎）
+  void set_stereo_ros_topics(const QString &left_topic, const QString &right_topic);
 
   /// \brief 结果父坐标系名
   QString result_parent_frame() const;
@@ -363,8 +457,16 @@ signals:
   void detect_started();
   /// \brief 后台检测结束
   void detect_finished(bool ok, const QString &error);
+  /// \brief 双目左右检测完成
+  void stereo_detect_finished(bool ok, const QString &error);
   /// \brief 异步裸图预览就绪（无检出时刷新画面）
   void live_preview_updated();
+  void stereo_live_preview_updated();
+  void offline_preview_updated();
+  /// \brief 离线批量入库开始（total=待处理帧/对数）
+  void offline_ingest_started(int total);
+  /// \brief 离线批量入库结束（added=成功入库，skipped=检测失败或重复）
+  void offline_ingest_finished(int added, int skipped);
   /// \brief 后台类型识别开始
   void identify_started();
   /// \brief 后台类型识别结束
@@ -383,6 +485,7 @@ private:
   bool attach_pose_to_observation(core::Observation *obs, QString *error_out);
   void start_detect_job(bool fast);
   void start_identify_job(const core::BoardTypeIdentifyOptions &options);
+  void clear_loaded_source_data();
 
   QString calibrator_id_ = QStringLiteral("cam_intrinsics");
   DetectLabMode detect_lab_mode_ = DetectLabMode::None;
@@ -420,6 +523,14 @@ private:
   mutable std::mutex live_preview_mutex_;
   QImage cached_live_preview_qimage_;
   std::atomic<bool> live_preview_busy_{false};
+  mutable std::mutex stereo_live_preview_mutex_;
+  QImage cached_stereo_live_left_;
+  QImage cached_stereo_live_right_;
+  std::atomic<bool> stereo_live_preview_busy_{false};
+  mutable std::mutex offline_preview_mutex_;
+  QImage cached_offline_preview_qimage_;
+  std::atomic<bool> offline_preview_busy_{false};
+  int offline_preview_index_ = -1;
   QString ros_topic_name_;
   int live_seq_ = 0;
 
@@ -485,8 +596,64 @@ private:
   void update_board_metrics_after_detect();
   bool tier4_preview_needs_overlay() const;
   double compute_pixel_speed() const;
+  bool detect_on_bgr(const cv::Mat &bgr, bool fast, QImage *preview_out, QString *error_out);
+  bool add_side_observation(
+      const std::string &side,
+      const core::Correspondence &corr,
+      int width,
+      int height,
+      const QString &path,
+      QString *error_out);
+  bool add_observation_from_detect(
+      const QString &path,
+      const core::Correspondence &corr,
+      int width,
+      int height,
+      const QImage &overlay,
+      QString *error_out);
+  void configure_stereo_intrinsics_states();
+  bool solve_stereo_intrinsics(QString *error_out);
+  void merge_stereo_calib_results(
+      const core::CalibrationResult &left_r,
+      const core::CalibrationResult &right_r,
+      core::CalibrationResult *out);
+  bool append_stereo_rectified_meta(core::CalibrationResult *result);
+  void rebuild_stereo_rectify_maps();
+  RosBagStereoFrameReader stereo_bag_reader_;
+
+  cv::Mat stereo_map1_x_;
+  cv::Mat stereo_map1_y_;
+  cv::Mat stereo_map2_x_;
+  cv::Mat stereo_map2_y_;
+  cv::Size stereo_rect_size_;
+  bool has_stereo_rectify_maps_ = false;
 
   core::IntrinsicsSessionState intrinsics_state_;
+  core::IntrinsicsSessionState intrinsics_left_state_;
+  core::IntrinsicsSessionState intrinsics_right_state_;
+  std::vector<StereoPairRecord> stereo_pairs_;
+  int next_stereo_pair_id_ = 1;
+  cv::Mat live_left_bgr_;
+  cv::Mat live_right_bgr_;
+  int64_t last_stereo_sync_delta_ms_ = -1;
+  QStringList stereo_left_paths_;
+  QStringList stereo_right_paths_;
+  int stereo_pair_index_ = -1;
+  struct StereoSideDetect {
+    bool has = false;
+    core::Correspondence corr;
+    int width = 0;
+    int height = 0;
+    double confidence = 0.0;
+    QImage preview;
+    cv::Mat bgr;
+    core::BoardFrameFingerprint fp{};
+  };
+  StereoSideDetect stereo_left_detect_;
+  StereoSideDetect stereo_right_detect_;
+  std::atomic<bool> stereo_detect_busy_{false};
+  std::atomic<uint64_t> stereo_detect_epoch_{0};
+  std::atomic<bool> offline_ingest_busy_{false};
   core::BoardFrameMetrics last_board_metrics_;
   cv::Point2f last_frame_centroid_{0.5f, 0.5f};
   bool has_last_frame_centroid_ = false;

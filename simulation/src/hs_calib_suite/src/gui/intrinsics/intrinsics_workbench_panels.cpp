@@ -53,6 +53,30 @@ void IntrinsicsMetricsStrip::refresh(const SessionController *session) {
     lbl_summary_->setText(QStringLiteral("检测：—"));
     return;
   }
+  if (session->uses_stereo_dual_session()) {
+  QString line;
+  if (session->stereo_left_has_detection() && session->stereo_right_has_detection()) {
+    line = QStringLiteral("L/R 已检出 · Δt %1ms")
+               .arg(session->last_stereo_sync_delta_ms());
+  } else if (session->stereo_left_has_detection() || session->stereo_right_has_detection()) {
+    line = QStringLiteral("L:%1 R:%2")
+               .arg(session->stereo_left_has_detection() ? QStringLiteral("✓")
+                                                         : QStringLiteral("—"))
+               .arg(session->stereo_right_has_detection() ? QStringLiteral("✓")
+                                                          : QStringLiteral("—"));
+  } else {
+    line = QStringLiteral("检测：未检出");
+  }
+  if (session->uses_tier4_intrinsics()) {
+    const auto &lcol = session->intrinsics_state_for_side(QStringLiteral("left")).collector();
+    const auto &rcol = session->intrinsics_state_for_side(QStringLiteral("right")).collector();
+    line += QStringLiteral(" · 训练 L%1/R%2")
+                .arg(lcol.training_count())
+                .arg(rcol.training_count());
+  }
+  lbl_summary_->setText(line);
+  return;
+  }
   if (!session->has_current_detection()) {
     lbl_summary_->setText(QStringLiteral("检测：未检出"));
     return;
@@ -361,6 +385,41 @@ void IntrinsicsCalibrationStatusDialog::refresh(const SessionController *session
     lbl_status_->setText(QStringLiteral("—"));
     return;
   }
+  if (session->uses_stereo_dual_session()) {
+    const auto &lst = session->intrinsics_state_for_side(QStringLiteral("left")).stats();
+    const auto &rst = session->intrinsics_state_for_side(QStringLiteral("right")).stats();
+    const auto &lcol = session->intrinsics_state_for_side(QStringLiteral("left")).collector();
+    const auto &rcol = session->intrinsics_state_for_side(QStringLiteral("right")).collector();
+    lbl_status_->setText(
+        (lst.calibration_time_sec > 0 || rst.calibration_time_sec > 0)
+            ? QStringLiteral("done")
+            : QStringLiteral("idle"));
+    lbl_time_->setText(
+        lst.calibration_time_sec > 0
+            ? QStringLiteral("L %1s / R %2s")
+                  .arg(lst.calibration_time_sec, 0, 'f', 2)
+                  .arg(rst.calibration_time_sec, 0, 'f', 2)
+            : QStringLiteral("—"));
+    lbl_train_->setText(
+        QStringLiteral("L %1 / R %2")
+            .arg(lcol.training_count())
+            .arg(rcol.training_count()));
+    lbl_eval_->setText(
+        QStringLiteral("L %1 / R %2")
+            .arg(lcol.evaluation_count())
+            .arg(rcol.evaluation_count()));
+    lbl_train_rms_->setText(
+        QStringLiteral("L %1 / R %2")
+            .arg(lst.training_rms_all >= 0 ? QString::number(lst.training_rms_all, 'f', 3)
+                                            : QStringLiteral("—"))
+            .arg(rst.training_rms_all >= 0 ? QString::number(rst.training_rms_all, 'f', 3)
+                                           : QStringLiteral("—")));
+    lbl_last_det_->setText(
+        QStringLiteral("成对 %1 · Δt %2ms")
+            .arg(session->stereo_pair_count())
+            .arg(session->last_stereo_sync_delta_ms()));
+    return;
+  }
   const auto &st = session->intrinsics_state().stats();
   const auto &col = session->intrinsics_state().collector();
   lbl_status_->setText(st.calibration_time_sec > 0 ? QStringLiteral("done")
@@ -496,6 +555,32 @@ void IntrinsicsControlRail::set_session(SessionController *session) {
 
 void IntrinsicsControlRail::refresh() {
   if (session_ == nullptr || !session_->uses_tier4_intrinsics()) {
+    return;
+  }
+  if (session_->uses_stereo_dual_session()) {
+    const auto &lst = session_->intrinsics_state_for_side(QStringLiteral("left")).stats();
+    const auto &rst = session_->intrinsics_state_for_side(QStringLiteral("right")).stats();
+    const auto &lcol = session_->intrinsics_state_for_side(QStringLiteral("left")).collector();
+    const auto &rcol = session_->intrinsics_state_for_side(QStringLiteral("right")).collector();
+    lbl_compact_status_->setText(
+        QStringLiteral("左 训%1 评%2 · 右 训%3 评%4")
+            .arg(lcol.training_count())
+            .arg(lcol.evaluation_count())
+            .arg(rcol.training_count())
+            .arg(rcol.evaluation_count()));
+    const QString lrms =
+        lst.training_rms_all >= 0
+            ? QStringLiteral("%1").arg(lst.training_rms_all, 0, 'f', 2)
+            : QStringLiteral("—");
+    const QString rrms =
+        rst.training_rms_all >= 0
+            ? QStringLiteral("%1").arg(rst.training_rms_all, 0, 'f', 2)
+            : QStringLiteral("—");
+    lbl_compact_collect_->setText(
+        QStringLiteral("RMS L %1 / R %2 px · 占用 L%3%/R%4%")
+            .arg(lrms, rrms)
+            .arg(lcol.training_occupancy_percent(), 0, 'f', 0)
+            .arg(rcol.training_occupancy_percent(), 0, 'f', 0));
     return;
   }
   const auto &st = session_->intrinsics_state().stats();

@@ -23,6 +23,10 @@
 
 ## 2. 信息架构（页面级）
 
+**单目 / 手眼 / 外参**：5 步 — 选择任务 → 数据源 → 标定设置 → 采集求解 → 复核导出。
+
+**双目内参 `stereo_intrinsics`**：6 步 — 在上述流程中插入 **第 5 步「校正验证」**（立体校正 + 极线预览），复核为第 6 步。详见 [STEREO_INTRINSICS_FLOW.md](STEREO_INTRINSICS_FLOW.md)。
+
 ```mermaid
 flowchart TB
   subgraph shell [MainWindow外壳]
@@ -31,14 +35,18 @@ flowchart TB
   end
 
   Home[P0首页_项目与标定器]
-  Setup[P1标定设置_参数与就绪检查]
-  Work[P2工作台_采集与求解]
-  Review[P3复核与导出]
+  DataSrc[P1数据源_话题或目录]
+  Setup[P2标定设置_参数与就绪检查]
+  Work[P3采集求解_仅此页ROS订阅]
+  Rectify[P4校正验证_仅双目内参]
+  Review[P5复核与导出]
 
   shell --> Home
-  Home -->|下一步| Setup
+  Home -->|下一步| DataSrc
+  DataSrc --> Setup
   Setup -->|开始会话| Work
-  Work -->|求解完成| Review
+  Work -->|求解成功| Rectify
+  Rectify --> Review
   Review -->|另开任务| Home
   Work -->|返回改参| Setup
 ```
@@ -46,9 +54,11 @@ flowchart TB
 | 页面 | 目的 | 主要控件 |
 |------|------|----------|
 | 首页 | 选项目、标定类别、具体标定器 | 项目卡片/列表、分类树、简介与前置条件 |
-| 标定设置 | 编辑/确认 YAML 参数、检查话题与 TF | 参数表单、就绪清单、打开 config 路径 |
-| 工作台 | 采集观测、触发求解、看实时反馈 | 预览、观测列表、采集/删除、求解按钮 |
-| 复核导出 | 看误差与 TF、写文件 | 指标表、TF 树、导出路径、报告预览 |
+| 数据源 | 图像源、左右话题、离线目录 | 话题下拉、刷新；**不订阅图像** |
+| 标定设置 | 编辑/确认 YAML 参数、检查话题与 TF | 参数表单、就绪清单、`stereo_joint_refine` |
+| 采集求解 | 采集观测、触发求解、看实时反馈 | 左右预览、成对采集、求解；**仅此页 ROS 订阅** |
+| 校正验证 | 双目立体校正与极线检查 | 校正预览、基线/RMS、图像对滑块 |
+| 复核导出 | 看误差与 TF、写文件 | 指标表、残差图、导出路径 |
 
 ---
 
@@ -199,10 +209,12 @@ flowchart TB
 
 | 阶段 | 界面交付 |
 |------|----------|
-| P0 | 四页 + 主题样式；流程可点通，无业务求解 |
+| P0 | 多页 + 主题样式；流程可点通 |
 | P1 | 内参工作台接预览/采集、YAML 表单、复核导出 |
-| P2 | TF 三树、点云投影、手眼工作台、就绪检查接 ROS |
-| P3 | 多传感器套件任务列表、批量导出 |
+| P2 | 双目 6 步流程、校正验证页、按需 ROS 订阅、立体校正预览 |
+| P3 | TF 三树、点云投影、手眼工作台、就绪检查接 ROS |
+| P4 | 多传感器套件任务列表、批量导出 |
 
 类图见 [CLASS_DIAGRAMS.md](CLASS_DIAGRAMS.md)。  
+双目内参流程见 [STEREO_INTRINSICS_FLOW.md](STEREO_INTRINSICS_FLOW.md)。  
 启动：`ros2 run hs_calib_suite hs_calib_gui`。

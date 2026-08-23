@@ -12,6 +12,8 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <thread>
+#include <vector>
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -971,6 +973,9 @@ SessionController::~SessionController() {
 
 /// \brief 设置标定器 ID，并按类型调整位姿源/最少视角
 void SessionController::set_calibrator_id(const QString &id) {
+  if (calibrator_id_ == id) {
+    return;
+  }
   calibrator_id_ = id;
   const DetectLabMode from_id = detect_lab_mode_from_task_id(id);
   if (from_id != DetectLabMode::None) {
@@ -1065,6 +1070,9 @@ void SessionController::set_capture_options(
 
 /// \brief 设置求解器键值选项
 void SessionController::set_solve_options(const std::map<std::string, std::string> &opts) {
+  if (solve_options_ == opts) {
+    return;
+  }
   solve_options_ = opts;
   configure_intrinsics_engine();
 }
@@ -1095,6 +1103,9 @@ void SessionController::set_handeye_method(const QString &method) {
 
 /// \brief 设置手眼用相机内参 YAML 路径
 void SessionController::set_camera_yaml(const QString &path) {
+  if (camera_yaml_ == path && !detect_K_.empty()) {
+    return;
+  }
   camera_yaml_ = path;
   if (path.isEmpty()) {
     return;
@@ -1169,6 +1180,21 @@ QImage SessionController::cached_live_preview_qimage() const {
   return cached_live_preview_qimage_;
 }
 
+QImage SessionController::cached_stereo_live_preview_left() const {
+  std::lock_guard<std::mutex> lock(stereo_live_preview_mutex_);
+  return cached_stereo_live_left_;
+}
+
+QImage SessionController::cached_stereo_live_preview_right() const {
+  std::lock_guard<std::mutex> lock(stereo_live_preview_mutex_);
+  return cached_stereo_live_right_;
+}
+
+QImage SessionController::cached_offline_preview_qimage() const {
+  std::lock_guard<std::mutex> lock(offline_preview_mutex_);
+  return cached_offline_preview_qimage_;
+}
+
 void SessionController::schedule_live_preview_update() {
   if (source_mode_ != SourceMode::RosTopic || live_bgr_.empty()) {
     return;
@@ -1193,14 +1219,111 @@ void SessionController::schedule_live_preview_update() {
   }).detach();
 }
 
+void SessionController::schedule_stereo_live_preview_update() {
+  if (source_mode_ != SourceMode::RosTopic || !uses_stereo_dual_session()) {
+    return;
+  }
+  if (live_left_bgr_.empty() && live_right_bgr_.empty()) {
+    return;
+  }
+  if (stereo_live_preview_busy_.exchange(true)) {
+    return;
+  }
+  cv::Mat left = live_left_bgr_.clone();
+  cv::Mat right = live_right_bgr_.clone();
+  if (left.empty() && right.empty()) {
+    stereo_live_preview_busy_.store(false);
+    return;
+  }
+  std::thread([this, left = std::move(left), right = std::move(right)]() mutable {
+    QImage l = mat_bgr_to_qimage(left);
+    QImage r = mat_bgr_to_qimage(right);
+    QMetaObject::invokeMethod(
+        this,
+        [this, l = std::move(l), r = std::move(r)]() {
+          {
+            std::lock_guard<std::mutex> lock(stereo_live_preview_mutex_);
+            cached_stereo_live_left_ = l;
+            cached_stereo_live_right_ = r;
+          }
+          stereo_live_preview_busy_.store(false);
+          emit stereo_live_preview_updated();
+        },
+        Qt::QueuedConnection);
+  }).detach();
+}
+
+void SessionController::schedule_offline_preview_update() {
+  if (source_mode_ == SourceMode::RosTopic) {
+    return;
+  }
+  if (offline_preview_busy_.exchange(true)) {
+    return;
+  }
+  const bool stereo = uses_stereo_dual_session();
+  const int request_index = stereo ? stereo_pair_index_ : current_index_;
+  QString left_path;
+  QString mono_path;
+  if (stereo && stereo_pair_index_ >= 0 &&
+      stereo_pair_index_ < stereo_left_paths_.size()) {
+    left_path = stereo_left_paths_.at(stereo_pair_index_);
+  } else if (current_index_ >= 0 && current_index_ < image_paths_.size()) {
+    mono_path = image_paths_.at(current_index_);
+  } else if (source_mode_ == SourceMode::RosBag && current_index_ >= 0 &&
+             current_index_ < bag_reader_.size()) {
+    // Bag 帧已在内存，主线程转图即可
+    offline_preview_busy_.store(false);
+    cv::Mat bgr = bag_reader_.frame(current_index_);
+    QImage img = mat_bgr_to_qimage(bgr);
+    {
+      std::lock_guard<std::mutex> lock(offline_preview_mutex_);
+      cached_offline_preview_qimage_ = img;
+      offline_preview_index_ = current_index_;
+    }
+    emit offline_preview_updated();
+    return;
+  } else {
+    offline_preview_busy_.store(false);
+    return;
+  }
+  std::thread([this, request_index, stereo, left_path, mono_path]() {
+    QImage img;
+    if (stereo && !left_path.isEmpty()) {
+      cv::Mat bgr = cv::imread(left_path.toStdString(), cv::IMREAD_COLOR);
+      img = mat_bgr_to_qimage(bgr);
+    } else if (!mono_path.isEmpty()) {
+      cv::Mat bgr = cv::imread(mono_path.toStdString(), cv::IMREAD_COLOR);
+      img = mat_bgr_to_qimage(bgr);
+    }
+    QMetaObject::invokeMethod(
+        this,
+        [this, request_index, stereo, img = std::move(img)]() {
+          offline_preview_busy_.store(false);
+          if (stereo) {
+            if (stereo_pair_index_ != request_index) {
+              return;
+            }
+          } else if (current_index_ != request_index) {
+            return;
+          }
+          {
+            std::lock_guard<std::mutex> lock(offline_preview_mutex_);
+            cached_offline_preview_qimage_ = img;
+            offline_preview_index_ = request_index;
+          }
+          emit offline_preview_updated();
+        },
+        Qt::QueuedConnection);
+  }).detach();
+}
+
 /// \brief 加载离线位姿 CSV
 bool SessionController::load_pose_csv(const QString &path, QString *error_out) {
   return pose_csv_.load(path, error_out);
 }
 
-/// \brief 扫描目录加载离线图片列表并重置会话数据
-int SessionController::load_image_dir(const QString &dir_path) {
-  // —— 重置会话状态 ——
+/// \brief 清空离线/Bag 载入前的会话图像与标定缓存
+void SessionController::clear_loaded_source_data() {
   image_paths_.clear();
   current_index_ = -1;
   has_detection_ = false;
@@ -1213,6 +1336,33 @@ int SessionController::load_image_dir(const QString &dir_path) {
   batch_ = {};
   last_result_ = {};
   bag_reader_.clear();
+  stereo_bag_reader_.clear();
+  stereo_left_paths_.clear();
+  stereo_right_paths_.clear();
+  stereo_pair_index_ = -1;
+  stereo_pairs_.clear();
+  live_left_bgr_.release();
+  live_right_bgr_.release();
+  last_stereo_sync_delta_ms_ = -1;
+  stereo_left_detect_ = {};
+  stereo_right_detect_ = {};
+  has_stereo_rectify_maps_ = false;
+  stereo_map1_x_.release();
+  stereo_map1_y_.release();
+  stereo_map2_x_.release();
+  stereo_map2_y_.release();
+  if (is_intrinsics()) {
+    intrinsics_state_.reset();
+    if (is_stereo_intrinsics()) {
+      intrinsics_left_state_.reset();
+      intrinsics_right_state_.reset();
+    }
+  }
+}
+
+/// \brief 扫描目录加载离线图片列表并重置会话数据
+int SessionController::load_image_dir(const QString &dir_path) {
+  clear_loaded_source_data();
 
   QDir dir(dir_path);
   if (!dir.exists()) {
@@ -1231,12 +1381,20 @@ int SessionController::load_image_dir(const QString &dir_path) {
   };
   const QFileInfoList files =
       dir.entryInfoList(filters, QDir::Files, QDir::Name);
+  QStringList paths;
+  paths.reserve(files.size());
   for (const QFileInfo &fi : files) {
-    image_paths_.push_back(fi.absoluteFilePath());
+    paths.push_back(fi.absoluteFilePath());
   }
-  if (!image_paths_.isEmpty()) {
-    current_index_ = 0;
-  }
+  return apply_image_paths(dir_path, paths);
+}
+
+int SessionController::apply_image_paths(
+    const QString &dir_path, const QStringList &paths) {
+  clear_loaded_source_data();
+  (void)dir_path;
+  image_paths_ = paths;
+  current_index_ = paths.isEmpty() ? -1 : 0;
   emit images_changed();
   emit current_changed();
   emit observations_changed();
@@ -1249,23 +1407,22 @@ int SessionController::load_rosbag(
     const QString &topic,
     int max_frames,
     QString *error_out) {
-  image_paths_.clear();
-  current_index_ = -1;
-  has_detection_ = false;
-  last_confidence_ = 0.0;
-  last_aruco_reproj_px_ = -1.0;
-  last_preview_ = {};
-  captured_fps_.clear();
-  captured_views_.clear();
-  clear_capture_cache();
-  batch_ = {};
-  last_result_ = {};
-  if (is_intrinsics()) {
-    intrinsics_state_.reset();
+  RosBagFrameReader reader;
+  const int n = reader.open(bag_uri, topic, max_frames, error_out);
+  if (n <= 0) {
+    clear_loaded_source_data();
+    emit images_changed();
+    emit observations_changed();
+    emit result_changed();
+    return 0;
   }
-  bag_reader_.clear();
+  return apply_loaded_bag(std::move(reader), topic);
+}
 
-  const int n = bag_reader_.open(bag_uri, topic, max_frames, error_out);
+int SessionController::apply_loaded_bag(RosBagFrameReader reader, const QString &topic) {
+  clear_loaded_source_data();
+  bag_reader_ = std::move(reader);
+  const int n = bag_reader_.size();
   if (n <= 0) {
     emit images_changed();
     emit observations_changed();
@@ -1289,6 +1446,10 @@ int SessionController::load_rosbag(
 /// \brief 切换离线当前图片索引
 void SessionController::set_current_index(int index) {
   if (source_mode_ == SourceMode::RosTopic) {
+    return;
+  }
+  if (uses_stereo_dual_session() && !stereo_left_paths_.isEmpty()) {
+    set_stereo_pair_index(index);
     return;
   }
   if (image_paths_.isEmpty()) {
@@ -1319,6 +1480,10 @@ QString SessionController::current_path() const {
     }
     return QStringLiteral("ros://%1").arg(ros_topic_name_);
   }
+  if (uses_stereo_dual_session() && stereo_pair_index_ >= 0 &&
+      stereo_pair_index_ < stereo_left_paths_.size()) {
+    return stereo_left_paths_.at(stereo_pair_index_);
+  }
   if (current_index_ < 0 || current_index_ >= image_paths_.size()) {
     return {};
   }
@@ -1327,6 +1492,35 @@ QString SessionController::current_path() const {
 
 /// \brief 取当前帧 BGR（在线 live / 离线 imread / bag 内存）
 cv::Mat SessionController::current_bgr() const {
+  if (uses_stereo_dual_session()) {
+    const QString mode = stereo_capture_mode();
+    if (mode == QStringLiteral("right") && !live_right_bgr_.empty()) {
+      return live_right_bgr_;
+    }
+    if (!live_left_bgr_.empty()) {
+      return live_left_bgr_;
+    }
+    if (stereo_pair_index_ >= 0) {
+      if (source_mode_ == SourceMode::RosBag && !stereo_bag_reader_.empty() &&
+          stereo_pair_index_ < stereo_bag_reader_.size()) {
+        const auto &pair = stereo_bag_reader_.pair(stereo_pair_index_);
+        if (mode == QStringLiteral("right")) {
+          return pair.right_bgr.empty() ? cv::Mat() : pair.right_bgr.clone();
+        }
+        return pair.left_bgr.empty() ? cv::Mat() : pair.left_bgr.clone();
+      }
+      if (stereo_pair_index_ < stereo_left_paths_.size()) {
+        const QString path =
+            (mode == QStringLiteral("right") &&
+             stereo_pair_index_ < stereo_right_paths_.size())
+                ? stereo_right_paths_.at(stereo_pair_index_)
+                : stereo_left_paths_.at(stereo_pair_index_);
+        if (!path.startsWith(QStringLiteral("bag://"))) {
+          return cv::imread(path.toStdString(), cv::IMREAD_COLOR);
+        }
+      }
+    }
+  }
   if (source_mode_ == SourceMode::RosTopic) {
     return live_bgr_;
   }
@@ -1476,18 +1670,8 @@ bool SessionController::detect_current(QImage *preview_out, QString *error_out, 
 }
 
 int SessionController::live_detect_interval_ms() const {
-  constexpr int kLiveHz = 200;
-  constexpr int kIdlePollMs = 400;
-  if (!is_intrinsics() || source_mode_ != SourceMode::RosTopic) {
-    return kLiveHz;
-  }
-  const core::IntrinsicsProfile profile =
-      core::profile_from_config_map(solve_options_);
-  const auto params = core::collector_params_from_config(solve_options_, profile);
-  if (params.skip_frames_when_not_detection && !has_detection_) {
-    return kIdlePollMs;
-  }
-  return kLiveHz;
+  // 实时预览不限频；忙时由 detect_busy / stereo_detect_busy 自然背压
+  return 0;
 }
 
 /// \brief 请求后台检测（忙则挂起一次）
@@ -1504,8 +1688,32 @@ void SessionController::request_detect(bool fast) {
 void SessionController::cancel_pending_detect() {
   pending_detect_ = false;
   detect_epoch_.fetch_add(1);
+  stereo_detect_epoch_.fetch_add(1);
   // 进行中的线程回主线程后会因 epoch 不匹配直接丢弃；此处先解除 busy，避免 UI 卡在「检测中」
   detect_busy_.store(false);
+  stereo_detect_busy_.store(false);
+}
+
+void SessionController::clear_live_ros_frames() {
+  live_bgr_.release();
+  live_left_bgr_.release();
+  live_right_bgr_.release();
+  last_stereo_sync_delta_ms_ = -1;
+  has_detection_ = false;
+  last_preview_ = {};
+  stereo_left_detect_ = {};
+  stereo_right_detect_ = {};
+  {
+    std::lock_guard<std::mutex> lock(live_preview_mutex_);
+    cached_live_preview_qimage_ = {};
+  }
+  {
+    std::lock_guard<std::mutex> lock(stereo_live_preview_mutex_);
+    cached_stereo_live_left_ = {};
+    cached_stereo_live_right_ = {};
+  }
+  live_preview_busy_.store(false);
+  stereo_live_preview_busy_.store(false);
 }
 
 /// \brief 请求后台类型识别（忙则忽略，避免与检测队列搅在一起）
@@ -1929,10 +2137,24 @@ void SessionController::request_provisional_intrinsics_refresh(bool force) {
 }
 
 core::IntrinsicsSessionState &SessionController::intrinsics_state() {
+  if (uses_stereo_dual_session() && uses_tier4_intrinsics()) {
+    const QString mode = stereo_capture_mode();
+    if (mode == QStringLiteral("right")) {
+      return intrinsics_right_state_;
+    }
+    return intrinsics_left_state_;
+  }
   return intrinsics_state_;
 }
 
 const core::IntrinsicsSessionState &SessionController::intrinsics_state() const {
+  if (uses_stereo_dual_session() && uses_tier4_intrinsics()) {
+    const QString mode = stereo_capture_mode();
+    if (mode == QStringLiteral("right")) {
+      return intrinsics_right_state_;
+    }
+    return intrinsics_left_state_;
+  }
   return intrinsics_state_;
 }
 
@@ -1944,10 +2166,176 @@ core::ObservationBatch SessionController::evaluation_batch() const {
 }
 
 int SessionController::observation_count() const {
+  if (uses_stereo_dual_session() && uses_tier4_intrinsics()) {
+    return stereo_left_sample_count() + stereo_right_sample_count();
+  }
   if (is_intrinsics() && uses_tier4_intrinsics()) {
     return intrinsics_state_.collector().training_count();
   }
   return static_cast<int>(batch_.items.size());
+}
+
+bool SessionController::can_solve() const {
+  if (uses_stereo_dual_session()) {
+    if (uses_tier4_intrinsics()) {
+      return stereo_left_sample_count() >= 3 && stereo_right_sample_count() >= 3;
+    }
+    return stereo_pair_count() >= 3;
+  }
+  return observation_count() >= 3;
+}
+
+void SessionController::request_offline_batch_ingest() {
+  if (source_mode_ != SourceMode::Offline || offline_ingest_busy_.load()) {
+    return;
+  }
+  if (observation_count() > 0) {
+    return;
+  }
+  const bool stereo = uses_stereo_dual_session();
+  const int n = stereo ? std::min(stereo_left_paths_.size(), stereo_right_paths_.size())
+                       : static_cast<int>(image_paths_.size());
+  if (n <= 0) {
+    return;
+  }
+
+  offline_ingest_busy_.store(true);
+  emit offline_ingest_started(n);
+  DetectJobIn tmpl;
+  tmpl.trihedral = is_trihedral();
+  tmpl.ros_mode = false;
+  tmpl.fast = false;
+  tmpl.squares_x = squares_x_;
+  tmpl.squares_y = squares_y_;
+  tmpl.square_length_m = square_length_m_;
+  tmpl.solve_options = solve_config_map();
+  tmpl.viz_corners = viz_corners_;
+  tmpl.viz_hull = viz_hull_;
+  tmpl.viz_conf = viz_conf_;
+  tmpl.viz_aruco = viz_aruco_;
+  tmpl.viz_marker_radius = viz_marker_radius_;
+  tmpl.camera_matrix = detect_K_.empty() ? cv::Mat() : detect_K_.clone();
+  tmpl.dist_coeffs = detect_D_.empty() ? cv::Mat() : detect_D_.clone();
+  tmpl.camera_model = detect_model_;
+  tmpl.camera_xi = detect_xi_;
+  tmpl.has_chess_roi = has_chess_track_roi_;
+  tmpl.chess_roi = chess_track_roi_;
+  tmpl.chess_lost_frames = chess_lost_frames_;
+
+  std::thread([this, stereo, n, tmpl]() {
+    struct MonoItem {
+      QString path;
+      DetectJobOut out;
+    };
+    struct StereoItem {
+      QString left_path;
+      QString right_path;
+      DetectJobOut left;
+      DetectJobOut right;
+    };
+    std::vector<MonoItem> mono_items;
+    std::vector<StereoItem> stereo_items;
+    mono_items.reserve(static_cast<size_t>(n));
+    stereo_items.reserve(static_cast<size_t>(n));
+
+    if (stereo) {
+      for (int i = 0; i < n; ++i) {
+        StereoItem item;
+        item.left_path = stereo_left_paths_.at(i);
+        item.right_path = stereo_right_paths_.at(i);
+        cv::Mat left = cv::imread(item.left_path.toStdString(), cv::IMREAD_COLOR);
+        cv::Mat right = cv::imread(item.right_path.toStdString(), cv::IMREAD_COLOR);
+        if (left.empty() || right.empty()) {
+          continue;
+        }
+        DetectJobIn lin = tmpl;
+        lin.bgr = std::move(left);
+        item.left = run_detect_job(std::move(lin));
+        DetectJobIn rin = tmpl;
+        rin.bgr = std::move(right);
+        item.right = run_detect_job(std::move(rin));
+        if (item.left.ok && item.right.ok) {
+          stereo_items.push_back(std::move(item));
+        }
+      }
+    } else {
+      for (int i = 0; i < n; ++i) {
+        MonoItem item;
+        item.path = image_paths_.at(i);
+        cv::Mat bgr = cv::imread(item.path.toStdString(), cv::IMREAD_COLOR);
+        if (bgr.empty()) {
+          continue;
+        }
+        DetectJobIn in = tmpl;
+        in.bgr = std::move(bgr);
+        item.out = run_detect_job(std::move(in));
+        if (item.out.ok) {
+          mono_items.push_back(std::move(item));
+        }
+      }
+    }
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, stereo, mono_items = std::move(mono_items),
+         stereo_items = std::move(stereo_items), n]() {
+          int added = 0;
+          if (stereo) {
+            for (const auto &item : stereo_items) {
+              QString err;
+              if (!add_side_observation(
+                      "left", item.left.corr, item.left.width, item.left.height,
+                      item.left_path, &err)) {
+                continue;
+              }
+              if (!add_side_observation(
+                      "right", item.right.corr, item.right.width, item.right.height,
+                      item.right_path, &err)) {
+                continue;
+              }
+              StereoPairRecord rec;
+              rec.pair_id = next_stereo_pair_id_++;
+              rec.left_source_path =
+                  std::string("left:") + item.left_path.toStdString();
+              rec.right_source_path =
+                  std::string("right:") + item.right_path.toStdString();
+              if (!item.left_path.isEmpty() &&
+                  !item.left_path.startsWith(QStringLiteral("ros://"))) {
+                rec.left_image_path = item.left_path.toStdString();
+              }
+              if (!item.right_path.isEmpty() &&
+                  !item.right_path.startsWith(QStringLiteral("ros://"))) {
+                rec.right_image_path = item.right_path.toStdString();
+              }
+              rec.timestamp_delta_ms = 0;
+              stereo_pairs_.push_back(rec);
+              ++added;
+            }
+            if (uses_tier4_intrinsics()) {
+              batch_ = intrinsics_left_state_.training_batch();
+              for (const auto &obs : intrinsics_right_state_.training_batch().items) {
+                batch_.items.push_back(obs);
+              }
+              emit intrinsics_state_changed();
+            }
+          } else {
+            for (const auto &item : mono_items) {
+              QString err;
+              if (add_observation_from_detect(
+                      item.path, item.out.corr, item.out.width, item.out.height,
+                      item.out.preview, &err)) {
+                ++added;
+              }
+            }
+          }
+          offline_ingest_busy_.store(false);
+          emit offline_ingest_finished(added, n - added);
+          if (added > 0) {
+            emit observations_changed();
+          }
+        },
+        Qt::QueuedConnection);
+  }).detach();
 }
 
 int SessionController::training_sample_count() const {
@@ -1982,6 +2370,10 @@ void SessionController::configure_intrinsics_engine() {
     return;
   }
   if (!uses_tier4_intrinsics()) {
+    return;
+  }
+  if (uses_stereo_dual_session()) {
+    configure_stereo_intrinsics_states();
     return;
   }
   core::merge_tier4_intrinsics_defaults(&solve_options_);
@@ -2139,6 +2531,116 @@ bool SessionController::attach_pose_to_observation(
   }
   obs->has_base_gripper = true;
   obs->T_base_gripper = T;
+  return true;
+}
+
+/// \brief 将指定检测结果加入观测批次（离线批量入库用）
+bool SessionController::add_observation_from_detect(
+    const QString &path,
+    const core::Correspondence &corr,
+    int width,
+    int height,
+    const QImage &overlay,
+    QString *error_out) {
+  if (corr.image_points.rows() < 6) {
+    if (error_out) {
+      *error_out = QStringLiteral("有效角点不足 6 个，无法用于 calibrateCamera");
+    }
+    return false;
+  }
+  const std::string stored_path = path.toStdString();
+  for (const auto &obs : batch_.items) {
+    if (obs.source_path == stored_path) {
+      if (error_out) {
+        *error_out = QStringLiteral("该图片已在观测列表中");
+      }
+      return false;
+    }
+  }
+
+  core::Observation obs;
+  obs.source_path = stored_path;
+  obs.frame_id = is_stereo_side_tagged() ? "left" : "camera";
+  obs.image_width = width;
+  obs.image_height = height;
+  obs.correspondences = {corr};
+
+  if (uses_intrinsics_capture_filter()) {
+    const core::IntrinsicsProfile profile =
+        core::profile_from_config_map(solve_options_);
+    cv::Mat K = provisional_intrinsics_.valid
+        ? provisional_intrinsics_.camera_matrix
+        : core::make_initial_camera_matrix(width, height);
+    cv::Mat D = provisional_intrinsics_.valid
+        ? provisional_intrinsics_.dist_coeffs
+        : core::make_initial_dist_coeffs(profile.rational_coeffs);
+    core::IntrinsicsView view;
+    view.object_points.reserve(static_cast<size_t>(corr.image_points.rows()));
+    view.image_points.reserve(static_cast<size_t>(corr.image_points.rows()));
+    for (int r = 0; r < corr.image_points.rows(); ++r) {
+      view.object_points.emplace_back(
+          static_cast<float>(corr.object_points(r, 0)),
+          static_cast<float>(corr.object_points(r, 1)),
+          static_cast<float>(corr.object_points(r, 2)));
+      view.image_points.emplace_back(
+          static_cast<float>(corr.image_points(r, 0)),
+          static_cast<float>(corr.image_points(r, 1)));
+    }
+    core::fill_view_fingerprint(&view, width, height);
+    cv::Mat rv, tv;
+    if (core::solve_board_pose(view, K, D, &rv, &tv)) {
+      const auto stats = core::compute_reprojection_stats(view, K, D, rv, tv);
+      obs.has_board_pose = true;
+      for (int i = 0; i < 3; ++i) {
+        obs.board_rvec(i) = rv.at<double>(i, 0);
+        obs.board_tvec(i) = tv.at<double>(i, 0);
+      }
+      obs.board_reproj_rms = stats.rms;
+      obs.board_reproj_max = stats.max;
+      obs.board_center_x_norm = view.centroid_x;
+      obs.board_center_y_norm = view.centroid_y;
+      obs.board_tilt_deg = view.tilt_deg;
+    }
+  }
+  if (!attach_pose_to_observation(&obs, error_out)) {
+    return false;
+  }
+
+  if (is_intrinsics() && uses_tier4_intrinsics()) {
+    core::BoardFrameFingerprint fp =
+        core::fingerprint_from_correspondence(corr, width, height);
+    if (obs.has_board_pose) {
+      fp.has_pose = true;
+      fp.position_m = cv::Vec3d(
+          obs.board_tvec.x(), obs.board_tvec.y(), obs.board_tvec.z());
+      fp.tilt_deg = obs.board_tilt_deg;
+      fp.rough_angle_x_deg = obs.board_rvec.x() * 180.0 / CV_PI;
+      fp.rough_angle_y_deg = obs.board_rvec.y() * 180.0 / CV_PI;
+    }
+    core::IntrinsicsSampleSplit split = core::IntrinsicsSampleSplit::Training;
+    const auto reason =
+        intrinsics_state_.try_capture(std::move(obs), fp, 0.0, &split);
+    if (reason != core::CollectorRejectReason::Accepted) {
+      if (error_out) {
+        *error_out = QString::fromStdString(core::collector_reject_reason_text(reason));
+      }
+      return false;
+    }
+    sync_batch_from_intrinsics();
+    request_provisional_intrinsics_refresh();
+    CapturedView view;
+    view.overlay = overlay;
+    view.image_path = path;
+    captured_views_.push_back(std::move(view));
+    return true;
+  }
+
+  batch_.items.push_back(std::move(obs));
+  request_provisional_intrinsics_refresh();
+  CapturedView view;
+  view.overlay = overlay;
+  view.image_path = path;
+  captured_views_.push_back(std::move(view));
   return true;
 }
 
@@ -2343,6 +2845,14 @@ void SessionController::clear_observations() {
   provisional_intrinsics_.valid = false;
   if (is_intrinsics()) {
     intrinsics_state_.reset();
+    if (uses_stereo_dual_session()) {
+      intrinsics_left_state_.reset();
+      intrinsics_right_state_.reset();
+      stereo_pairs_.clear();
+      next_stereo_pair_id_ = 1;
+      stereo_left_detect_ = {};
+      stereo_right_detect_ = {};
+    }
     has_last_frame_centroid_ = false;
     intrinsics_linearity_grid_.clear();
     emit intrinsics_state_changed();
@@ -2362,6 +2872,19 @@ bool SessionController::has_observations() const {
 }
 
 core::ObservationBatch SessionController::training_observations() const {
+  if (uses_stereo_dual_session() && uses_tier4_intrinsics()) {
+    core::ObservationBatch merged;
+    const auto left = intrinsics_left_state_.training_batch();
+    const auto right = intrinsics_right_state_.training_batch();
+    merged.items.reserve(left.items.size() + right.items.size());
+    for (const auto &obs : left.items) {
+      merged.items.push_back(obs);
+    }
+    for (const auto &obs : right.items) {
+      merged.items.push_back(obs);
+    }
+    return merged;
+  }
   if (is_intrinsics() && uses_tier4_intrinsics()) {
     return intrinsics_state_.training_batch();
   }
@@ -2517,6 +3040,9 @@ void SessionController::start_solve_job() {
 
 /// \brief 调用注册表标定器求解
 bool SessionController::solve(QString *error_out) {
+  if (uses_stereo_dual_session()) {
+    return solve_stereo_intrinsics(error_out);
+  }
   if (!validate_solve_preconditions(error_out)) {
     return false;
   }
@@ -2617,6 +3143,18 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
     }
     return false;
   }
+  if (!out.mkpath(QStringLiteral("images/original"))) {
+    if (error_out) {
+      *error_out = QStringLiteral("无法创建 images/original 子目录");
+    }
+    return false;
+  }
+  if (!out.mkpath(QStringLiteral("images/overlay"))) {
+    if (error_out) {
+      *error_out = QStringLiteral("无法创建 images/overlay 子目录");
+    }
+    return false;
+  }
 
   // —— 标定结果 YAML ——
   QString result_name = is_handeye() ? QStringLiteral("handeye_extrinsics.yaml")
@@ -2647,6 +3185,16 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
         *error_out = QStringLiteral("未能写出左右内参 YAML");
       }
       return false;
+    }
+    if (has_stereo_rectified()) {
+      const QString rect_path = out.filePath(QStringLiteral("stereo_rectified.yaml"));
+      if (!core::export_stereo_rectified_yaml(
+              last_result_, rect_path.toStdString())) {
+        if (error_out) {
+          *error_out = QStringLiteral("立体校正 YAML 写入失败：%1").arg(rect_path);
+        }
+        return false;
+      }
     }
   } else {
     const QString result_path = out.filePath(result_name);
@@ -2742,9 +3290,10 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
     const auto &obs = batch_.items[i];
     std::ostringstream stem;
     stem << std::setw(2) << std::setfill('0') << static_cast<int>(i);
-    const QString rel_img = QStringLiteral("images/%1.png").arg(QString::fromStdString(stem.str()));
+    const QString rel_img =
+        QStringLiteral("images/original/%1.png").arg(QString::fromStdString(stem.str()));
     const QString rel_det =
-        QStringLiteral("images/%1_detect.png").arg(QString::fromStdString(stem.str()));
+        QStringLiteral("images/overlay/%1.png").arg(QString::fromStdString(stem.str()));
     const QString abs_img = out.filePath(rel_img);
     const QString abs_det = out.filePath(rel_det);
 

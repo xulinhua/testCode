@@ -2,6 +2,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include <QString>
 #include <QWidget>
@@ -14,6 +15,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
+class QStackedWidget;
 class QVBoxLayout;
 
 namespace hs_calib {
@@ -30,12 +32,19 @@ public:
 
   void set_calibrator_id(const QString &id);
   QString calibrator_id() const { return calibrator_id_; }
+  /// \brief 按任务流切换数据源/标定设置独立子页
+  void apply_task_flow_layout();
+  /// \brief 当前 ROS 预览/订阅应使用的话题（双目按采集侧）
+  QString active_image_topic() const;
+  bool uses_stereo_dual_topics() const;
 
   void apply_to_session(SessionController *session) const;
   std::map<std::string, std::string> to_config_map() const;
 
   QComboBox *combo_source_mode() const { return combo_source_mode_; }
   QComboBox *combo_image_topic() const { return combo_image_topic_; }
+  QComboBox *combo_left_image_topic() const { return combo_left_image_topic_; }
+  QComboBox *combo_right_image_topic() const { return combo_right_image_topic_; }
   QComboBox *combo_camera_info_topic() const { return combo_camera_info_topic_; }
   QLineEdit *edit_image_dir() const { return edit_image_dir_; }
   QWidget *offline_row() const { return offline_row_; }
@@ -135,9 +144,18 @@ private:
   /// \brief 按当前标定任务刷新「类型」下拉（平面 / 三面 / 手眼等）
   void refresh_target_type_options();
   static void set_form_row_visible(QFormLayout *form, QWidget *field, bool visible);
+  void finalize_task_flow_layout();
+  void refresh_image_topic_rows();
+  static void move_block_to_page(QWidget *block, QWidget *page);
 
   QString calibrator_id_ = QStringLiteral("cam_intrinsics");
   QWidget *data_source_panel_ = nullptr;
+  QLabel *task_data_source_title_ = nullptr;
+  QLabel *task_setup_title_ = nullptr;
+  QWidget *image_source_group_ = nullptr;
+  QStackedWidget *data_source_stack_ = nullptr;
+  QStackedWidget *setup_stack_ = nullptr;
+  std::vector<QWidget *> setup_stack_pages_;
 
   QFormLayout *form_ros_ = nullptr;
   QComboBox *combo_source_mode_ = nullptr;
@@ -147,6 +165,9 @@ private:
   QLineEdit *edit_camera_link_frame_ = nullptr;
   QWidget *offline_row_ = nullptr;
   QWidget *topic_row_ = nullptr;
+  QWidget *stereo_topic_row_ = nullptr;
+  QComboBox *combo_left_image_topic_ = nullptr;
+  QComboBox *combo_right_image_topic_ = nullptr;
   QWidget *bag_path_row_ = nullptr;
   QWidget *bag_topic_row_ = nullptr;
   QPushButton *btn_refresh_topics_ = nullptr;
@@ -220,6 +241,7 @@ private:
   QCheckBox *chk_thin_prism_ = nullptr;
   QCheckBox *chk_use_intrinsic_guess_ = nullptr;
   QComboBox *combo_stereo_side_ = nullptr;
+  QCheckBox *chk_stereo_joint_refine_ = nullptr;
   QComboBox *combo_handeye_method_ = nullptr;
   QLineEdit *edit_export_path_ = nullptr;
 

@@ -6,6 +6,9 @@
 #include "hs_calib_suite/gui/log/app_logger.hpp"
 #include "hs_calib_suite/gui/panels/launcher_config_panel.hpp"
 #include "hs_calib_suite/gui/bridges/ros_image_bridge.hpp"
+#include "hs_calib_suite/gui/bridges/ros_stereo_image_bridge.hpp"
+#include "hs_calib_suite/gui/bridges/ros_executor_hub.hpp"
+#include "hs_calib_suite/gui/bridges/ros_stereo_image_bridge.hpp"
 #include "hs_calib_suite/gui/session/session_controller.hpp"
 #include "hs_calib_suite/gui/bridges/tf_pose_bridge.hpp"
 
@@ -88,6 +91,8 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
       session_(std::make_unique<SessionController>(this)),
       ros_bridge_(std::make_unique<RosImageBridge>(this)),
+      ros_stereo_bridge_(std::make_unique<RosStereoImageBridge>(this)),
+      ros_executor_hub_(std::make_unique<RosExecutorHub>()),
       tf_bridge_(std::make_unique<TfPoseBridge>(this)) {
   setWindowTitle(QStringLiteral("HS Calib Suite"));
   // 收窄整体宽度；高度保持可用。预览缩放适配 1280×720 / 640×480
@@ -105,18 +110,33 @@ MainWindow::MainWindow(QWidget *parent)
   setup_central_widget();
   apply_theme();
 
-  // —— ROS/TF 定时泵 ——
-  ros_spin_timer_ = new QTimer(this);
-  ros_spin_timer_->setInterval(33);
-  connect(ros_spin_timer_, &QTimer::timeout, this, [this]() {
-    if (ros_bridge_) {
-      ros_bridge_->spin_some();
+  if (ros_executor_hub_) {
+    if (ros_bridge_ && ros_bridge_->ros_node()) {
+      ros_executor_hub_->add_node(ros_bridge_->ros_node());
     }
-    if (tf_bridge_) {
-      tf_bridge_->spin_some();
+    if (ros_stereo_bridge_ && ros_stereo_bridge_->ros_node()) {
+      ros_executor_hub_->add_node(ros_stereo_bridge_->ros_node());
     }
+    if (tf_bridge_ && tf_bridge_->ros_node()) {
+      ros_executor_hub_->add_node(tf_bridge_->ros_node());
+    }
+    ros_executor_hub_->start(2);
+  }
+
+  ros_stereo_sub_debounce_ = new QTimer(this);
+  ros_stereo_sub_debounce_->setSingleShot(true);
+  ros_stereo_sub_debounce_->setInterval(450);
+  connect(ros_stereo_sub_debounce_, &QTimer::timeout, this, [this]() {
+    sync_ros_image_subscription();
   });
-  ros_spin_timer_->start();
+
+  workbench_refresh_timer_ = new QTimer(this);
+  workbench_refresh_timer_->setSingleShot(true);
+  workbench_refresh_timer_->setInterval(0);
+  connect(workbench_refresh_timer_, &QTimer::timeout, this, [this]() {
+    refresh_workbench_view(workbench_refresh_update_preview_);
+    workbench_refresh_update_preview_ = false;
+  });
 
   connect(session_.get(), &SessionController::images_changed, this, [this]() {
     refresh_setup_readiness();
@@ -126,14 +146,39 @@ MainWindow::MainWindow(QWidget *parent)
         stack_->currentIndex() == static_cast<int>(PageId::DetectLab)) {
       refresh_detect_lab_view(false);
     } else {
-      refresh_workbench_view();
+      schedule_workbench_view_refresh(true);
     }
   });
   connect(session_.get(), &SessionController::observations_changed, this, [this]() {
-    refresh_workbench_view(false);
+    schedule_workbench_view_refresh(false);
   });
+  connect(session_.get(), &SessionController::offline_ingest_started, this,
+          [this](int total) {
+            append_log(
+                LogLevel::Info,
+                QStringLiteral("› 离线批量检测入库中（%1 帧）…").arg(total));
+            update_solve_action_enabled();
+          });
+  connect(session_.get(), &SessionController::offline_ingest_finished, this,
+          [this](int added, int skipped) {
+            append_log(
+                added > 0 ? LogLevel::Info : LogLevel::Warn,
+                QStringLiteral("› 离线入库完成：成功 %1，跳过 %2")
+                    .arg(added)
+                    .arg(skipped));
+            schedule_workbench_view_refresh(false);
+            update_solve_action_enabled();
+          });
   connect(session_.get(), &SessionController::intrinsics_state_changed, this,
-          [this]() { refresh_intrinsics_workbench_ui(); });
+          [this]() {
+            if (session_ == nullptr || stack_ == nullptr) {
+              return;
+            }
+            if (stack_->currentIndex() != static_cast<int>(PageId::Workbench)) {
+              return;
+            }
+            refresh_intrinsics_workbench_ui();
+          });
   connect(session_.get(), &SessionController::live_preview_updated, this, [this]() {
     if (session_ == nullptr || stack_ == nullptr ||
         stack_->currentIndex() != static_cast<int>(PageId::Workbench)) {
@@ -147,8 +192,40 @@ MainWindow::MainWindow(QWidget *parent)
       show_preview_image(img);
     }
   });
+  connect(session_.get(), &SessionController::stereo_live_preview_updated, this, [this]() {
+    if (session_ == nullptr || stack_ == nullptr ||
+        stack_->currentIndex() != static_cast<int>(PageId::Workbench)) {
+      return;
+    }
+    if (!preview_live_ || !session_->uses_stereo_dual_session()) {
+      return;
+    }
+    apply_stereo_raw_previews();
+  });
+  connect(session_.get(), &SessionController::offline_preview_updated, this, [this]() {
+    if (session_ == nullptr || stack_ == nullptr ||
+        stack_->currentIndex() != static_cast<int>(PageId::Workbench)) {
+      return;
+    }
+    if (session_->source_mode() == SourceMode::RosTopic) {
+      return;
+    }
+    if (!session_->last_preview().isNull()) {
+      return;
+    }
+    const QImage img = session_->cached_offline_preview_qimage();
+    if (!img.isNull()) {
+      show_preview_image(img);
+    }
+  });
   connect(session_.get(), &SessionController::result_changed, this, [this]() {
-    refresh_review_view();
+    if (stack_ != nullptr) {
+      const int idx = stack_->currentIndex();
+      if (idx == static_cast<int>(PageId::Review) ||
+          idx == static_cast<int>(PageId::StereoRectify)) {
+        refresh_review_view();
+      }
+    }
     if (act_export_ != nullptr) {
       act_export_->setEnabled(session_->has_result());
     }
@@ -177,6 +254,9 @@ MainWindow::MainWindow(QWidget *parent)
   connect(
       ros_bridge_.get(), &RosImageBridge::frame_received, this,
       &MainWindow::on_ros_frame);
+  connect(
+      ros_stereo_bridge_.get(), &RosStereoImageBridge::stereo_frames_updated, this,
+      &MainWindow::on_stereo_ros_frames);
   connect(
       ros_bridge_.get(), &RosImageBridge::camera_info_received, this, [this]() {
         sync_detect_intrinsics_from_sources();
@@ -211,11 +291,14 @@ MainWindow::MainWindow(QWidget *parent)
 /// \brief 析构：停转 ROS 泵并退订图像
 MainWindow::~MainWindow() {
   AppLogger::write(LogLevel::Info, QStringLiteral("HS Calib Suite window closing"));
-  if (ros_spin_timer_ != nullptr) {
-    ros_spin_timer_->stop();
+  if (ros_executor_hub_) {
+    ros_executor_hub_->stop();
   }
   if (ros_bridge_) {
     ros_bridge_->unsubscribe();
+  }
+  if (ros_stereo_bridge_) {
+    ros_stereo_bridge_->unsubscribe();
   }
 }
 
@@ -311,26 +394,108 @@ void MainWindow::refresh_online_indicator() {
       online_mode_ ? QStringLiteral("ROS 在线") : QStringLiteral("离线"));
 }
 
-/// \brief 更新顶部步骤条状态（5 步；DetectLab 不计入）
+/// \brief 更新顶部步骤条状态（双目内参 6 步，其余 5 步；DetectLab 不计入）
 void MainWindow::update_step_rail(PageId page) {
-  static const char *titles[] = {
+  static const char *titles_mono[] = {
       "1  选择任务", "2  数据源设置", "3  标定设置", "4  采集求解", "5  复核导出"};
-  for (int i = 0; i < 5; ++i) {
+  static const char *titles_stereo[] = {"1  选择任务", "2  数据源设置", "3  标定设置",
+                                        "4  采集求解", "5  校正验证", "6  复核导出"};
+  const bool stereo_flow = uses_stereo_rectify_flow();
+  const int step_count = stereo_flow ? 6 : 5;
+  const int active_step = step_index_for_page(page);
+
+  for (int i = 0; i < 6; ++i) {
     if (step_labels_[i] == nullptr) {
       continue;
     }
-    step_labels_[i]->setText(QString::fromUtf8(titles[i]));
+    const bool visible = i < step_count;
+    step_labels_[i]->setVisible(visible);
+    if (i < 5 && step_arrows_[i] != nullptr) {
+      step_arrows_[i]->setVisible(visible && i < step_count - 1);
+    }
+    if (!visible) {
+      continue;
+    }
+    const char *title = stereo_flow ? titles_stereo[i] : titles_mono[i];
+    step_labels_[i]->setText(QString::fromUtf8(title));
     if (page == PageId::DetectLab) {
       step_labels_[i]->setObjectName(QStringLiteral("StepIdle"));
-    } else if (i < static_cast<int>(page)) {
+    } else if (active_step >= 0 && i < active_step) {
       step_labels_[i]->setObjectName(QStringLiteral("StepDone"));
-    } else if (i == static_cast<int>(page)) {
+    } else if (active_step >= 0 && i == active_step) {
       step_labels_[i]->setObjectName(QStringLiteral("StepActive"));
     } else {
       step_labels_[i]->setObjectName(QStringLiteral("StepIdle"));
     }
     step_labels_[i]->style()->unpolish(step_labels_[i]);
     step_labels_[i]->style()->polish(step_labels_[i]);
+  }
+}
+
+bool MainWindow::uses_stereo_rectify_flow() const {
+  return selected_calibrator_id_ == QStringLiteral("stereo_intrinsics");
+}
+
+MainWindow::PageId MainWindow::page_id_for_step_index(int step) const {
+  if (uses_stereo_rectify_flow()) {
+    switch (step) {
+      case 0:
+        return PageId::Home;
+      case 1:
+        return PageId::DataSource;
+      case 2:
+        return PageId::Setup;
+      case 3:
+        return PageId::Workbench;
+      case 4:
+        return PageId::StereoRectify;
+      case 5:
+        return PageId::Review;
+      default:
+        return PageId::Home;
+    }
+  }
+  switch (step) {
+    case 0:
+      return PageId::Home;
+    case 1:
+      return PageId::DataSource;
+    case 2:
+      return PageId::Setup;
+    case 3:
+      return PageId::Workbench;
+    case 4:
+      return PageId::Review;
+    default:
+      return PageId::Home;
+  }
+}
+
+int MainWindow::step_index_for_page(PageId page) const {
+  if (page == PageId::DetectLab) {
+    return -1;
+  }
+  if (uses_stereo_rectify_flow()) {
+    if (static_cast<int>(page) <= static_cast<int>(PageId::Review)) {
+      return static_cast<int>(page);
+    }
+    return -1;
+  }
+  switch (page) {
+    case PageId::Home:
+      return 0;
+    case PageId::DataSource:
+      return 1;
+    case PageId::Setup:
+      return 2;
+    case PageId::Workbench:
+      return 3;
+    case PageId::StereoRectify:
+      return 4;
+    case PageId::Review:
+      return 4;
+    default:
+      return -1;
   }
 }
 
@@ -493,7 +658,7 @@ void MainWindow::refresh_status_task() {
 void MainWindow::update_status_bar(PageId page) {
   static const char *names[] = {
       "PAGE / HOME", "PAGE / DATA SOURCE", "PAGE / SETUP", "PAGE / WORKBENCH",
-      "PAGE / REVIEW", "PAGE / DETECT LAB"};
+      "PAGE / STEREO RECTIFY", "PAGE / REVIEW", "PAGE / DETECT LAB"};
   if (status_page_ != nullptr) {
     status_page_->setText(QString::fromUtf8(names[static_cast<int>(page)]));
   }
@@ -520,7 +685,7 @@ void MainWindow::update_status_bar(PageId page) {
       }
     } else {
       status_hint_->setText(
-          online_mode_ ? QStringLiteral("在线 · Setup 中选择图像话题后采集")
+          online_mode_ ? QStringLiteral("在线 · 进入「采集求解」后开始订阅图像")
                        : QStringLiteral("离线 · 选图片目录后采集求解"));
     }
   }
@@ -567,6 +732,15 @@ void MainWindow::set_online_mode(bool online) {
 
 /// \brief 切换到指定流程页
 void MainWindow::go_to(PageId page) {
+  const PageId prev =
+      stack_ != nullptr ? static_cast<PageId>(stack_->currentIndex()) : PageId::Home;
+  const bool was_live =
+      prev == PageId::Workbench || prev == PageId::DetectLab;
+  const bool will_live = page == PageId::Workbench || page == PageId::DetectLab;
+  if (was_live && !will_live) {
+    stop_ros_image_pipeline();
+  }
+
   if (stack_ != nullptr) {
     stack_->setCurrentIndex(static_cast<int>(page));
   }
@@ -575,7 +749,7 @@ void MainWindow::go_to(PageId page) {
 
   // 复核页隐藏底部系统日志，把高度留给结果摘要
   if (log_panel_host_ != nullptr) {
-    log_panel_host_->setVisible(page != PageId::Review);
+    log_panel_host_->setVisible(page != PageId::Review && page != PageId::StereoRectify);
   }
 
   if (act_home_ != nullptr) {
@@ -594,8 +768,8 @@ void MainWindow::go_to(PageId page) {
   }
   if (act_solve_ != nullptr) {
     act_solve_->setEnabled(
-        on_work && session_ && !session_->solve_busy() &&
-        session_->observation_count() >= 3);
+        on_work && session_ && !session_->solve_busy() && session_->can_solve() &&
+        !session_->offline_ingest_busy());
   }
   if (act_export_ != nullptr) {
     act_export_->setEnabled(session_ && session_->has_result());
@@ -604,18 +778,32 @@ void MainWindow::go_to(PageId page) {
   if (page == PageId::DataSource) {
     refresh_setup_source_ui();
     refresh_setup_readiness();
+    refresh_task_flow_chrome();
   } else if (page == PageId::Setup) {
     refresh_handeye_ui();
     refresh_setup_readiness();
+    refresh_task_flow_chrome();
   } else if (page == PageId::Workbench) {
     maybe_clear_observations_on_workbench_enter();
-    refresh_workbench_view();
+    refresh_workbench_view(false);
+    QTimer::singleShot(0, this, [this]() { schedule_workbench_preview_load(); });
+    if (session_ != nullptr && session_->source_mode() == SourceMode::RosTopic) {
+      preview_live_ = true;
+      start_ros_image_pipeline();
+    }
+    refresh_task_flow_chrome();
+  } else if (page == PageId::StereoRectify) {
+    refresh_stereo_rectify_view();
+    refresh_task_flow_chrome();
   } else if (page == PageId::Review) {
     refresh_review_view();
+    refresh_task_flow_chrome();
   } else if (page == PageId::DetectLab) {
     if (session_ != nullptr) {
       session_->sync_detect_lab_mode_from_task_id(selected_calibrator_id_);
-      preview_live_ = (session_->source_mode() == SourceMode::RosTopic);
+      if (session_->source_mode() == SourceMode::RosTopic) {
+        preview_live_ = true;
+      }
     }
     refresh_lab_mode_ui();
     // 沿用数据源页已配置的图像 / CameraInfo
@@ -638,6 +826,7 @@ void MainWindow::go_to(PageId page) {
     }
     if (session_ != nullptr && session_->source_mode() == SourceMode::RosTopic) {
       on_lab_refresh_camera_info();
+      start_ros_image_pipeline();
     }
     apply_lab_camera_info_subscription();
     sync_detect_intrinsics_from_sources();
@@ -658,6 +847,9 @@ void MainWindow::go_to(PageId page) {
       break;
     case PageId::Workbench:
       page_name = QStringLiteral("工作台");
+      break;
+    case PageId::StereoRectify:
+      page_name = QStringLiteral("校正验证");
       break;
     case PageId::Review:
       page_name = QStringLiteral("复核导出");
@@ -910,14 +1102,15 @@ void MainWindow::setup_central_widget() {
   steps->setObjectName(QStringLiteral("StepRail"));
   auto *steps_layout = new QHBoxLayout(steps);
   steps_layout->setContentsMargins(20, 0, 20, 0);
-  for (int i = 0; i < 5; ++i) {
+  for (int i = 0; i < 6; ++i) {
     step_labels_[i] = new QLabel(steps);
     step_labels_[i]->setCursor(Qt::PointingHandCursor);
     step_labels_[i]->setToolTip(QStringLiteral("点击切换到此步骤"));
     step_labels_[i]->installEventFilter(this);
     steps_layout->addWidget(step_labels_[i]);
-    if (i < 4) {
-      steps_layout->addWidget(make_label(QStringLiteral("→"), QStringLiteral("Muted"), steps));
+    if (i < 5) {
+      step_arrows_[i] = make_label(QStringLiteral("→"), QStringLiteral("Muted"), steps);
+      steps_layout->addWidget(step_arrows_[i]);
     }
   }
   steps_layout->addStretch(1);
@@ -930,6 +1123,7 @@ void MainWindow::setup_central_widget() {
   stack_->addWidget(build_data_source_page());
   stack_->addWidget(build_setup_page());
   stack_->addWidget(build_workbench_page());
+  stack_->addWidget(build_stereo_rectify_page());
   stack_->addWidget(build_review_page());
   stack_->addWidget(build_detect_lab_page());
   root_layout->addWidget(stack_, 1);

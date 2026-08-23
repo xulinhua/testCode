@@ -3,6 +3,7 @@
 #include "main_window_helpers.hpp"
 
 #include "hs_calib_suite/gui/theme/app_style.hpp"
+#include "hs_calib_suite/gui/task_flow/task_flow.hpp"
 #include "hs_calib_suite/gui/widgets/image_view_widget.hpp"
 #include "hs_calib_suite/gui/widgets/review_charts_widget.hpp"
 #include "hs_calib_suite/gui/panels/launcher_config_panel.hpp"
@@ -244,6 +245,7 @@ void MainWindow::select_calib_tile(QFrame *tile) {
   }
   append_log(LogLevel::Info, QStringLiteral("› 选定标定器：%1").arg(selected_calibrator_id_));
   refresh_status_task();
+  refresh_task_flow_chrome();
 }
 
 /// \brief 创建任务画廊卡（工程标定 / 检测调试共用）
@@ -1060,7 +1062,7 @@ void MainWindow::wire_launcher_panel_once() {
       &MainWindow::on_source_mode_changed);
   connect(
       launcher_panel_, &LauncherConfigPanel::image_topic_changed, this,
-      &MainWindow::on_topic_changed);
+      [this](const QString &) { schedule_ros_image_subscription(); });
   connect(
       launcher_panel_, &LauncherConfigPanel::camera_info_topic_changed, this,
       &MainWindow::on_camera_info_topic_changed);
@@ -1100,6 +1102,13 @@ void MainWindow::wire_launcher_panel_once() {
   connect(
       launcher_panel_, &LauncherConfigPanel::pose_source_changed, this,
       [this](int) { refresh_setup_readiness(); });
+
+  if (launcher_panel_->combo_stereo_side() != nullptr) {
+    connect(
+        launcher_panel_->combo_stereo_side(),
+        QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+        [this](int) { schedule_ros_image_subscription(); });
+  }
 
   combo_source_mode_ = launcher_panel_->combo_source_mode();
   combo_image_topic_ = launcher_panel_->combo_image_topic();
@@ -1280,8 +1289,9 @@ QWidget *MainWindow::build_workbench_page() {
   auto *titles = new QVBoxLayout(left_host);
   titles->setContentsMargins(0, 0, 12, 0);
   titles->setSpacing(2);
-  auto *title_lbl =
-      make_label(QStringLiteral("工作台 · 采集与求解"), QStringLiteral("PageTitle"), left_host);
+  auto *title_lbl = make_label(
+      QStringLiteral("工作台 · 采集与求解"), QStringLiteral("PageTitle"), left_host);
+  flow_workbench_title_ = title_lbl;
   title_lbl->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
   titles->addWidget(title_lbl);
   workbench_path_label_ = make_label(
@@ -1332,7 +1342,14 @@ QWidget *MainWindow::build_workbench_page() {
   connect(btn_detect_, &QPushButton::clicked, this, &MainWindow::on_detect_and_preview);
   connect(btn_capture_wb_, &QPushButton::clicked, this, &MainWindow::on_capture_observation);
   connect(btn_solve_wb_, &QPushButton::clicked, this, &MainWindow::on_solve);
-  connect(to_review, &QPushButton::clicked, this, [this]() { go_to(PageId::Review); });
+  connect(to_review, &QPushButton::clicked, this, [this]() {
+    if (session_ != nullptr && session_->is_stereo_intrinsics() &&
+        session_->has_result()) {
+      go_to(session_->has_stereo_rectified() ? PageId::StereoRectify : PageId::Review);
+      return;
+    }
+    go_to(PageId::Review);
+  });
 
   // 等宽固定：QSS min/max-width=108 + 代码再锁一层（防换文案/主题后撑开）
   {
@@ -1474,7 +1491,44 @@ QWidget *MainWindow::build_workbench_page() {
   auto *preview_body = new QWidget(preview_panel);
   auto *preview_body_lay = new QVBoxLayout(preview_body);
   preview_body_lay->setContentsMargins(8, 8, 8, 8);
-  preview_body_lay->addWidget(preview_view_);
+  mono_preview_host_ = new QWidget(preview_body);
+  auto *mono_lay = new QVBoxLayout(mono_preview_host_);
+  mono_lay->setContentsMargins(0, 0, 0, 0);
+  mono_lay->addWidget(preview_view_);
+
+  stereo_preview_host_ = new QWidget(preview_body);
+  auto *stereo_outer = new QVBoxLayout(stereo_preview_host_);
+  stereo_outer->setContentsMargins(0, 0, 0, 0);
+  stereo_outer->setSpacing(6);
+  auto *stereo_sync_row = new QHBoxLayout;
+  stereo_sync_row->addWidget(
+      make_label(QStringLiteral("左目"), QStringLiteral("Muted"), stereo_preview_host_));
+  stereo_sync_row->addStretch(1);
+  stereo_sync_label_ = make_label(QStringLiteral("Δt —"), QStringLiteral("Muted"), stereo_preview_host_);
+  stereo_sync_row->addWidget(stereo_sync_label_);
+  stereo_sync_row->addStretch(1);
+  stereo_sync_row->addWidget(
+      make_label(QStringLiteral("右目"), QStringLiteral("Muted"), stereo_preview_host_));
+  stereo_outer->addLayout(stereo_sync_row);
+  auto *stereo_row = new QHBoxLayout;
+  stereo_row->setSpacing(6);
+  stereo_preview_left_ = new ImageViewWidget(stereo_preview_host_);
+  stereo_preview_left_->setMinimumSize(140, 120);
+  stereo_preview_left_->set_placeholder(QStringLiteral("左目"));
+  stereo_preview_left_->set_async_refresh(true, 33);
+  stereo_preview_left_->set_toolbar_style(ImageViewToolbarStyle::Hidden);
+  stereo_preview_right_ = new ImageViewWidget(stereo_preview_host_);
+  stereo_preview_right_->setMinimumSize(140, 120);
+  stereo_preview_right_->set_placeholder(QStringLiteral("右目"));
+  stereo_preview_right_->set_async_refresh(true, 33);
+  stereo_preview_right_->set_toolbar_style(ImageViewToolbarStyle::Hidden);
+  stereo_row->addWidget(stereo_preview_left_, 1);
+  stereo_row->addWidget(stereo_preview_right_, 1);
+  stereo_outer->addLayout(stereo_row, 1);
+  stereo_preview_host_->setVisible(false);
+
+  preview_body_lay->addWidget(mono_preview_host_, 1);
+  preview_body_lay->addWidget(stereo_preview_host_, 1);
   preview_panel_lay->addWidget(preview_body, 1);
   preview_lay->addWidget(preview_panel, 1);
 
@@ -1744,6 +1798,103 @@ QWidget *MainWindow::build_workbench_page() {
   return page;
 }
 
+/// \brief 构建双目校正验证页（第 6 步流程，仅 stereo_intrinsics）
+QWidget *MainWindow::build_stereo_rectify_page() {
+  auto *page = new QWidget;
+  auto *root = new QVBoxLayout(page);
+  root->setContentsMargins(16, 12, 16, 8);
+  root->setSpacing(10);
+
+  auto *header = new QHBoxLayout;
+  auto *titles = new QVBoxLayout;
+  flow_rectify_title_ =
+      make_label(QStringLiteral("校正验证"), QStringLiteral("PageTitle"), page);
+  titles->addWidget(flow_rectify_title_);
+  rectify_path_label_ = make_label(
+      QStringLiteral("标定成功后浏览校正图与极线对齐"), QStringLiteral("PageSubtitle"), page);
+  titles->addWidget(rectify_path_label_);
+  header->addLayout(titles, 1);
+
+  auto *back_wb = new QPushButton(QStringLiteral("返回工作台"), page);
+  back_wb->setObjectName(QStringLiteral("GhostButton"));
+  connect(back_wb, &QPushButton::clicked, this, [this]() { go_to(PageId::Workbench); });
+  auto *to_review = new QPushButton(QStringLiteral("下一步：复核导出"), page);
+  to_review->setObjectName(QStringLiteral("PrimaryButton"));
+  connect(to_review, &QPushButton::clicked, this, [this]() { go_to(PageId::Review); });
+  header->addWidget(back_wb);
+  header->addWidget(to_review);
+  root->addLayout(header);
+
+  auto *metrics_row = new QHBoxLayout;
+  auto *baseline_card = make_metric_card(QStringLiteral("基线"), QStringLiteral("—"));
+  auto *rms_card = make_metric_card(QStringLiteral("立体 RMS"), QStringLiteral("— px"));
+  auto *brightness_card = make_metric_card(QStringLiteral("左右亮度"), QStringLiteral("—"));
+  rectify_metric_baseline_ = baseline_card->findChild<QLabel *>(QStringLiteral("MetricValue"));
+  rectify_metric_rms_ = rms_card->findChild<QLabel *>(QStringLiteral("MetricValue"));
+  rectify_metric_brightness_ =
+      brightness_card->findChild<QLabel *>(QStringLiteral("MetricValue"));
+  metrics_row->addWidget(baseline_card);
+  metrics_row->addWidget(rms_card);
+  metrics_row->addWidget(brightness_card);
+  root->addLayout(metrics_row);
+
+  rectify_hint_label_ = make_label(QString(), QStringLiteral("Muted"), page);
+  root->addWidget(rectify_hint_label_);
+
+  auto *split = new QSplitter(Qt::Horizontal, page);
+  split->setChildrenCollapsible(false);
+  rectify_preview_left_ = new ImageViewWidget(split);
+  rectify_preview_left_->set_placeholder(QStringLiteral("左目校正预览"));
+  rectify_preview_left_->setMinimumSize(360, 280);
+  rectify_preview_right_ = new ImageViewWidget(split);
+  rectify_preview_right_->set_placeholder(QStringLiteral("右目校正预览"));
+  rectify_preview_right_->setMinimumSize(360, 280);
+  split->addWidget(make_panel(QStringLiteral("左目 · 极线叠加"), rectify_preview_left_));
+  split->addWidget(make_panel(QStringLiteral("右目 · 极线叠加"), rectify_preview_right_));
+  split->setStretchFactor(0, 1);
+  split->setStretchFactor(1, 1);
+  root->addWidget(split, 1);
+
+  auto *nav = new QHBoxLayout;
+  auto *prev = new QPushButton(QStringLiteral("上一对"), page);
+  auto *next = new QPushButton(QStringLiteral("下一对"), page);
+  prev->setObjectName(QStringLiteral("GhostButton"));
+  next->setObjectName(QStringLiteral("GhostButton"));
+  connect(prev, &QPushButton::clicked, this, [this]() {
+    if (session_ == nullptr) {
+      return;
+    }
+    session_->set_stereo_pair_index(session_->stereo_pair_index() - 1);
+    refresh_stereo_rectify_view();
+  });
+  connect(next, &QPushButton::clicked, this, [this]() {
+    if (session_ == nullptr) {
+      return;
+    }
+    session_->set_stereo_pair_index(session_->stereo_pair_index() + 1);
+    refresh_stereo_rectify_view();
+  });
+  rectify_pair_slider_label_ = make_label(QStringLiteral("图像对：—"), QStringLiteral("Muted"), page);
+  rectify_pair_slider_ = new QSlider(Qt::Horizontal, page);
+  rectify_pair_slider_->setRange(0, 0);
+  connect(rectify_pair_slider_, &QSlider::valueChanged, this, [this](int v) {
+    if (session_ == nullptr) {
+      return;
+    }
+    if (session_->stereo_pair_index() != v) {
+      session_->set_stereo_pair_index(v);
+    }
+    refresh_stereo_rectify_view();
+  });
+  nav->addWidget(prev);
+  nav->addWidget(rectify_pair_slider_label_);
+  nav->addWidget(rectify_pair_slider_, 1);
+  nav->addWidget(next);
+  root->addLayout(nav);
+
+  return page;
+}
+
 /// \brief 构建结果复查页
 QWidget *MainWindow::build_review_page() {
   auto *page = new QWidget;
@@ -1753,8 +1904,9 @@ QWidget *MainWindow::build_review_page() {
 
   auto *header = new QHBoxLayout;
   auto *titles = new QVBoxLayout;
-  titles->addWidget(
-      make_label(QStringLiteral("复核与导出"), QStringLiteral("PageTitle"), page));
+  flow_review_title_ =
+      make_label(QStringLiteral("复核与导出"), QStringLiteral("PageTitle"), page);
+  titles->addWidget(flow_review_title_);
   titles->addWidget(make_label(
       QStringLiteral("残差 · 观测 · 覆盖可视化，确认后导出"),
       QStringLiteral("PageSubtitle"), page));

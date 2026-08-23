@@ -10,5 +10,11 @@ namespace gui {
 bool build_intrinsics_plot_input(
     const SessionController &session, core::IntrinsicsPlotInput *out);
 
+/// \brief 双目分侧统计图输入（side: "left" / "right"）
+bool build_intrinsics_plot_input_for_side(
+    const SessionController &session,
+    const QString &side,
+    core::IntrinsicsPlotInput *out);
+
 }  // namespace gui
 }  // namespace hs_calib

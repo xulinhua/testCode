@@ -71,7 +71,7 @@ hs_calib_suite/
 | 标定器 ID             | 靶标                                                            | 说明                                                                            |
 | --------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `cam_intrinsics`    | 平面棋盘 / ChArUco / ArUco 阵列 / AprilGrid / 圆点              | Tier4 流水线；训练/评估双库；工作台右栏；**三张 matplotlib 统计图**（采集分布 / single-shot 柱状 / RMS 热力图）；复核页「标定统计…」与导出 PNG |
-| `stereo_intrinsics` | 同左（左右分侧采集）                                            | 复用内参 Tier4 工作台布局；左右目各自多姿态 → `camera_left.yaml` + `camera_right.yaml` |
+| `stereo_intrinsics` | 同左（**成对**左右采集） | 左右分侧标定 + 可选 `stereoCalibrate`；6 步 UI（含校正验证）；`camera_left.yaml` + `camera_right.yaml` + 可选 `stereo_rectified.yaml` |
 | `stereo_extrinsics` | 同左（成对左右观测）                                            | 固定内参 → `stereoCalibrate` + 校正 → `stereo_extrinsics.yaml`              |
 | `trihedral_oneshot` | 直角三面**ChArUco**（推荐）/ 棋盘；正方形面 + 约 1 格白边 | 单帧：≥2 面，搜焦距 + PnP；多帧：`calibrateCamera`；三面可同码，几何聚类分面 |
 | `eye_in_hand`       | 棋盘 + 位姿                                                     | 末端相机：求解 gripper→camera                                                  |
@@ -139,6 +139,16 @@ Kannala–Brandt / CMei 仍走 OpenCV 原生路径。
 
 配置 `gui.stats_backend`：`qt`（默认，采集统计为轻量 Qt 图）或 `matplotlib`（完整 Tier4 三图 + 导出 PNG）。复核页导出 YAML 时同步写入 `calibration_data_statistics.png`、`calibration_result_vs_singleshot.png`、`calibration_result_rms.png`（需 matplotlib 后端且已标定）。
 
+### 双目内参在线流程（摘要）
+
+| 要点 | 说明 |
+|------|------|
+| 步骤 | 6 步：数据源 → 标定设置 → **采集求解** → **校正验证** → 复核导出 |
+| ROS 订阅 | 仅在「采集求解」页；离开即退订，避免设置页卡顿 |
+| 成对采集 | 左右同步检测后一次入库；在线原图缓存至临时目录供校正预览 |
+| 立体校正 | 求解后 `stereoCalibrate` + `stereoRectify`；校正页极线叠加预览 |
+| 详细文档 | [`docs/STEREO_INTRINSICS_FLOW.md`](docs/STEREO_INTRINSICS_FLOW.md) |
+
 ## 5. 运行
 
 ```bash
@@ -174,6 +184,7 @@ GUI 可「文件 → 重新加载默认棋盘配置」从 `config/*.yaml` 刷新
 | [docs/CLASS_DIAGRAMS.md](docs/CLASS_DIAGRAMS.md) | UI / 算法类图            |
 | [docs/TAXONOMY.md](docs/TAXONOMY.md)             | 靶标与标定类型一览       |
 | [docs/UI_CONCEPT.md](docs/UI_CONCEPT.md)         | 界面分区与操作流程       |
+| [docs/STEREO_INTRINSICS_FLOW.md](docs/STEREO_INTRINSICS_FLOW.md) | 双目内参 6 步、ROS 订阅、校正验证 |
 | [docs/HANDEYE_MONO.md](docs/HANDEYE_MONO.md)     | 单目内参与手眼用法       |
 | [docs/TIER4_FUSION_PLAN.md](docs/TIER4_FUSION_PLAN.md)           | Tier4 内参融合方案与交付状态 |
 | [docs/TIER4_INTRINSICS_UI_SPEC.md](docs/TIER4_INTRINSICS_UI_SPEC.md) | Tier4 内参 UI / 参数规格 |

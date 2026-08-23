@@ -78,6 +78,9 @@ public:
   /// \brief 泵一次 ROS 回调（由 QTimer 调用）
   void spin_some();
 
+  /// \brief 供 RosExecutorHub 注册的后台 spin 节点
+  rclcpp::Node::SharedPtr ros_node() const { return node_; }
+
 signals:
   /// \brief 收到新帧（仅通知；取图用 latest_bgr）
   void frame_received();

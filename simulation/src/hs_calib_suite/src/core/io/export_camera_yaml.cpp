@@ -333,6 +333,41 @@ std::string format_intrinsics_text(const CalibrationResult &result) {
     };
     dump_side("left", "left_");
     dump_side("right", "right_");
+    if (result.intrinsics_meta.count("stereo_rectified") &&
+        result.intrinsics_meta.at("stereo_rectified") == "true") {
+      oss << "\n[stereo geometry / rectification]\n";
+      if (result.metrics.count("stereo_rms")) {
+        oss << "  stereo_rms: " << result.metrics.at("stereo_rms") << " px\n";
+      }
+      if (result.metrics.count("baseline_m")) {
+        oss << "  baseline_m: " << result.metrics.at("baseline_m") << " m\n";
+      }
+      auto has = [&](const char *k) { return result.intrinsics_meta.count(k) > 0; };
+      auto get = [&](const char *k) {
+        return has(k) ? result.intrinsics_meta.at(k) : std::string();
+      };
+      if (has("stereo_R")) {
+        oss << "  R: " << get("stereo_R") << "\n";
+      }
+      if (has("stereo_T")) {
+        oss << "  T: " << get("stereo_T") << " m\n";
+      }
+      if (has("Q")) {
+        oss << "  Q: " << get("Q") << "\n";
+      }
+      if (has("P1")) {
+        oss << "  P1: " << get("P1") << "\n";
+      }
+      if (has("P2")) {
+        oss << "  P2: " << get("P2") << "\n";
+      }
+      if (has("R1")) {
+        oss << "  R1: " << get("R1") << "\n";
+      }
+      if (has("R2")) {
+        oss << "  R2: " << get("R2") << "\n";
+      }
+    }
     return oss.str();
   }
   const CameraModelId mid = parse_camera_model(meta(result, "model", "brown_conrady"));
@@ -484,6 +519,48 @@ std::string format_extrinsics_text(
     oss << "]\n";
   }
   return oss.str();
+}
+
+/// \brief 导出立体校正参数 YAML
+bool export_stereo_rectified_yaml(
+    const CalibrationResult &result, const std::string &path) {
+  if (!result.success || !result.intrinsics_meta.count("stereo_rectified") ||
+      result.intrinsics_meta.at("stereo_rectified") != "true") {
+    return false;
+  }
+  std::ofstream ofs(path);
+  if (!ofs) {
+    return false;
+  }
+  ofs << "# hs_calib_suite stereo rectification\n";
+  if (result.intrinsics_meta.count("left_image_width")) {
+    ofs << "image_width: " << result.intrinsics_meta.at("left_image_width") << "\n";
+    ofs << "image_height: " << result.intrinsics_meta.at("left_image_height") << "\n";
+  }
+  if (result.metrics.count("stereo_rms")) {
+    ofs << "stereo_rms: " << result.metrics.at("stereo_rms") << "\n";
+  }
+  if (result.metrics.count("baseline_m")) {
+    ofs << "baseline_m: " << result.metrics.at("baseline_m") << "\n";
+  }
+  if (result.metrics.count("rectified_pairs")) {
+    ofs << "rectified_pairs: " << static_cast<int>(result.metrics.at("rectified_pairs"))
+        << "\n";
+  }
+  auto dump = [&](const char *key) {
+    const auto it = result.intrinsics_meta.find(key);
+    if (it != result.intrinsics_meta.end()) {
+      ofs << key << ": " << it->second << "\n";
+    }
+  };
+  dump("R1");
+  dump("R2");
+  dump("P1");
+  dump("P2");
+  dump("Q");
+  dump("stereo_R");
+  dump("stereo_T");
+  return static_cast<bool>(ofs);
 }
 
 }  // namespace core
