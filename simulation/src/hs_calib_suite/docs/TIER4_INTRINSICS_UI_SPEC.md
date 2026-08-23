@@ -63,7 +63,7 @@ flowchart TB
 | 圆点板专用检测参数 | ✅ DotBoardDetector | ⚠️ 通用圆网格，参数不全 |
 | 棋盘 ROI 跟踪检测 | ✅ ChessBoardDetector | ⚠️ 无 ROI / padding / lost_frames |
 | AprilTag 阵列检测参数 | ✅ ApriltagGridDetector (tag16h5) | ⚠️ AprilGrid 用 36h11，参数集不同 |
-| matplotlib 标定统计图 | ✅ | ❌ |
+| matplotlib 标定统计图 | ✅ | ✅（`gui.stats_backend=matplotlib`，见 [`TIER4_INTRINSICS_STATS.md`](TIER4_INTRINSICS_STATS.md)） |
 
 ---
 
@@ -621,9 +621,10 @@ chess_board_detector:
 
 ### P4 — 统计与导出
 
-- [ ] View data collection statistics（matplotlib 或 Qt 图表）
-- [ ] plot_calibration_* 标定后图表
-- [ ] Save 格式与 Autoware camera_info 对齐
+- [x] View data collection statistics（matplotlib 5×3 + Qt 轻量摘要）
+- [x] plot_calibration_* 标定后图表（柱状对比 + RMS 热力图，异步弹窗）
+- [x] 复核页导出三张统计 PNG
+- [ ] Save 格式与 Autoware camera_info 全字段对齐（部分已支持）
 
 ---
 

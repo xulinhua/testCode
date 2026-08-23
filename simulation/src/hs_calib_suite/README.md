@@ -38,6 +38,7 @@ hs_calib_suite/
 │   │   ├── targets/       # 靶标几何模型
 │   │   ├── detectors/     # 特征检测
 │   │   ├── calibrators/   # 标定求解器
+│   │   │   └── intrinsics/  # Tier4 内参：采集双库、流水线、统计 JSON
 │   │   ├── io/            # YAML 读写、板位姿
 │   │   └── util/          # ImageFrame 桥接、通用图像工具（to_gray 等）
 │   ├── ros/
@@ -45,15 +46,19 @@ hs_calib_suite/
 │       ├── window/        # 主窗口
 │       ├── panels/        # 配置面板等
 │       ├── session/       # 会话编排
-│       ├── bridges/       # ROS 图像 / TF
+│       ├── intrinsics/    # 内参工作台右栏、参数弹窗、预览叠加
+│       ├── plotting/      # Tier4 统计图（异步 matplotlib / 导出）
+│       ├── bridges/       # ROS 图像 / TF / Rosbag
 │       ├── widgets/       # 预览图像控件（缩放/平移，无新依赖）
 │       ├── log/           # 日志等级 + rclcpp 终端输出
 │       ├── data/          # CSV 等位姿存储
 │       └── theme/         # 样式主题
+├── scripts/               # matplotlib 统计图（install/share 下供运行时调用）
+├── third_party/           # apriltag、ceres_intrinsic_camera_calibrator（vendored）
 ├── src/
 │   ├── core/{base,types,registry,targets,detectors,calibrators,io,tools,util}/
 │   ├── ros/
-│   └── gui/{app,window,panels,session,bridges,widgets,log,data,theme}/
+│   └── gui/{app,window,panels,session,intrinsics,plotting,bridges,widgets,log,data,theme}/
 ├── msg/  srv/
 ├── config/
 └── docs/
@@ -65,7 +70,7 @@ hs_calib_suite/
 
 | 标定器 ID             | 靶标                                                            | 说明                                                                            |
 | --------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `cam_intrinsics`    | 平面棋盘 / ChArUco / ArUco 阵列 / AprilGrid / 圆点              | Tier4 风格流水线；训练/评估双库采集；工作台 Tier4 右栏（Solver/标定/评估/采集统计）；Rosbag 直接解码 |
+| `cam_intrinsics`    | 平面棋盘 / ChArUco / ArUco 阵列 / AprilGrid / 圆点              | Tier4 流水线；训练/评估双库；工作台右栏；**三张 matplotlib 统计图**（采集分布 / single-shot 柱状 / RMS 热力图）；复核页「标定统计…」与导出 PNG |
 | `stereo_intrinsics` | 同左（左右分侧采集）                                            | 复用内参 Tier4 工作台布局；左右目各自多姿态 → `camera_left.yaml` + `camera_right.yaml` |
 | `stereo_extrinsics` | 同左（成对左右观测）                                            | 固定内参 → `stereoCalibrate` + 校正 → `stereo_extrinsics.yaml`              |
 | `trihedral_oneshot` | 直角三面**ChArUco**（推荐）/ 棋盘；正方形面 + 约 1 格白边 | 单帧：≥2 面，搜焦距 + PnP；多帧：`calibrateCamera`；三面可同码，几何聚类分面 |
@@ -124,8 +129,15 @@ sudo apt install libceres-dev
 Tier4 `ceres_intrinsic_camera_calibrator` 以 Apache-2.0  vendored 于 `third_party/ceres_intrinsic_camera_calibrator/`（仅标定器，无 pybind/ROS 依赖）。
 Kannala–Brandt / CMei 仍走 OpenCV 原生路径。
 
-内参 Tier4 UI 融合说明：[`docs/TIER4_FUSION_PLAN.md`](docs/TIER4_FUSION_PLAN.md)、[`docs/TIER4_INTRINSICS_UI_SPEC.md`](docs/TIER4_INTRINSICS_UI_SPEC.md)。  
-配置 `gui.stats_backend`：`qt`（默认）或 `matplotlib`。
+内参 Tier4 UI 与统计图：
+
+| 文档 | 说明 |
+|------|------|
+| [`docs/TIER4_FUSION_PLAN.md`](docs/TIER4_FUSION_PLAN.md) | 融合方案与实现状态 |
+| [`docs/TIER4_INTRINSICS_UI_SPEC.md`](docs/TIER4_INTRINSICS_UI_SPEC.md) | 参数与界面模块规格 |
+| [`docs/TIER4_INTRINSICS_STATS.md`](docs/TIER4_INTRINSICS_STATS.md) | **三张统计图**、异步绘制、`gui.stats_backend`、蓝/橙柱语义 |
+
+配置 `gui.stats_backend`：`qt`（默认，采集统计为轻量 Qt 图）或 `matplotlib`（完整 Tier4 三图 + 导出 PNG）。复核页导出 YAML 时同步写入 `calibration_data_statistics.png`、`calibration_result_vs_singleshot.png`、`calibration_result_rms.png`（需 matplotlib 后端且已标定）。
 
 ## 5. 运行
 
@@ -163,6 +175,9 @@ GUI 可「文件 → 重新加载默认棋盘配置」从 `config/*.yaml` 刷新
 | [docs/TAXONOMY.md](docs/TAXONOMY.md)             | 靶标与标定类型一览       |
 | [docs/UI_CONCEPT.md](docs/UI_CONCEPT.md)         | 界面分区与操作流程       |
 | [docs/HANDEYE_MONO.md](docs/HANDEYE_MONO.md)     | 单目内参与手眼用法       |
+| [docs/TIER4_FUSION_PLAN.md](docs/TIER4_FUSION_PLAN.md)           | Tier4 内参融合方案与交付状态 |
+| [docs/TIER4_INTRINSICS_UI_SPEC.md](docs/TIER4_INTRINSICS_UI_SPEC.md) | Tier4 内参 UI / 参数规格 |
+| [docs/TIER4_INTRINSICS_STATS.md](docs/TIER4_INTRINSICS_STATS.md) | Tier4 统计图架构与使用 |
 | [docs/TIER4_GAP.md](docs/TIER4_GAP.md)           | 与 TIER IV 对比          |
 | [docs/MIGRATION.md](docs/MIGRATION.md)           | 与仓库内旧标定代码的边界 |
 

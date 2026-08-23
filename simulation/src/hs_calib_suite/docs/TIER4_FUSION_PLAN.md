@@ -500,11 +500,11 @@ aruco / grid     →      同上
 
 ---
 
-*文档版本：2026-08-22 v1.1 · 已确认 · **P0–P4 首版已落地**（见下）*
+*文档版本：2026-08-23 v1.2 · P0–P4 首版已落地；统计图见 [`TIER4_INTRINSICS_STATS.md`](TIER4_INTRINSICS_STATS.md)*
 
 ---
 
-## 12. 实现状态（2026-08-22）
+## 12. 实现状态（2026-08-23）
 
 | 阶段 | 状态 | 主要交付 |
 |------|------|----------|
@@ -512,8 +512,9 @@ aruco / grid     →      同上
 | P1 | ✅ | `IntrinsicsControlRail`、`IntrinsicsMetricsStrip`、训练/评估 Tab、标定/评估/保存拆分 |
 | P1b | ✅ | `RosBagFrameReader` 直接解码、`SessionController::load_rosbag` |
 | P2 | ✅ | 非模态 `IntrinsicsParameterDialog`（标定/采集/检测） |
-| P3 | ✅ | `IntrinsicsStatsDialog`（qt/matplotlib 可配置）、复核页训练/评估计数 |
-| P4 | ✅ | `stereo_intrinsics` 复用 Tier4 右栏布局 |
+| P3 | ✅ | 三张 Tier4 统计弹窗 + `IntrinsicsAsyncPlotController`；`gui.stats_backend`；复核页「标定统计…」 |
+| P4 | ✅ | 导出 `calibration_*_statistics.png`；柱状图橙柱 = 逐帧 `calibrateCamera` 下界 RMS |
+| P4b | ✅ | `stereo_intrinsics` 复用 Tier4 右栏布局 |
 
 **代码落点**：
 
@@ -523,8 +524,23 @@ core/calibrators/intrinsics/
   board_frame_metrics.*
   intrinsics_data_collector.*
   intrinsics_session_state.*
+  intrinsics_pipeline.*              # 含 compute_single_shot_view_rms
+  intrinsics_plot_statistics.*       # 统计 JSON 导出
 gui/intrinsics/
-  intrinsics_workbench_panels.*   # 右栏 + 预览下指标
-  intrinsics_parameter_dialog.*   # 参数弹窗 + 统计
+  intrinsics_workbench_panels.*
+  intrinsics_parameter_dialog.*
+gui/plotting/
+  intrinsics_plot_session.*            # 会话 → IntrinsicsPlotInput
+  intrinsics_plot_renderer.*
+  intrinsics_async_plot_controller.*
+  intrinsics_plot_export.*
+  intrinsics_*_dialog.*                # 三统计弹窗
+scripts/
+  plot_common.py
+  intrinsics_collection_stats_plot.py
+  intrinsics_calibration_bars_plot.py
+  intrinsics_calibration_rms_plot.py
 gui/bridges/ros_bag_frame_reader.*
 ```
+
+详细统计图说明：**[`docs/TIER4_INTRINSICS_STATS.md`](TIER4_INTRINSICS_STATS.md)**。

@@ -39,4 +39,5 @@ collector_max_pixel_speed: 25.0
 collector_filter_reproj: true
 max_allowed_max_reprojection_error: 2.0
 max_allowed_rms_reprojection_error: 0.5
+# 统计图：qt=轻量摘要；matplotlib=完整 Tier4 三图（见 docs/TIER4_INTRINSICS_STATS.md）
 gui.stats_backend: qt
