@@ -21,12 +21,55 @@ find_package(sensor_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(tf2_ros REQUIRED)
-find_package(cv_bridge REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2_storage REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
-find_package(OpenCV REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
+
+# ---------------------------------------------------------------------------
+# Adaptive OpenCV:
+# - If a CUDA-enabled OpenCV exists AND its exact toolkit is installed → use it
+# - Otherwise force system CPU OpenCV (so cv_bridge configure does not fail
+#   when /usr/local/cuda points at a different major/minor toolkit)
+# Must run BEFORE find_package(cv_bridge/OpenCV).
+# ---------------------------------------------------------------------------
+set(_HS_CUDA_OPENCV_DIR "/usr/local/opencv4.10.0/lib/cmake/opencv4")
+set(_HS_SYS_OPENCV_DIR "/usr/lib/x86_64-linux-gnu/cmake/opencv4")
+set(_HS_OPENCV_CUDA_REQ "")
+if(EXISTS "${_HS_CUDA_OPENCV_DIR}/OpenCVConfig.cmake")
+  file(STRINGS "${_HS_CUDA_OPENCV_DIR}/OpenCVConfig.cmake" _hs_ocv_cuda_line
+    REGEX "^set\\(OpenCV_CUDA_VERSION")
+  if(_hs_ocv_cuda_line)
+    string(REGEX REPLACE ".*\"([0-9]+\\.[0-9]+)\".*" "\\1"
+      _HS_OPENCV_CUDA_REQ "${_hs_ocv_cuda_line}")
+  endif()
+endif()
+
+set(_HS_MATCHING_CUDA "")
+if(_HS_OPENCV_CUDA_REQ AND EXISTS "/usr/local/cuda-${_HS_OPENCV_CUDA_REQ}")
+  set(_HS_MATCHING_CUDA "/usr/local/cuda-${_HS_OPENCV_CUDA_REQ}")
+endif()
+
+if(_HS_MATCHING_CUDA AND EXISTS "${_HS_CUDA_OPENCV_DIR}/OpenCVConfig.cmake")
+  set(OpenCV_DIR "${_HS_CUDA_OPENCV_DIR}" CACHE PATH "OpenCV CMake dir" FORCE)
+  set(CUDA_TOOLKIT_ROOT_DIR "${_HS_MATCHING_CUDA}" CACHE PATH "CUDA toolkit" FORCE)
+  set(ENV{CUDA_HOME} "${_HS_MATCHING_CUDA}")
+  set(ENV{CUDA_PATH} "${_HS_MATCHING_CUDA}")
+  set(ENV{PATH} "${_HS_MATCHING_CUDA}/bin:$ENV{PATH}")
+  message(STATUS
+    "hs_calib_suite: CUDA ${_HS_OPENCV_CUDA_REQ} found → CUDA OpenCV (${OpenCV_DIR})")
+elseif(EXISTS "${_HS_SYS_OPENCV_DIR}/OpenCVConfig.cmake")
+  set(OpenCV_DIR "${_HS_SYS_OPENCV_DIR}" CACHE PATH "OpenCV CMake dir" FORCE)
+  message(STATUS
+    "hs_calib_suite: CUDA ${_HS_OPENCV_CUDA_REQ} unavailable/mismatched "
+    "→ CPU OpenCV (${OpenCV_DIR})")
+else()
+  message(STATUS "hs_calib_suite: OpenCV_DIR left to CMake default search")
+endif()
+
+# OpenCV before cv_bridge so the selected OpenCV_DIR is what both use
+find_package(OpenCV REQUIRED)
+find_package(cv_bridge REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Vendored AprilRobotics/apriltag（Kalibr 同系 36h11 检测后端）
