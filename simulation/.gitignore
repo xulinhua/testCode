@@ -30,3 +30,6 @@ Thumbs.db
 
 # Local runtime logs
 MUJOCO_LOG.TXT
+
+# hs_calib_suite: matplotlib 统计图临时导出（运行时生成）
+hs_intrinsics_plot_*.png
