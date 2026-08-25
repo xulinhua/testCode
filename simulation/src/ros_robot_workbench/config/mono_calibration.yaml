@@ -1,6 +1,0 @@
-image_topic: /camera/image_raw
-pose_endpoint: /robot_pose
-control_endpoint: /robot_control
-board_type: chessboard
-mode: realtime
-quality_hint: true

@@ -1,5 +1,0 @@
-# detection_overlay
-module: detection_overlay
-enabled: true
-image_topic: /camera/image_raw
-det_topic: /detections

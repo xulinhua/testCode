@@ -1,4 +1,0 @@
-# joint_monitor
-module: joint_monitor
-enabled: true
-joint_states_topic: /joint_states

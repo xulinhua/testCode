@@ -1,5 +1,0 @@
-# foot_contact_monitor
-module: foot_contact_monitor
-enabled: true
-contact_topic: /foot_contact
-leg_count: 4

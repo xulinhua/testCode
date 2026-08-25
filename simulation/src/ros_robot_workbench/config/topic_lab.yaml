@@ -1,9 +1,0 @@
-# 话题调试
-module: topic_lab
-default_topic: /chatter
-echo_buffer_size: 50
-hz_sample_sec: 2
-favorite_topics:
-  - /joint_states
-  - /odom
-  - /camera/image_raw

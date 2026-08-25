@@ -1,5 +1,0 @@
-# balance_panel
-module: balance_panel
-enabled: true
-imu_topic: /imu/data
-foot_force_topic: /foot_force

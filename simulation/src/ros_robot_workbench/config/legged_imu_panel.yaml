@@ -1,5 +1,0 @@
-# legged_imu_panel
-module: legged_imu_panel
-enabled: true
-imu_topic: /imu/data
-fall_threshold_deg: 45.0

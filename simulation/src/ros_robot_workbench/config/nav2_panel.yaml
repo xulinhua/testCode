@@ -1,5 +1,0 @@
-# nav2_panel
-module: nav2_panel
-enabled: true
-action_name: navigate_to_pose
-global_frame: map

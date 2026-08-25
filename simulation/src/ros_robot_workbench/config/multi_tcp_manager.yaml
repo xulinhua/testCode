@@ -1,5 +1,0 @@
-# multi_tcp_manager
-module: multi_tcp_manager
-enabled: true
-active_tcp: default
-tcp_config_dir: ""

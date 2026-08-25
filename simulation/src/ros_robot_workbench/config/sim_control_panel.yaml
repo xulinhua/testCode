@@ -1,9 +1,0 @@
-# sim_control_panel
-module: sim_control_panel
-enabled: true
-backend_default: ros_topic
-control_topic: /sim/control
-clock_topic: /clock
-world_name: default
-isaac_python: ""
-last_scene_path: ""

@@ -1,5 +1,0 @@
-# humanoid_joint_monitor
-module: humanoid_joint_monitor
-enabled: true
-joint_states_topic: /joint_states
-group: full_body
