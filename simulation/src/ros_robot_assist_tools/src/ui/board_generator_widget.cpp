@@ -177,6 +177,7 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
   QLineEdit * cell_size_mm = new QLineEdit("25");
   QLineEdit * circle_diameter_mm = new QLineEdit("12");
   QLineEdit * tag_size_mm = new QLineEdit("12");
+  QLineEdit * tag_spacing = new QLineEdit("0.3");
   QLineEdit * marker_ratio = new QLineEdit("0.75");
 
   QLabel * aruco_dict_hint = new QLabel(
@@ -217,6 +218,7 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
   form->addRow("单元尺寸(mm):", cell_size_mm);
   form->addRow("圆直径(mm):", circle_diameter_mm);
   form->addRow("Tag Size(mm):", tag_size_mm);
+  form->addRow("Tag Spacing (空白/tag):", tag_spacing);
   form->addRow("Marker比例(0-1):", marker_ratio);
   layout->addLayout(form);
 
@@ -244,6 +246,7 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     const bool show_start_id = (t == 4 || t == 5);
     const bool show_marker_ratio = (t == 4);
     const bool show_tag_size = (t == 5);
+    const bool show_tag_spacing = (t == 5);
     const bool show_circle_diameter_mm = (t == 2 || t == 3);
     const bool show_cell_size_mm = (t != 5 && t != 0);
     const bool show_marker_size = (t != 5);
@@ -266,6 +269,8 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     circle_diameter_mm->setVisible(show_circle_diameter_mm);
     if (auto * l = form->labelForField(tag_size_mm)) { l->setVisible(show_tag_size); }
     tag_size_mm->setVisible(show_tag_size);
+    if (auto * l = form->labelForField(tag_spacing)) { l->setVisible(show_tag_spacing); }
+    tag_spacing->setVisible(show_tag_spacing);
     if (auto * l = form->labelForField(marker_ratio)) { l->setVisible(show_marker_ratio); }
     marker_ratio->setVisible(show_marker_ratio);
     if (auto * w = form->labelForField(marker_size)) {
@@ -291,9 +296,10 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     if (t == 5) {
       if (board_width_mm->text().trimmed().isEmpty()) { board_width_mm->setText("200"); }
       if (board_height_mm->text().trimmed().isEmpty()) { board_height_mm->setText("150"); }
-      if (grid_rows->value() <= 0) { grid_rows->setValue(9); }
-      if (grid_cols->value() <= 0) { grid_cols->setValue(11); }
-      if (tag_size_mm->text().trimmed().isEmpty()) { tag_size_mm->setText("9"); }
+      if (grid_rows->value() <= 0) { grid_rows->setValue(7); }
+      if (grid_cols->value() <= 0) { grid_cols->setValue(7); }
+      if (tag_size_mm->text().trimmed().isEmpty()) { tag_size_mm->setText("12"); }
+      if (tag_spacing->text().trimmed().isEmpty()) { tag_spacing->setText("0.3"); }
       if (start_id->text().trimmed().isEmpty()) { start_id->setText("0"); }
     }
   };
@@ -320,6 +326,7 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
     params.cell_size_mm = cell_size_mm->text().toDouble();
     params.circle_diameter_mm = circle_diameter_mm->text().toDouble();
     params.tag_size_mm = tag_size_mm->text().toDouble();
+    params.tag_spacing = tag_spacing->text().toDouble();
     params.marker_ratio = marker_ratio->text().toDouble();
     params.aruco_white_border = (params.board_type == 0 && aruco_border_enable->isChecked());
     params.aruco_border_px = aruco_border_px->value();
@@ -341,6 +348,32 @@ BoardGeneratorWidget::BoardGeneratorWidget(QWidget * parent)
                     .arg(params.aruco_white_border && params.aruco_border_px > 0
                            ? QStringLiteral("（每侧白边 %1 px，边长=MarkSize+2×%1）").arg(params.aruco_border_px)
                            : QString()));
+    } else if (params.board_type == 5) {
+      const double gap_mm = params.tag_size_mm * params.tag_spacing;
+      const double pattern_w = (params.cols + 1) * gap_mm + params.cols * params.tag_size_mm;
+      const double pattern_h = (params.rows + 1) * gap_mm + params.rows * params.tag_size_mm;
+      const double need_w = pattern_w + 2.0 * params.tag_size_mm;
+      const double need_h = pattern_h + 2.0 * params.tag_size_mm;
+      const double fit_scale = std::min(1.0, std::min(params.board_width_mm / need_w, params.board_height_mm / need_h));
+      QString scale_note;
+      if (fit_scale < 0.999) {
+        scale_note = QString("（板面偏小，图案已等比缩至 %1%）").arg(fit_scale * 100.0, 0, 'f', 1);
+      }
+      log->append(QString(
+                    "AprilGrid 生成成功：DICT_APRILTAG_36h11，%1×%2 tags + %3×%4 小黑方格，"
+                    "板=%5×%6 mm，tagSize=%7 mm，空白=%8 mm，起始ID=%9，图像=%10×%11 px%12")
+                    .arg(params.cols)
+                    .arg(params.rows)
+                    .arg(params.cols + 1)
+                    .arg(params.rows + 1)
+                    .arg(params.board_width_mm, 0, 'f', 1)
+                    .arg(params.board_height_mm, 0, 'f', 1)
+                    .arg(params.tag_size_mm, 0, 'f', 1)
+                    .arg(gap_mm, 0, 'f', 1)
+                    .arg(params.start_id)
+                    .arg(board_image->cols)
+                    .arg(board_image->rows)
+                    .arg(scale_note));
     } else {
       log->append(QString("%1 生成成功。参数: %2x%3, 板尺寸=%4x%5mm, 圆直径=%6mm, 起始ID=%7")
                   .arg(board_type->currentText())

@@ -8,10 +8,9 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Keep compatibility with locally compiled OpenCV + CUDA 12.4.
-set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda-12.4")
-set(CUDA_HOME "/usr/local/cuda-12.4")
-set(CUDA_VERSION "12.4")
+# Do not hardcode CUDA toolkit; select OpenCV adaptively (see cmake/AdaptiveOpenCV.cmake).
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(AdaptiveOpenCV)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -19,8 +18,6 @@ find_package(OpenCV REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
-find_package(example_interfaces REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -40,7 +37,6 @@ include_directories(
 add_library(ros_robot_assist_tools_core STATIC
   src/preferences/app_preferences.cpp
   src/ros_robot_assist_tools_ui.cpp
-  src/ui/main_window.cpp
   src/ui/lazy_feature_page.cpp
   src/ui/preferences_dialog.cpp
   src/ui/shared_refresh_pool.cpp
@@ -50,17 +46,6 @@ add_library(ros_robot_assist_tools_core STATIC
   src/module/system_status_module.cpp
   src/module/image_viewer_module.cpp
   src/ui/zoomable_image_widget.cpp
-  src/module/intrinsic_calibration_module.cpp
-  src/module/stereo_calibration_module.cpp
-  src/module/multi_sensor_calibration_module.cpp
-  src/module/handeye_calibration_module.cpp
-  src/module/tcp_calibration_module.cpp
-  src/ui/intrinsic_calibration_widget.cpp
-  src/ui/stereo_calibration_widget.cpp
-  src/ui/multi_sensor_calibration_widget.cpp
-  src/ui/handeye_calibration_widget.cpp
-  src/ui/tcp_calibration_widget.cpp
-  src/module/calibration_module.cpp
   src/ui/board_generator_widget.cpp
   src/module/board_generator_module.cpp
   src/ui/pose_transform_widget.cpp
@@ -74,26 +59,13 @@ add_library(ros_robot_assist_tools_core STATIC
   src/ui/tf_viewer_widget.cpp
   src/module/tf_viewer_module.cpp
   src/manage/feature_data_manager_base.cpp
-  src/manage/system_status_data_manager.cpp
-  src/manage/image_viewer_data_manager.cpp
-  src/manage/board_generator_data_manager.cpp
-  src/manage/pose_transform_data_manager.cpp
   src/manage/kinematics_solver_data_manager.cpp
-  src/manage/tf_viewer_data_manager.cpp
-  src/manage/intrinsic_calibration_data_manager.cpp
-  src/manage/stereo_calibration_data_manager.cpp
-  src/manage/multi_sensor_calibration_data_manager.cpp
-  src/manage/handeye_calibration_data_manager.cpp
-  src/manage/tcp_calibration_data_manager.cpp
-  src/manage/feature_data_manager_hub.cpp
 )
 
 ament_target_dependencies(ros_robot_assist_tools_core
   rclcpp
   std_msgs
   sensor_msgs
-  std_srvs
-  example_interfaces
   tf2
   tf2_ros
   geometry_msgs
@@ -110,7 +82,6 @@ target_link_libraries(ros_robot_assist_tools_core
   Eigen3::Eigen
 )
 
-# 主 UI 节点
 add_executable(ros_robot_assist_tools_ui
   src/ros_robot_assist_tools_ui_node.cpp
 )

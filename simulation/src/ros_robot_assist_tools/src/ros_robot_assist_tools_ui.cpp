@@ -1,5 +1,4 @@
-// Nova Robot Tools UI - 参考 calib_sim 架构
-// 所有 Qt 代码在 .cpp 中实现，不使用 Q_OBJECT 和 AUTOMOC
+// Assist Tool UI：Qt 实现在 .cpp 中，不使用 Q_OBJECT / AUTOMOC
 
 #include "ros_robot_assist_tools/ros_robot_assist_tools_ui.hpp"
 
@@ -21,38 +20,17 @@
 #include <QTimer>
 #include <QProcess>
 #include <QStatusBar>
-#include <QComboBox>
-#include <QSpinBox>
-#include <QFileDialog>
 #include <QMessageBox>
-#include <QGroupBox>
-#include <QFormLayout>
-#include <QImage>
-#include <QPixmap>
-#include <QInputDialog>
 #include <QDir>
-#include <QFile>
-#include <QTextStream>
-#include <QDateTime>
-#include <QBuffer>
-#include <QLineEdit>
-#include <QDoubleSpinBox>
-#include <QTextEdit>
-#include <cmath>
 
 #include <QtGlobal>
 
 #include "ros_robot_assist_tools/ui/board_generator_widget.h"
-#include "ros_robot_assist_tools/ui/handeye_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/image_viewer_widget.h"
-#include "ros_robot_assist_tools/ui/intrinsic_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/lazy_feature_page.hpp"
 #include "ros_robot_assist_tools/ui/kinematics_solver_widget.h"
-#include "ros_robot_assist_tools/ui/multi_sensor_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/pose_transform_widget.h"
-#include "ros_robot_assist_tools/ui/stereo_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/system_status_widget.h"
-#include "ros_robot_assist_tools/ui/tcp_calibration_widget.h"
 #include "ros_robot_assist_tools/ui/tf_viewer_widget.h"
 #include "ros_robot_assist_tools/ui/shared_ui_executor.hpp"
 #include "ros_robot_assist_tools/ui/preferences_dialog.h"
@@ -328,252 +306,6 @@ private:
   QTimer* timer_;
 };
 
-/// 创建坐标转换页面
-QWidget* createCoordinateConverterPage() {
-  QWidget* page = new QWidget();
-  QVBoxLayout* mainLayout = new QVBoxLayout(page);
-  
-  // 标题
-  QLabel* titleLabel = new QLabel("坐标转换器", page);
-  titleLabel->setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50;");
-  mainLayout->addWidget(titleLabel);
-  
-  // 转换方向选择
-  QHBoxLayout* dirLayout = new QHBoxLayout();
-  QLabel* dirLabel = new QLabel("转换方向:", page);
-  QComboBox* dirComboBox = new QComboBox(page);
-  dirComboBox->addItem("RPY → 四元数");
-  dirComboBox->addItem("四元数 → RPY");
-  dirLayout->addWidget(dirLabel);
-  dirLayout->addWidget(dirComboBox);
-  dirLayout->addStretch();
-  mainLayout->addLayout(dirLayout);
-  
-  // 创建两个面板：输入和输出
-  QHBoxLayout* contentLayout = new QHBoxLayout();
-  
-  // 输入面板
-  QGroupBox* inputGroup = new QGroupBox("输入", page);
-  QVBoxLayout* inputLayout = new QVBoxLayout(inputGroup);
-  
-  QFormLayout* inputForm = new QFormLayout();
-  
-  // RPY 输入
-  QDoubleSpinBox* rollInput = new QDoubleSpinBox();
-  rollInput->setRange(-360, 360);
-  rollInput->setDecimals(4);
-  rollInput->setValue(0);
-  rollInput->setSuffix(" deg");
-  inputForm->addRow("Roll (X):", rollInput);
-  
-  QDoubleSpinBox* pitchInput = new QDoubleSpinBox();
-  pitchInput->setRange(-360, 360);
-  pitchInput->setDecimals(4);
-  pitchInput->setValue(0);
-  pitchInput->setSuffix(" deg");
-  inputForm->addRow("Pitch (Y):", pitchInput);
-  
-  QDoubleSpinBox* yawInput = new QDoubleSpinBox();
-  yawInput->setRange(-360, 360);
-  yawInput->setDecimals(4);
-  yawInput->setValue(0);
-  yawInput->setSuffix(" deg");
-  inputForm->addRow("Yaw (Z):", yawInput);
-  
-  // 四元数输入
-  QDoubleSpinBox* qwInput = new QDoubleSpinBox();
-  qwInput->setRange(-10, 10);
-  qwInput->setDecimals(6);
-  qwInput->setValue(1.0);
-  inputForm->addRow("w:", qwInput);
-  
-  QDoubleSpinBox* qxInput = new QDoubleSpinBox();
-  qxInput->setRange(-10, 10);
-  qxInput->setDecimals(6);
-  qxInput->setValue(0);
-  inputForm->addRow("x:", qxInput);
-  
-  QDoubleSpinBox* qyInput = new QDoubleSpinBox();
-  qyInput->setRange(-10, 10);
-  qyInput->setDecimals(6);
-  qyInput->setValue(0);
-  inputForm->addRow("y:", qyInput);
-  
-  QDoubleSpinBox* qzInput = new QDoubleSpinBox();
-  qzInput->setRange(-10, 10);
-  qzInput->setDecimals(6);
-  qzInput->setValue(0);
-  inputForm->addRow("z:", qzInput);
-  
-  inputLayout->addLayout(inputForm);
-  
-  // 切换输入显示
-  auto updateInputVisibility = [=]() {
-    bool toQuaternion = (dirComboBox->currentIndex() == 0);
-    rollInput->setVisible(toQuaternion);
-    pitchInput->setVisible(toQuaternion);
-    yawInput->setVisible(toQuaternion);
-    qwInput->setVisible(!toQuaternion);
-    qxInput->setVisible(!toQuaternion);
-    qyInput->setVisible(!toQuaternion);
-    qzInput->setVisible(!toQuaternion);
-    
-    // 更新标签
-    inputForm->labelForField(rollInput)->setVisible(toQuaternion);
-    inputForm->labelForField(pitchInput)->setVisible(toQuaternion);
-    inputForm->labelForField(yawInput)->setVisible(toQuaternion);
-    inputForm->labelForField(qwInput)->setVisible(!toQuaternion);
-    inputForm->labelForField(qxInput)->setVisible(!toQuaternion);
-    inputForm->labelForField(qyInput)->setVisible(!toQuaternion);
-    inputForm->labelForField(qzInput)->setVisible(!toQuaternion);
-  };
-  
-  QObject::connect(dirComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                   [=](int){ updateInputVisibility(); });
-  
-  updateInputVisibility();
-  
-  contentLayout->addWidget(inputGroup, 1);
-  
-  // 输出面板
-  QGroupBox* outputGroup = new QGroupBox("输出", page);
-  QVBoxLayout* outputLayout = new QVBoxLayout(outputGroup);
-  
-  QTextEdit* outputText = new QTextEdit(outputGroup);
-  outputText->setReadOnly(true);
-  outputText->setStyleSheet("font-family: monospace; font-size: 13px; background-color: #ecf0f1;");
-  outputLayout->addWidget(outputText);
-  
-  contentLayout->addWidget(outputGroup, 1);
-  
-  mainLayout->addLayout(contentLayout);
-  
-  // 转换按钮
-  QPushButton* convertBtn = new QPushButton("转换");
-  convertBtn->setFixedHeight(40);
-  convertBtn->setStyleSheet(
-    "QPushButton { background-color: #3498db; color: white; border-radius: 5px; font-size: 16px; }"
-    "QPushButton:hover { background-color: #2980b9; }"
-  );
-  mainLayout->addWidget(convertBtn);
-  
-  // 转换逻辑
-  QObject::connect(convertBtn, &QPushButton::clicked, [=]() {
-    bool toQuaternion = (dirComboBox->currentIndex() == 0);
-    
-    try {
-      QString result;
-      
-      if (toQuaternion) {
-        // RPY → 四元数
-        double roll = rollInput->value() * M_PI / 180.0;      // deg → rad
-        double pitch = pitchInput->value() * M_PI / 180.0;
-        double yaw = yawInput->value() * M_PI / 180.0;
-        
-        double cy = std::cos(yaw * 0.5);
-        double sy = std::sin(yaw * 0.5);
-        double cp = std::cos(pitch * 0.5);
-        double sp = std::sin(pitch * 0.5);
-        double cr = std::cos(roll * 0.5);
-        double sr = std::sin(roll * 0.5);
-        
-        double qw = cr * cp * cy + sr * sp * sy;
-        double qx = sr * cp * cy - cr * sp * sy;
-        double qy = cr * sp * cy + sr * cp * sy;
-        double qz = cr * cp * sy - sr * sp * cy;
-        
-        result = QString(
-          "四元数结果:\n"
-          "w = %1\n"
-          "x = %2\n"
-          "y = %3\n"
-          "z = %4\n\n"
-          "归一化检查: %5\n"
-          "(应接近 1.0)"
-        ).arg(qw, 0, 'f', 6)
-         .arg(qx, 0, 'f', 6)
-         .arg(qy, 0, 'f', 6)
-         .arg(qz, 0, 'f', 6)
-         .arg(qw*qw + qx*qx + qy*qy + qz*qz, 0, 'f', 6);
-        
-      } else {
-        // 四元数 → RPY
-        double qw = qwInput->value();
-        double qx = qxInput->value();
-        double qy = qyInput->value();
-        double qz = qzInput->value();
-        
-        // 归一化
-        double norm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
-        if (norm < 1e-10) {
-          QMessageBox::warning(page, "警告", "四元数不能为零向量");
-          return;
-        }
-        qw /= norm; qx /= norm; qy /= norm; qz /= norm;
-        
-        // 计算 RPY
-        double sinr_cosp = 2 * (qw * qx + qy * qz);
-        double cosr_cosp = 1 - 2 * (qx * qx + qy * qy);
-        double roll = std::atan2(sinr_cosp, cosr_cosp);
-        
-        double sinp = 2 * (qw * qy - qz * qx);
-        double pitch;
-        if (std::abs(sinp) >= 1)
-          pitch = std::copysign(M_PI / 2, sinp);  // 万向锁
-        else
-          pitch = std::asin(sinp);
-        
-        double siny_cosp = 2 * (qw * qz + qx * qy);
-        double cosy_cosp = 1 - 2 * (qy * qy + qz * qz);
-        double yaw = std::atan2(siny_cosp, cosy_cosp);
-        
-        // rad → deg
-        roll *= 180.0 / M_PI;
-        pitch *= 180.0 / M_PI;
-        yaw *= 180.0 / M_PI;
-        
-        result = QString(
-          "RPY 结果 (度):\n"
-          "Roll  (X) = %1°\n"
-          "Pitch (Y) = %2°\n\n"
-          "Yaw   (Z) = %3°\n\n"
-          "RPY 结果 (弧度):\n"
-          "Roll  (X) = %4 rad\n"
-          "Pitch (Y) = %5 rad\n"
-          "Yaw   (Z) = %6 rad\n\n"
-          "四元数归一化: %7\n"
-          "(应接近 1.0)"
-        ).arg(roll, 0, 'f', 4)
-         .arg(pitch, 0, 'f', 4)
-         .arg(yaw, 0, 'f', 4)
-         .arg(roll * M_PI / 180.0, 0, 'f', 6)
-         .arg(pitch * M_PI / 180.0, 0, 'f', 6)
-         .arg(yaw * M_PI / 180.0, 0, 'f', 6)
-         .arg(qw*qw + qx*qx + qy*qy + qz*qz, 0, 'f', 6);
-      }
-      
-      outputText->setText(result);
-      
-    } catch (const std::exception& e) {
-      QMessageBox::critical(page, "错误", QString("转换失败: %1").arg(e.what()));
-    }
-  });
-  
-  return page;
-}
-
-/// 创建运动学求解器页面
-QWidget* createKinematicsSolverPage() {
-  QWidget* page = new QWidget();
-  QVBoxLayout* mainLayout = new QVBoxLayout(page);
-  QLabel* titleLabel = new QLabel("运动学模块已移除", page);
-  titleLabel->setAlignment(Qt::AlignCenter);
-  titleLabel->setStyleSheet("font-size: 20px; color: #7f8c8d;");
-  mainLayout->addWidget(titleLabel);
-
-  return page;
-}
-
 /// 创建主窗口
 QMainWindow* createMainWindow() {
   QMainWindow* window = new QMainWindow();
@@ -614,11 +346,6 @@ QMainWindow* createMainWindow() {
   auto * lazy_pose = new ui::LazyFeaturePage([](QWidget * p) { return new ui::PoseTransformWidget(p); });
   auto * lazy_kin = new ui::LazyFeaturePage([](QWidget * p) { return new ui::KinematicsSolverWidget(p); });
   auto * lazy_tf = new ui::LazyFeaturePage([](QWidget * p) { return new ui::TfViewerWidget(p); });
-  auto * lazy_intrinsic = new ui::LazyFeaturePage([](QWidget * p) { return new ui::IntrinsicCalibrationWidget(p); });
-  auto * lazy_stereo = new ui::LazyFeaturePage([](QWidget * p) { return new ui::StereoCalibrationWidget(p); });
-  auto * lazy_multi = new ui::LazyFeaturePage([](QWidget * p) { return new ui::MultiSensorCalibrationWidget(p); });
-  auto * lazy_handeye = new ui::LazyFeaturePage([](QWidget * p) { return new ui::HandeyeCalibrationWidget(p); });
-  auto * lazy_tcp = new ui::LazyFeaturePage([](QWidget * p) { return new ui::TcpCalibrationWidget(p); });
 
   stackedWidget->addWidget(systemStatusWidget);
   stackedWidget->addWidget(lazy_image);
@@ -626,16 +353,10 @@ QMainWindow* createMainWindow() {
   stackedWidget->addWidget(lazy_pose);
   stackedWidget->addWidget(lazy_kin);
   stackedWidget->addWidget(lazy_tf);
-  stackedWidget->addWidget(lazy_intrinsic);
-  stackedWidget->addWidget(lazy_stereo);
-  stackedWidget->addWidget(lazy_multi);
-  stackedWidget->addWidget(lazy_handeye);
-  stackedWidget->addWidget(lazy_tcp);
   
   // 创建导航按钮
   QStringList buttonNames = {
-    "系统状态", "图像查看", "标定板生成", "姿态转换", "运动学计算", "TF查看",
-    "内参标定", "双目标定", "多传感器标定", "手眼标定", "TCP标定"
+    "系统状态", "图像查看", "标定板生成", "姿态转换", "运动学计算", "TF查看"
   };
   for (int i = 0; i < buttonNames.size(); ++i) {
     QPushButton* btn = new QPushButton(buttonNames[i], navPanel);

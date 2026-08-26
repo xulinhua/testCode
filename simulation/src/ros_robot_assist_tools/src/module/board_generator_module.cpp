@@ -57,6 +57,89 @@ bool GenerateCalibrationBoard(const BoardGeneratorParams & p, cv::Mat * out_imag
       return true;
     }
 
+    if (type == 5) {
+      // AprilGrid（calib.io / Kalibr 打印样式，DICT_APRILTAG_36h11）:
+      //   tagSize = Tag 检测方格边到边 [mm]
+      //   tagSpacing = 空白 / tagSize（0.3 → 12mm Tag 时空白 3.6mm）
+      // 布局：Tag 间为白缝；每个白缝十字交叉处以及外圈，放置 gap×gap 的小黑方格。
+      // 7×7 Tag → 8×8 个小黑方格。
+      const int rows = std::max(2, p.rows);
+      const int cols = std::max(2, p.cols);
+      const double board_w_mm = std::max(1.0, p.board_width_mm);
+      const double board_h_mm = std::max(1.0, p.board_height_mm);
+      const double tag_mm = std::max(0.1, p.tag_size_mm);
+      const double spacing = std::max(0.05, std::min(2.0, p.tag_spacing));
+      const double gap_mm = tag_mm * spacing;
+      const int start_marker_id = std::max(0, p.start_id);
+
+      const double pattern_w_mm = (cols + 1) * gap_mm + cols * tag_mm;
+      const double pattern_h_mm = (rows + 1) * gap_mm + rows * tag_mm;
+      const double margin_mm = tag_mm;
+      const double need_w_mm = pattern_w_mm + 2.0 * margin_mm;
+      const double need_h_mm = pattern_h_mm + 2.0 * margin_mm;
+      const double fit_scale = std::min(1.0, std::min(board_w_mm / need_w_mm, board_h_mm / need_h_mm));
+      const double tag_draw_mm = tag_mm * fit_scale;
+      const double gap_draw_mm = gap_mm * fit_scale;
+
+      const double dpi = 300.0;
+      const double ppm_phys = dpi / 25.4;
+      const int export_cap = std::max(512, p.export_pixel_size);
+      const double ppm_cap = std::min(
+        static_cast<double>(export_cap) / board_w_mm,
+        static_cast<double>(export_cap) / board_h_mm);
+      const double ppm = std::min(ppm_phys, ppm_cap);
+
+      const int canvas_w = std::max(64, static_cast<int>(std::round(board_w_mm * ppm)));
+      const int canvas_h = std::max(64, static_cast<int>(std::round(board_h_mm * ppm)));
+      out_image->release();
+      out_image->create(canvas_h, canvas_w, CV_8UC1);
+      out_image->setTo(cv::Scalar(255));
+
+      const int tag_px = std::max(16, static_cast<int>(std::round(tag_draw_mm * ppm)));
+      const int gap_px = std::max(2, static_cast<int>(std::round(gap_draw_mm * ppm)));
+      const int step_px = tag_px + gap_px;
+      const int pattern_w_px = (cols + 1) * gap_px + cols * tag_px;
+      const int pattern_h_px = (rows + 1) * gap_px + rows * tag_px;
+      const int origin_x = (canvas_w - pattern_w_px) / 2;
+      const int origin_y = (canvas_h - pattern_h_px) / 2;
+
+      // 小黑方格：外圈 + Tag 间白缝十字交叉点，(rows+1)×(cols+1) 个
+      for (int gr = 0; gr <= rows; ++gr) {
+        for (int gc = 0; gc <= cols; ++gc) {
+          cv::rectangle(
+            *out_image,
+            cv::Rect(origin_x + gc * step_px, origin_y + gr * step_px, gap_px, gap_px),
+            cv::Scalar(0), cv::FILLED);
+        }
+      }
+
+      cv::aruco::Dictionary dict_obj =
+        cv::aruco::getPredefinedDictionary(cv::aruco::DICT_APRILTAG_36h11);
+      const int dict_size = std::max(1, dict_obj.bytesList.rows);
+      if (start_marker_id + rows * cols > dict_size) {
+        if (err_msg != nullptr) {
+          *err_msg = QString("AprilTag 36h11 字典只有 %1 个 ID，当前需要 ID [%2 .. %3)")
+                       .arg(dict_size)
+                       .arg(start_marker_id)
+                       .arg(start_marker_id + rows * cols);
+        }
+        return false;
+      }
+
+      for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+          const int id = start_marker_id + r * cols + c;
+          cv::Mat tag_img;
+          dict_obj.generateImageMarker(id, tag_px, tag_img);
+          const int x = origin_x + gap_px + c * step_px;
+          const int y = origin_y + gap_px + r * step_px;
+          tag_img.copyTo((*out_image)(cv::Rect(x, y, tag_px, tag_px)));
+        }
+      }
+
+      return true;
+    }
+
     const int size = std::max(128, p.marker_size);
     const int rows = std::max(2, p.rows);
     const int cols = std::max(2, p.cols);
@@ -64,7 +147,6 @@ bool GenerateCalibrationBoard(const BoardGeneratorParams & p, cv::Mat * out_imag
     const double board_h_mm = std::max(1.0, p.board_height_mm);
     const double cell_mm = std::max(1.0, p.cell_size_mm);
     const double circle_mm = std::max(0.1, p.circle_diameter_mm);
-    const double tag_mm = std::max(0.1, p.tag_size_mm);
     const int start_marker_id = std::max(0, p.start_id);
     const double marker_ratio_value = std::max(0.1, std::min(0.95, p.marker_ratio));
 
@@ -160,34 +242,8 @@ bool GenerateCalibrationBoard(const BoardGeneratorParams & p, cv::Mat * out_imag
         }
       }
     } else {
-      cv::aruco::Dictionary dict_obj = cv::aruco::getPredefinedDictionary(DictTypeFromIndex(p.dict_index));
-      const int dict_size = std::max(1, dict_obj.bytesList.rows);
-      const int pitch_x = std::max(8, board_w_px / cols);
-      const int pitch_y = std::max(8, board_h_px / rows);
-      const int total_w = cols * pitch_x;
-      const int total_h = rows * pitch_y;
-      const int start_x = board_x + (board_w_px - total_w) / 2;
-      const int start_y = board_y + (board_h_px - total_h) / 2;
-      const int min_tag_px = std::max(8, dict_obj.markerSize + 2);
-      const int tag_px_from_mm = std::max(min_tag_px, static_cast<int>(std::round(tag_mm * ppm)));
-      const int cell_inner_px = std::max(8, std::min(pitch_x, pitch_y) - 2);
-      const int tag_px = std::max(min_tag_px, std::min(tag_px_from_mm, static_cast<int>(std::round(cell_inner_px * 0.72))));
-      const int cell_border = std::max(1, static_cast<int>(std::round(std::min(pitch_x, pitch_y) * 0.03)));
-      for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < cols; ++c) {
-          const int cell_x = start_x + c * pitch_x;
-          const int cell_y = start_y + r * pitch_y;
-          cv::rectangle(*out_image, cv::Rect(cell_x, cell_y, pitch_x, pitch_y), cv::Scalar(0), cell_border);
-          int id = (start_marker_id + r * cols + c) % dict_size;
-          cv::Mat tag_img;
-          dict_obj.generateImageMarker(id, tag_px, tag_img);
-          const int x = cell_x + (pitch_x - tag_px) / 2;
-          const int y = cell_y + (pitch_y - tag_px) / 2;
-          if (x >= board_x && y >= board_y && x + tag_px <= board_x + board_w_px && y + tag_px <= board_y + board_h_px) {
-            tag_img.copyTo((*out_image)(cv::Rect(x, y, tag_px, tag_px)));
-          }
-        }
-      }
+      if (err_msg != nullptr) { *err_msg = QString("unknown board_type=%1").arg(type); }
+      return false;
     }
     return true;
   } catch (const std::exception & e) {
