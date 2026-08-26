@@ -587,9 +587,12 @@ QFrame#StepRail {
 
 QLabel#StepIdle {
   color: __FG_STEP_IDLE__;
-  padding: 6px 12px;
-  font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
-  font-size: 12px;
+  min-height: 36px;
+  max-height: 36px;
+  padding: 0 4px;
+  qproperty-alignment: AlignCenter;
+  font-family: "Noto Sans CJK SC", "Noto Sans", "Source Han Sans SC", sans-serif;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -600,18 +603,24 @@ QLabel#StepIdle:hover {
 QLabel#StepActive {
   color: __FG_STEP_ACTIVE__;
   background-color: __ACCENT__;
-  border-radius: 14px;
-  padding: 6px 14px;
-  font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
-  font-size: 12px;
+  border-radius: 18px;
+  min-height: 36px;
+  max-height: 36px;
+  padding: 0 4px;
+  qproperty-alignment: AlignCenter;
+  font-family: "Noto Sans CJK SC", "Noto Sans", "Source Han Sans SC", sans-serif;
+  font-size: 13px;
   font-weight: 700;
 }
 
 QLabel#StepDone {
   color: __FG_STEP_DONE__;
-  padding: 6px 12px;
-  font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
-  font-size: 12px;
+  min-height: 36px;
+  max-height: 36px;
+  padding: 0 4px;
+  qproperty-alignment: AlignCenter;
+  font-family: "Noto Sans CJK SC", "Noto Sans", "Source Han Sans SC", sans-serif;
+  font-size: 13px;
   font-weight: 700;
 }
 

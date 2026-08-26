@@ -1,6 +1,6 @@
 # 直角三面靶单帧 / 多帧内参（推荐 ChArUco）
 # squares_x/y = 每面内角点数（正方形）；CharucoBoard 方格 = n+1
-# 三面可为相同 ChArUco（同字典、同 ID）；套件按共面单应 + 位姿法向分面
+# 三面可为相同 ChArUco（同字典、同 ID）；先按单码法向分面，再在每面 ROI 插值
 # 白边 ≈ 1 格（利于检测，不作分面标签）
 squares_x: 8
 squares_y: 8

@@ -165,6 +165,15 @@ bool ProjectWorkspace::write_project_yaml(
   out << "gripper_frame: " << info.gripper_frame << "\n";
   out << "image_frame: " << info.image_frame << "\n";
   out << "camera_link_frame: " << info.camera_link_frame << "\n";
+  if (!info.image_topic.isEmpty()) {
+    out << "image_topic: " << info.image_topic << "\n";
+  }
+  if (!info.camera_info_topic.isEmpty()) {
+    out << "camera_info_topic: " << info.camera_info_topic << "\n";
+  }
+  if (!info.pose_source.isEmpty()) {
+    out << "pose_source: " << info.pose_source << "\n";
+  }
   if (!info.last_calibrator_id.isEmpty()) {
     out << "last_calibrator_id: " << info.last_calibrator_id << "\n";
   }
@@ -261,6 +270,12 @@ bool ProjectWorkspace::read_project_yaml(
       p.image_frame = val;
     } else if (key == QStringLiteral("camera_link_frame")) {
       p.camera_link_frame = val;
+    } else if (key == QStringLiteral("image_topic")) {
+      p.image_topic = val;
+    } else if (key == QStringLiteral("camera_info_topic")) {
+      p.camera_info_topic = val;
+    } else if (key == QStringLiteral("pose_source")) {
+      p.pose_source = val;
     } else if (key == QStringLiteral("last_calibrator_id")) {
       p.last_calibrator_id = val;
     } else if (key == QStringLiteral("default_image_subdir")) {

@@ -40,6 +40,8 @@ public:
 
   void apply_to_session(SessionController *session) const;
   std::map<std::string, std::string> to_config_map() const;
+  /// \brief 用扁平 YAML 字典填充控件（话题、坐标系、靶标、位姿源等）
+  void apply_config_map(const std::map<std::string, std::string> &kv);
 
   QComboBox *combo_source_mode() const { return combo_source_mode_; }
   QComboBox *combo_image_topic() const { return combo_image_topic_; }

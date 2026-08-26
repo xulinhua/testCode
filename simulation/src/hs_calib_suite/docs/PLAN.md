@@ -2,7 +2,7 @@
 
 > 文档目录：`simulation/src/hs_calib_suite/docs/`  
 > 架构参考：[TIER IV CalibrationTools](https://github.com/tier4/CalibrationTools)（只学其分层与流程，不复制代码）  
-> 当前状态：**单目内参 + 手眼（棋盘）已可用**；其余类型按阶段推进
+> 当前状态：**单目内参 + 手眼（棋盘 / ChArUco / ArUco / AprilGrid，话题写 YAML）已可用**；其余类型按阶段推进
 
 ---
 
@@ -92,7 +92,7 @@ ros2 run hs_calib_suite hs_calib_gui
 |------|----------|
 | **P0** | 单包骨架、接口占位、文档、Qt **四页线框**（首页/配置/工作台/复核） |
 | **P1** | 棋盘检测；**相机内参已可用**（离线/ROS）；双目/三面仍为后续 |
-| **P2** | **手眼 eye_in_hand / eye_to_hand 已可用**（棋盘 PnP + CSV/TF）；激光外参等仍为后续 |
+| **P2** | **手眼 eye_in_hand / eye_to_hand 已可用**（平面靶 PnP + CSV/TF，话题写 YAML）；激光外参等仍为后续 |
 | **P3** | 激光–激光 / 地面约束；多相机套件；时间同步标定；传感器套件参数导出 |
 
 当前可运行：`smoke_cam_intrinsics`、`smoke_handeye`、`hs_calib_gui`。详见 [HANDEYE_MONO.md](HANDEYE_MONO.md)。

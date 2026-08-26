@@ -982,7 +982,7 @@ void SessionController::set_calibrator_id(const QString &id) {
     detect_lab_mode_ = from_id;
   }
   if (is_handeye() && pose_source_ == PoseSource::None) {
-    pose_source_ = PoseSource::Csv;
+    pose_source_ = PoseSource::Tf;
   }
   if (is_intrinsics() || is_trihedral() || is_stereo_extrinsics()) {
     pose_source_ = PoseSource::None;
@@ -1563,11 +1563,19 @@ std::map<std::string, std::string> SessionController::solve_config_map() const {
     }
   }
   if (calibrator_id_ == QStringLiteral("eye_in_hand")) {
-    m["parent_frame"] = "gripper";
-    m["child_frame"] = "camera";
+    if (!m.count("parent_frame") || m["parent_frame"].empty()) {
+      m["parent_frame"] = "gripper";
+    }
+    if (!m.count("child_frame") || m["child_frame"].empty()) {
+      m["child_frame"] = "camera";
+    }
   } else if (calibrator_id_ == QStringLiteral("eye_to_hand")) {
-    m["parent_frame"] = "base";
-    m["child_frame"] = "camera";
+    if (!m.count("parent_frame") || m["parent_frame"].empty()) {
+      m["parent_frame"] = "base";
+    }
+    if (!m.count("child_frame") || m["child_frame"].empty()) {
+      m["child_frame"] = "camera";
+    }
   } else if (is_stereo_extrinsics()) {
     if (!m.count("parent_frame") || m["parent_frame"].empty()) {
       m["parent_frame"] = "left";
@@ -2182,7 +2190,8 @@ bool SessionController::can_solve() const {
     }
     return stereo_pair_count() >= 3;
   }
-  return observation_count() >= 3;
+  const int need = is_handeye() ? std::max(3, min_views_) : 3;
+  return observation_count() >= need;
 }
 
 void SessionController::request_offline_batch_ingest() {
@@ -3239,6 +3248,7 @@ bool SessionController::export_bundle(const QString &dir_path, QString *error_ou
   cfg << "source_mode: " << source_name(source_mode_) << "\n";
   cfg << "pose_source: " << pose_name(pose_source_) << "\n";
   if (!ros_topic_name_.isEmpty()) {
+    cfg << "image_topic: " << yaml_quote_q(ros_topic_name_) << "\n";
     cfg << "ros_topic: " << yaml_quote_q(ros_topic_name_) << "\n";
   }
   cfg << "squares_x: " << squares_x_ << "\n";

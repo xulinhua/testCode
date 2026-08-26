@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <algorithm>
+#include <map>
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -244,6 +245,7 @@ void MainWindow::select_calib_tile(QFrame *tile) {
                  : QStringLiteral("下一步：数据源设置"));
   }
   append_log(LogLevel::Info, QStringLiteral("› 选定标定器：%1").arg(selected_calibrator_id_));
+  load_calibrator_default_config();
   refresh_status_task();
   refresh_task_flow_chrome();
 }
@@ -735,9 +737,33 @@ void MainWindow::apply_selected_project_to_setup() {
     return;
   }
   if (launcher_panel_ != nullptr) {
+    const bool he_in = selected_calibrator_id_ == QStringLiteral("eye_in_hand");
+    const bool he_to = selected_calibrator_id_ == QStringLiteral("eye_to_hand");
+    QString result_parent = p->parent_frame;
+    QString result_child = p->child_frame;
+    if (he_in) {
+      result_parent = p->gripper_frame.isEmpty() ? QStringLiteral("tool0") : p->gripper_frame;
+      result_child = p->image_frame.isEmpty() ? p->child_frame : p->image_frame;
+    } else if (he_to) {
+      result_parent = p->base_frame.isEmpty() ? QStringLiteral("base") : p->base_frame;
+      result_child = p->image_frame.isEmpty() ? p->child_frame : p->image_frame;
+    }
     launcher_panel_->apply_project_frames(
-        p->parent_frame, p->child_frame, p->base_frame, p->gripper_frame,
+        result_parent, result_child, p->base_frame, p->gripper_frame,
         p->image_frame, p->camera_link_frame);
+    std::map<std::string, std::string> overlay;
+    if (!p->image_topic.isEmpty()) {
+      overlay["image_topic"] = p->image_topic.toStdString();
+    }
+    if (!p->camera_info_topic.isEmpty()) {
+      overlay["camera_info_topic"] = p->camera_info_topic.toStdString();
+    }
+    if (!p->pose_source.isEmpty()) {
+      overlay["pose_source"] = p->pose_source.toStdString();
+    }
+    if (!overlay.empty()) {
+      launcher_panel_->apply_config_map(overlay);
+    }
     if (project_workspace_.is_open()) {
       const QString img = project_workspace_.preferred_image_dir();
       if (!img.isEmpty() && launcher_panel_->edit_image_dir() != nullptr) {
@@ -867,6 +893,12 @@ void MainWindow::on_configure_project() {
   auto *edit_optical = new QLineEdit(meta.image_frame, &dlg);
   auto *edit_parent = new QLineEdit(meta.parent_frame, &dlg);
   auto *edit_child = new QLineEdit(meta.child_frame, &dlg);
+  auto *edit_image_topic = new QLineEdit(meta.image_topic, &dlg);
+  auto *edit_info_topic = new QLineEdit(meta.camera_info_topic, &dlg);
+  auto *edit_pose_src = new QLineEdit(meta.pose_source, &dlg);
+  edit_image_topic->setPlaceholderText(QStringLiteral("/camera/color/image_raw"));
+  edit_info_topic->setPlaceholderText(QStringLiteral("/camera/color/camera_info"));
+  edit_pose_src->setPlaceholderText(QStringLiteral("tf 或 csv"));
   auto *edit_rec = new QLineEdit(meta.recommended_calibrators.join(QStringLiteral(", ")), &dlg);
   edit_rec->setPlaceholderText(QStringLiteral("cam_intrinsics, eye_in_hand, …"));
 
@@ -879,6 +911,9 @@ void MainWindow::on_configure_project() {
   form->addRow(QStringLiteral("optical_frame"), edit_optical);
   form->addRow(QStringLiteral("parent_frame"), edit_parent);
   form->addRow(QStringLiteral("child_frame"), edit_child);
+  form->addRow(QStringLiteral("图像话题"), edit_image_topic);
+  form->addRow(QStringLiteral("CameraInfo 话题"), edit_info_topic);
+  form->addRow(QStringLiteral("位姿源"), edit_pose_src);
   form->addRow(QStringLiteral("推荐标定器"), edit_rec);
 
   auto *buttons = new QDialogButtonBox(
@@ -899,6 +934,9 @@ void MainWindow::on_configure_project() {
   meta.image_frame = edit_optical->text().trimmed();
   meta.parent_frame = edit_parent->text().trimmed();
   meta.child_frame = edit_child->text().trimmed();
+  meta.image_topic = edit_image_topic->text().trimmed();
+  meta.camera_info_topic = edit_info_topic->text().trimmed();
+  meta.pose_source = edit_pose_src->text().trimmed();
   QStringList rec;
   for (const QString &part : edit_rec->text().split(QLatin1Char(','))) {
     const QString t = part.trimmed();
@@ -1011,6 +1049,9 @@ void MainWindow::on_new_project() {
     info.gripper_frame = cur->gripper_frame;
     info.image_frame = cur->image_frame;
     info.camera_link_frame = cur->camera_link_frame;
+    info.image_topic = cur->image_topic;
+    info.camera_info_topic = cur->camera_info_topic;
+    info.pose_source = cur->pose_source;
     info.recommended_calibrators = cur->recommended_calibrators;
   }
   QString err;
@@ -1257,12 +1298,6 @@ QWidget *MainWindow::build_setup_page() {
   root->addWidget(ready_strip, 0);
 
   apply_board_config_from_package();
-  {
-    const std::string path = core::resolve_package_config("cam_intrinsics.yaml");
-    if (!path.empty()) {
-      launcher_panel_->set_config_path(QString::fromStdString(path));
-    }
-  }
   launcher_panel_->set_calibrator_id(selected_calibrator_id_);
   refresh_setup_source_ui();
   refresh_handeye_ui();

@@ -29,9 +29,9 @@
 //
 //  B. 分面层（同 ID 可印在三面 → 不能靠 ID）
 //     - 白边只是视觉分隔，OpenCV 不返回「面标签」。
-//     - 正确做法：用「板局部坐标 → 图像」的单应 H。同一张板上的码中心
-//       应落在同一 H 上（残差 ~1px）；正交另一面残差通常 >> 几十 px。
-//     - 折缝附近若阈值太松，会把两面码吃进同一 H → 跨面污染。
+//     - 先对每个码做 PnP 得法向，正交面应分成不同簇；折缝码两面都像则丢掉。
+//     - 每簇再套板→图单应 H 清内点。分不开时回退整图剥离。
+//     - 插值时把邻面区域掩掉，避免局部画面把点吸到另一面。
 //
 //  C. 建板层（每面当一张 CharucoBoard）
 //     - interpolateCornersCharuco 要够多码；PnP 给出法向，再贴到 XY/XZ/YZ。
@@ -404,7 +404,289 @@ struct MarkerObs {
   cv::Point2f obj_c;  ///< 板平面上该码中心 (x,y)，z=0
   float side_px = 20.f;
   std::vector<cv::Point2f> corners;
+  cv::Vec3d normal{0, 0, 1};  ///< 单码 PnP 法向（相机系，指向相机）
+  bool has_normal = false;
 };
+
+/// \brief 单码 4 角 → 平面法向（IPPE 方形；失败则 ITERATIVE）
+bool estimate_marker_normal(
+    const MarkerObs &m, double marker_length_m, const cv::Mat &K, cv::Vec3d *n_out) {
+  if (n_out == nullptr || m.corners.size() < 4 || K.empty() || marker_length_m <= 1e-6) {
+    return false;
+  }
+  const float h = static_cast<float>(marker_length_m * 0.5);
+  const std::vector<cv::Point3f> obj = {
+      {-h, h, 0.f}, {h, h, 0.f}, {h, -h, 0.f}, {-h, -h, 0.f}};
+  const std::vector<cv::Point2f> img(m.corners.begin(), m.corners.begin() + 4);
+  cv::Mat rvec;
+  cv::Mat tvec;
+  const cv::Mat D = cv::Mat::zeros(5, 1, CV_64F);
+  bool ok = false;
+  try {
+    ok = cv::solvePnP(obj, img, K, D, rvec, tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
+  } catch (const cv::Exception &) {
+    ok = false;
+  }
+  if (!ok) {
+    const float s = static_cast<float>(marker_length_m);
+    const std::vector<cv::Point3f> obj2 = {
+        {0.f, 0.f, 0.f}, {s, 0.f, 0.f}, {s, s, 0.f}, {0.f, s, 0.f}};
+    try {
+      ok = cv::solvePnP(obj2, img, K, D, rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
+    } catch (const cv::Exception &) {
+      return false;
+    }
+  }
+  if (!ok) {
+    return false;
+  }
+  cv::Mat R;
+  cv::Rodrigues(rvec, R);
+  cv::Vec3d n(R.at<double>(0, 2), R.at<double>(1, 2), R.at<double>(2, 2));
+  const double nrm = cv::norm(n);
+  if (nrm < 1e-9) {
+    return false;
+  }
+  n *= 1.0 / nrm;
+  if (n[2] > 0.0) {
+    n *= -1.0;
+  }
+  *n_out = n;
+  return true;
+}
+
+/// \brief 簇内法向相对均值的最大夹角（度）
+double cluster_normal_spread_deg(
+    const std::vector<MarkerObs> &pool, const std::vector<int> &idx) {
+  cv::Vec3d mean(0, 0, 0);
+  int n = 0;
+  for (int ci : idx) {
+    if (ci < 0 || ci >= static_cast<int>(pool.size()) || !pool[static_cast<size_t>(ci)].has_normal) {
+      continue;
+    }
+    mean += pool[static_cast<size_t>(ci)].normal;
+    ++n;
+  }
+  if (n < 2) {
+    return 0.0;
+  }
+  const double mn = cv::norm(mean);
+  if (mn < 1e-12) {
+    return 90.0;
+  }
+  mean *= 1.0 / mn;
+  double max_deg = 0.0;
+  for (int ci : idx) {
+    if (ci < 0 || ci >= static_cast<int>(pool.size()) || !pool[static_cast<size_t>(ci)].has_normal) {
+      continue;
+    }
+    double c = std::abs(pool[static_cast<size_t>(ci)].normal.dot(mean));
+    c = std::max(0.0, std::min(1.0, c));
+    max_deg = std::max(max_deg, std::acos(c) * 180.0 / CV_PI);
+  }
+  return max_deg;
+}
+
+/// \brief 按单码法向把观测分成最多 3 簇（正交面应落在不同簇）
+///
+/// 种子：大码优先，彼此法向夹角须大（|n·n'| 小）。归属时丢掉「两簇都像」的折缝码。
+std::vector<std::vector<int>> cluster_pool_by_normals(const std::vector<MarkerObs> &pool) {
+  std::vector<int> valid;
+  valid.reserve(pool.size());
+  for (int i = 0; i < static_cast<int>(pool.size()); ++i) {
+    if (pool[static_cast<size_t>(i)].has_normal) {
+      valid.push_back(i);
+    }
+  }
+  if (valid.size() < 3) {
+    return {};
+  }
+
+  auto ndot = [&](int a, int b) {
+    return std::abs(pool[static_cast<size_t>(a)].normal.dot(pool[static_cast<size_t>(b)].normal));
+  };
+
+  std::vector<int> order = valid;
+  std::sort(order.begin(), order.end(), [&](int a, int b) {
+    return pool[static_cast<size_t>(a)].side_px > pool[static_cast<size_t>(b)].side_px;
+  });
+
+  std::vector<int> seeds;
+  seeds.push_back(order.front());
+  for (int ci : order) {
+    if (seeds.size() >= 3) {
+      break;
+    }
+    bool far = true;
+    for (int s : seeds) {
+      // |n·n'| > 0.55 ≈ 夹角 < 57° → 太像同一面，不能当新种子
+      if (ndot(ci, s) > 0.55) {
+        far = false;
+        break;
+      }
+    }
+    if (far) {
+      seeds.push_back(ci);
+    }
+  }
+
+  const int k = static_cast<int>(seeds.size());
+  std::vector<std::vector<int>> clusters(static_cast<size_t>(k));
+  for (int ci : valid) {
+    int best = -1;
+    double best_d = -1.0;
+    double second = -1.0;
+    for (int s = 0; s < k; ++s) {
+      const double d = ndot(ci, seeds[static_cast<size_t>(s)]);
+      if (d > best_d) {
+        second = best_d;
+        best_d = d;
+        best = s;
+      } else if (d > second) {
+        second = d;
+      }
+    }
+    // 与最近种子仍超过 ~38°：法向不可靠，丢掉
+    if (best < 0 || best_d < 0.78) {
+      continue;
+    }
+    // 两簇得分接近：折缝附近，宁缺
+    if (k >= 2 && second > 0.0 && (best_d - second) < 0.12) {
+      continue;
+    }
+    clusters[static_cast<size_t>(best)].push_back(ci);
+  }
+
+  std::vector<std::vector<int>> out;
+  out.reserve(clusters.size());
+  for (auto &cl : clusters) {
+    if (cl.size() >= 3) {
+      out.push_back(std::move(cl));
+    }
+  }
+  return out;
+}
+
+/// \brief 丢掉空间上骑在两簇之间的码（折缝）
+void reject_crease_markers(
+    const std::vector<MarkerObs> &pool, std::vector<std::vector<int>> *clusters) {
+  if (clusters == nullptr || clusters->size() < 2) {
+    return;
+  }
+  std::vector<int> owner(pool.size(), -1);
+  for (int hi = 0; hi < static_cast<int>(clusters->size()); ++hi) {
+    for (int ci : (*clusters)[static_cast<size_t>(hi)]) {
+      if (ci >= 0 && ci < static_cast<int>(pool.size())) {
+        owner[static_cast<size_t>(ci)] = hi;
+      }
+    }
+  }
+
+  auto hull_of = [&](const std::vector<int> &idx) {
+    std::vector<cv::Point2f> pts;
+    pts.reserve(idx.size() * 4);
+    for (int ci : idx) {
+      if (ci < 0 || ci >= static_cast<int>(pool.size())) {
+        continue;
+      }
+      const auto &m = pool[static_cast<size_t>(ci)];
+      if (m.corners.size() >= 4) {
+        pts.insert(pts.end(), m.corners.begin(), m.corners.end());
+      } else {
+        pts.push_back(m.img_c);
+      }
+    }
+    std::vector<cv::Point2f> hull;
+    if (pts.size() >= 3) {
+      cv::convexHull(pts, hull);
+    }
+    return hull;
+  };
+
+  std::vector<std::vector<cv::Point2f>> hulls;
+  hulls.reserve(clusters->size());
+  for (const auto &cl : *clusters) {
+    hulls.push_back(hull_of(cl));
+  }
+
+  std::vector<char> drop(pool.size(), 0);
+  for (size_t hi = 0; hi < clusters->size(); ++hi) {
+    float med = 20.f;
+    {
+      std::vector<float> sides;
+      for (int ci : (*clusters)[hi]) {
+        sides.push_back(pool[static_cast<size_t>(ci)].side_px);
+      }
+      if (!sides.empty()) {
+        std::nth_element(
+            sides.begin(), sides.begin() + static_cast<int>(sides.size() / 2), sides.end());
+        med = std::max(8.f, sides[sides.size() / 2]);
+      }
+    }
+    const float margin = 0.40f * med;
+    for (int ci : (*clusters)[hi]) {
+      const cv::Point2f p = pool[static_cast<size_t>(ci)].img_c;
+      for (size_t hj = 0; hj < clusters->size(); ++hj) {
+        if (hj == hi || hulls[hj].size() < 3) {
+          continue;
+        }
+        const double d = cv::pointPolygonTest(hulls[hj], p, true);
+        if (d > -static_cast<double>(margin)) {
+          drop[static_cast<size_t>(ci)] = 1;
+          break;
+        }
+      }
+    }
+  }
+
+  // k 近邻：周围多数不是本簇 → 折缝
+  for (size_t hi = 0; hi < clusters->size(); ++hi) {
+    for (int ci : (*clusters)[hi]) {
+      if (drop[static_cast<size_t>(ci)]) {
+        continue;
+      }
+      std::vector<std::pair<float, int>> nn;
+      nn.reserve(pool.size());
+      const cv::Point2f p = pool[static_cast<size_t>(ci)].img_c;
+      for (size_t j = 0; j < pool.size(); ++j) {
+        if (static_cast<int>(j) == ci || owner[j] < 0) {
+          continue;
+        }
+        nn.emplace_back(static_cast<float>(cv::norm(pool[j].img_c - p)), owner[j]);
+      }
+      std::sort(nn.begin(), nn.end());
+      const int k = std::min(5, static_cast<int>(nn.size()));
+      if (k < 3) {
+        continue;
+      }
+      int same = 0;
+      for (int t = 0; t < k; ++t) {
+        if (nn[static_cast<size_t>(t)].second == static_cast<int>(hi)) {
+          ++same;
+        }
+      }
+      if (same * 2 < k) {
+        drop[static_cast<size_t>(ci)] = 1;
+      }
+    }
+  }
+
+  for (auto &cl : *clusters) {
+    std::vector<int> keep;
+    keep.reserve(cl.size());
+    for (int ci : cl) {
+      if (!drop[static_cast<size_t>(ci)]) {
+        keep.push_back(ci);
+      }
+    }
+    cl.swap(keep);
+  }
+  clusters->erase(
+      std::remove_if(
+          clusters->begin(), clusters->end(),
+          [](const std::vector<int> &c) { return c.size() < 3; }),
+      clusters->end());
+}
 
 /// \brief 码中心相对板→图单应 H 的平均残差
 double mean_h_residual(
@@ -834,6 +1116,7 @@ Correspondence TrihedralCharucoDetector::detect_merged(
                    marker_corners[i][static_cast<size_t>((k + 1) % 4)]));
     }
     m.side_px = std::max(8.f, side * 0.25f);
+    m.has_normal = estimate_marker_normal(m, marker_length_m_, K, &m.normal);
     pool.push_back(std::move(m));
   }
   if (pool.size() < 3) {
@@ -842,6 +1125,7 @@ Correspondence TrihedralCharucoDetector::detect_merged(
 
   std::vector<char> used(pool.size(), 0);
   std::vector<FaceHyp> hyps;
+  bool allow_hyp_merge = true;
 
   // ----- ③b 把一簇共面码建成「一面」：Charuco 角点 + PnP 法向 -----
   auto try_build_hyp = [&](const std::vector<int> &cluster_idx) -> bool {
@@ -939,6 +1223,7 @@ Correspondence TrihedralCharucoDetector::detect_merged(
 
     // 新 hyp 若与已有面法向近平行，且落在对方 H 内 → 视为同面碎块，并入而非新开面
     int merge_into = -1;
+    if (allow_hyp_merge) {
     for (size_t hi = 0; hi < hyps.size(); ++hi) {
       const double d = std::abs(hyps[hi].normal.dot(hyp.normal));
       if (d < 0.88) {
@@ -982,6 +1267,7 @@ Correspondence TrihedralCharucoDetector::detect_merged(
         merge_into = static_cast<int>(hi);
         break;
       }
+    }
     }
 
     auto append_markers = [&](FaceHyp &dst, const FaceHyp &src) {
@@ -1069,7 +1355,7 @@ Correspondence TrihedralCharucoDetector::detect_merged(
         continue;
       }
       const double e = cv::norm(apply_H(H, m.obj_c) - m.img_c);
-      if (e <= 5.5) {
+      if (e <= 3.0) {
         hyp.marker_ids.push_back(m.id);
         hyp.marker_corners.push_back(m.corners);
         hyp.marker_pool_index.push_back(m.index);
@@ -1082,13 +1368,55 @@ Correspondence TrihedralCharucoDetector::detect_merged(
     pending->swap(next);
   };
 
-  // ----- ③ 逐面几何剥离（目标：最多 3 张「共面板」）-----
-  // pending = 尚未归属任何面的码下标。
-  // 每轮：从 pending 里 fit 出一簇共面码 → try_build_hyp。
-  //   · 若这簇其实落在已有面 H 上 → 只 absorb，不开新面（防一板多色）；
-  //   · 若建成新面但法向与已有面不正交 → 当作碎块并回最平行面；
-  //   · 否则接受为新面，再用 H 吸收同面残留。
+  // ----- ③ 先按单码法向分面，失败再回退整图剥离 -----
+  // 靶标三面同 ID，不能靠码号。单码 PnP 法向在正交面上差一截，
+  // 可在插值之前切开；折缝码两面都像，直接丢掉。
   {
+    auto clusters = cluster_pool_by_normals(pool);
+    reject_crease_markers(pool, &clusters);
+    bool use_clusters = false;
+    if (clusters.size() >= 2) {
+      use_clusters = true;
+    } else if (clusters.size() == 1 &&
+               cluster_normal_spread_deg(pool, clusters[0]) < 32.0) {
+      use_clusters = true;
+    }
+
+    if (use_clusters) {
+      allow_hyp_merge = false;
+      for (const auto &cl : clusters) {
+        auto inliers = fit_board_in_indices(local_board_, pool, cl, 2.5, 4);
+        if (inliers.size() < 4) {
+          inliers = cl;
+        }
+        if (inliers.size() < 3) {
+          continue;
+        }
+        const size_t before = hyps.size();
+        try_build_hyp(inliers);
+        if (hyps.size() <= before) {
+          continue;
+        }
+        cv::Vec3d mean(0, 0, 0);
+        int nn = 0;
+        for (int ci : inliers) {
+          if (pool[static_cast<size_t>(ci)].has_normal) {
+            mean += pool[static_cast<size_t>(ci)].normal;
+            ++nn;
+          }
+        }
+        if (nn > 0) {
+          const double nrm = cv::norm(mean);
+          if (nrm > 1e-12) {
+            mean *= 1.0 / nrm;
+            if (mean[2] > 0.0) {
+              mean *= -1.0;
+            }
+            hyps.back().normal = mean;
+          }
+        }
+      }
+    } else {
     std::vector<int> pending(pool.size());
     std::iota(pending.begin(), pending.end(), 0);
 
@@ -1134,11 +1462,11 @@ Correspondence TrihedralCharucoDetector::detect_merged(
         int ok = 0;
         for (int ci : inliers) {
           const auto &m = pool[static_cast<size_t>(ci)];
-          if (cv::norm(apply_H(H, m.obj_c) - m.img_c) <= 6.0) {
+          if (cv::norm(apply_H(H, m.obj_c) - m.img_c) <= 3.5) {
             ++ok;
           }
         }
-        if (ok * 2 >= static_cast<int>(inliers.size())) {
+        if (ok * 10 >= static_cast<int>(inliers.size()) * 7) {
           absorb_with_h(hi, &pending);
           coplanar_existing = true;
           break;
@@ -1243,27 +1571,129 @@ Correspondence TrihedralCharucoDetector::detect_merged(
         absorb_with_h(hi, &pending);
       }
     }
+    }  // else: 整图剥离回退
   }
 
   if (hyps.empty()) {
     return empty;
   }
 
-  // 吸收后重算 Charuco 角点（并入的新码要参与插值）
-  for (auto &hyp : hyps) {
+  auto marker_hull = [](const FaceHyp &hyp) {
+    std::vector<cv::Point2f> pts;
+    for (const auto &mc : hyp.marker_corners) {
+      pts.insert(pts.end(), mc.begin(), mc.end());
+    }
+    std::vector<cv::Point2f> hull;
+    if (pts.size() >= 3) {
+      cv::convexHull(pts, hull);
+    }
+    return hull;
+  };
+
+  /// 每面：掩膜掉其它区域再插值/亚像素，并用板→图单应丢掉飞点
+  auto refine_hyp_on_roi = [&](FaceHyp &hyp) {
     if (hyp.marker_ids.size() < 3) {
-      continue;
+      return;
+    }
+    const auto hull = marker_hull(hyp);
+    cv::Mat mask = cv::Mat::zeros(mat.size(), CV_8UC1);
+    if (hull.size() >= 3) {
+      std::vector<cv::Point> ih;
+      ih.reserve(hull.size());
+      for (const auto &p : hull) {
+        ih.emplace_back(cvRound(p.x), cvRound(p.y));
+      }
+      cv::fillConvexPoly(mask, ih, 255);
+      const float side = median_marker_side(hyp.marker_corners);
+      int er = std::max(3, cvRound(side * 0.20f));
+      if (er % 2 == 0) {
+        ++er;
+      }
+      cv::erode(
+          mask, mask, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(er, er)));
+    }
+    cv::Mat masked = mat.clone();
+    const bool use_mask = cv::countNonZero(mask) > 80;
+    if (use_mask) {
+      masked.setTo(cv::Scalar(128, 128, 128), mask == 0);
     }
     std::vector<cv::Point2f> cc;
     std::vector<int> ci;
     const int min_m = hyp.marker_ids.size() >= 6 ? 2 : 1;
     charuco_interpolate_from_markers(
-        *local_board_, mat, K, D, hyp.marker_corners, hyp.marker_ids, cc, ci, min_m,
+        *local_board_, masked, K, D, hyp.marker_corners, hyp.marker_ids, cc, ci, min_m,
         make_params());
     if (ci.size() >= 4 && ci.size() == cc.size()) {
       hyp.charuco_corners = std::move(cc);
       hyp.charuco_ids = std::move(ci);
     }
+    if (hyp.charuco_ids.size() >= 4) {
+      snap_to_chess_saddles(
+          to_gray(masked), hyp.marker_corners, median_marker_side(hyp.marker_corners),
+          &hyp.charuco_corners, &hyp.charuco_ids);
+    }
+    if (use_mask && hyp.charuco_ids.size() == hyp.charuco_corners.size()) {
+      std::vector<cv::Point2f> kc;
+      std::vector<int> ki;
+      for (size_t i = 0; i < hyp.charuco_corners.size(); ++i) {
+        const cv::Point2f &p = hyp.charuco_corners[i];
+        const int x = std::max(0, std::min(mask.cols - 1, cvRound(p.x)));
+        const int y = std::max(0, std::min(mask.rows - 1, cvRound(p.y)));
+        if (mask.at<uchar>(y, x) != 0) {
+          kc.push_back(p);
+          ki.push_back(hyp.charuco_ids[i]);
+        }
+      }
+      if (kc.size() >= 4) {
+        hyp.charuco_corners.swap(kc);
+        hyp.charuco_ids.swap(ki);
+      }
+    }
+    std::vector<cv::Point2f> src;
+    std::vector<cv::Point2f> dst;
+    for (size_t k = 0; k < hyp.marker_ids.size(); ++k) {
+      cv::Point2f obj;
+      if (!marker_center_on_board(local_board_, hyp.marker_ids[k], &obj)) {
+        continue;
+      }
+      src.push_back(obj);
+      dst.push_back(marker_image_center(hyp.marker_corners[k]));
+    }
+    if (src.size() < 4 || hyp.charuco_ids.size() != hyp.charuco_corners.size()) {
+      return;
+    }
+    cv::Mat H;
+    try {
+      H = cv::findHomography(src, dst, cv::RANSAC, 2.5);
+    } catch (const cv::Exception &) {
+      return;
+    }
+    if (H.empty()) {
+      return;
+    }
+    const auto &board_pts = local_board_->getChessboardCorners();
+    std::vector<cv::Point2f> kc;
+    std::vector<int> ki;
+    for (size_t i = 0; i < hyp.charuco_ids.size(); ++i) {
+      const int lid = hyp.charuco_ids[i];
+      if (lid < 0 || lid >= static_cast<int>(board_pts.size())) {
+        continue;
+      }
+      const cv::Point2f obj(
+          board_pts[static_cast<size_t>(lid)].x, board_pts[static_cast<size_t>(lid)].y);
+      if (cv::norm(apply_H(H, obj) - hyp.charuco_corners[i]) <= 3.5) {
+        kc.push_back(hyp.charuco_corners[i]);
+        ki.push_back(lid);
+      }
+    }
+    if (kc.size() >= 4) {
+      hyp.charuco_corners.swap(kc);
+      hyp.charuco_ids.swap(ki);
+    }
+  };
+
+  for (auto &hyp : hyps) {
+    refine_hyp_on_roi(hyp);
   }
 
   // 后处理：大面 H 回收小碎块；近平行 hyp 再拼一次
@@ -1312,11 +1742,11 @@ Correspondence TrihedralCharucoDetector::detect_merged(
           ++total;
           const double e = cv::norm(
               apply_H(H, obj) - marker_image_center(hyps[j].marker_corners[k]));
-          if (e <= 6.0) {
+          if (e <= 3.5) {
             ++ok;
           }
         }
-        if (total > 0 && ok * 2 >= total) {
+        if (total > 0 && ok * 4 >= total * 3) {
           // 碎块完全落在大面单应下 → 并入
           std::unordered_set<int> have(hyps[i].marker_ids.begin(), hyps[i].marker_ids.end());
           for (size_t k = 0; k < hyps[j].marker_ids.size(); ++k) {
@@ -1340,19 +1770,7 @@ Correspondence TrihedralCharucoDetector::detect_merged(
     }
     hyps.swap(kept);
     for (auto &hyp : hyps) {
-      if (hyp.marker_ids.size() < 3) {
-        continue;
-      }
-      std::vector<cv::Point2f> cc;
-      std::vector<int> ci;
-      const int min_m = hyp.marker_ids.size() >= 6 ? 2 : 1;
-      charuco_interpolate_from_markers(
-          *local_board_, mat, K, D, hyp.marker_corners, hyp.marker_ids, cc, ci, min_m,
-          make_params());
-      if (ci.size() >= 4 && ci.size() == cc.size()) {
-        hyp.charuco_corners = std::move(cc);
-        hyp.charuco_ids = std::move(ci);
-      }
+      refine_hyp_on_roi(hyp);
     }
   }
 
@@ -1414,6 +1832,64 @@ Correspondence TrihedralCharucoDetector::detect_merged(
       }
     }
     hyps.swap(kept);
+  }
+
+  for (auto &hyp : hyps) {
+    refine_hyp_on_roi(hyp);
+  }
+
+  // 折缝角点：落在邻面凸包附近的丢掉
+  if (hyps.size() >= 2) {
+    std::vector<std::vector<cv::Point2f>> hulls;
+    std::vector<float> meds;
+    hulls.reserve(hyps.size());
+    meds.reserve(hyps.size());
+    for (const auto &h : hyps) {
+      hulls.push_back(marker_hull(h));
+      meds.push_back(median_marker_side(h.marker_corners));
+    }
+    for (size_t i = 0; i < hyps.size(); ++i) {
+      if (hyps[i].charuco_corners.size() != hyps[i].charuco_ids.size()) {
+        continue;
+      }
+      std::vector<cv::Point2f> kc;
+      std::vector<int> ki;
+      for (size_t p = 0; p < hyps[i].charuco_corners.size(); ++p) {
+        const cv::Point2f &pt = hyps[i].charuco_corners[p];
+        bool near_other = false;
+        for (size_t j = 0; j < hyps.size(); ++j) {
+          if (j == i || hulls[j].size() < 3) {
+            continue;
+          }
+          const double d = cv::pointPolygonTest(hulls[j], pt, true);
+          if (d > -0.45 * static_cast<double>(meds[j])) {
+            near_other = true;
+            break;
+          }
+        }
+        if (!near_other) {
+          kc.push_back(pt);
+          ki.push_back(hyps[i].charuco_ids[p]);
+        }
+      }
+      if (kc.size() >= 4) {
+        hyps[i].charuco_corners.swap(kc);
+        hyps[i].charuco_ids.swap(ki);
+      }
+    }
+  }
+
+  {
+    std::vector<FaceHyp> kept;
+    for (auto &h : hyps) {
+      if (h.charuco_ids.size() >= 4 && h.charuco_ids.size() == h.charuco_corners.size()) {
+        kept.push_back(std::move(h));
+      }
+    }
+    hyps.swap(kept);
+  }
+  if (hyps.empty()) {
+    return empty;
   }
 
   // ----- ④ 法向 → 模型三面 XY / XZ / YZ（与码 ID 无关）-----

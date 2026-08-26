@@ -11,6 +11,9 @@ base_frame: base_link
 gripper_frame: wrist_camera_mount
 image_frame: wrist_camera_optical
 camera_link_frame: wrist_camera_link
+image_topic: /wrist_camera/color/image_raw
+camera_info_topic: /wrist_camera/color/camera_info
+pose_source: tf
 recommended_calibrators:
   - cam_intrinsics
   - eye_in_hand

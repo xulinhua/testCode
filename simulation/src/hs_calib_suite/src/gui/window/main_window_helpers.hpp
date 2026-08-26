@@ -68,9 +68,9 @@ inline QLabel *make_label(const QString &text, const QString &object_name, QWidg
       object_name == QStringLiteral("StepActive") ||
       object_name == QStringLiteral("StepDone") ||
       object_name == QStringLiteral("StepIdle")) {
-    f.setFamily(QStringLiteral("Noto Sans Mono"));
-    f.setStyleHint(QFont::Monospace);
-    f.setPointSize(11);
+    f.setFamily(QStringLiteral("Noto Sans CJK SC"));
+    f.setStyleHint(QFont::SansSerif);
+    f.setPointSize(12);
     f.setWeight(QFont::DemiBold);
   } else if (object_name == QStringLiteral("StatusBarPage")) {
     f.setFamily(QStringLiteral("Noto Sans Mono"));

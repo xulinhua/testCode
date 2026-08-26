@@ -1,5 +1,6 @@
 #include "hs_calib_suite/core/calibrators/eye_to_hand_calibrator.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -71,7 +72,7 @@ CalibratorInfo EyeToHandCalibrator::calibrator_info() const {
   info.display_name = "眼在手外";
   info.category = "handeye";
   info.required_frames = {"base", "gripper", "camera"};
-  info.supported_targets = {"chessboard", "aruco", "aruco_grid"};
+  info.supported_targets = {"chessboard", "charuco", "aruco", "aruco_grid", "aprilgrid"};
   return info;
 }
 
@@ -153,11 +154,44 @@ CalibrationResult EyeToHandCalibrator::calibrate(
     T_base_camera(r, 3) = t_c2b.at<double>(r, 0);
   }
 
+  double rot_err = 0.0;
+  double t_err = 0.0;
+  int pairs = 0;
+  for (size_t i = 0; i + 1 < R_b2g.size(); ++i) {
+    Eigen::Matrix4d A = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d Ai = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d B = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d Bi = Eigen::Matrix4d::Identity();
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        A(r, c) = R_b2g[i + 1].at<double>(r, c);
+        Ai(r, c) = R_b2g[i].at<double>(r, c);
+        B(r, c) = R_t2c[i + 1].at<double>(r, c);
+        Bi(r, c) = R_t2c[i].at<double>(r, c);
+      }
+    }
+    Eigen::Matrix4d Am = invert_se3(Ai) * A;
+    Eigen::Matrix4d Bm = invert_se3(Bi) * B;
+    Eigen::Matrix4d AX = Am * T_base_camera;
+    Eigen::Matrix4d XB = T_base_camera * Bm;
+    Eigen::Matrix3d R = AX.block<3, 3>(0, 0).transpose() * XB.block<3, 3>(0, 0);
+    double c = (R.trace() - 1.0) * 0.5;
+    c = std::max(-1.0, std::min(1.0, c));
+    rot_err += std::acos(c) * 180.0 / CV_PI;
+    t_err += (AX.block<3, 1>(0, 3) - XB.block<3, 1>(0, 3)).norm();
+    ++pairs;
+  }
+  if (pairs > 0) {
+    rot_err /= static_cast<double>(pairs);
+    t_err /= static_cast<double>(pairs);
+  }
+
   result.success = true;
   result.message = "eye_to_hand ok";
-  result.score = 1.f;
+  result.score = static_cast<float>(1.0 / (1.0 + rot_err));
   result.metrics["num_pairs"] = static_cast<double>(R_b2g.size());
-  result.metrics["handeye_rmse"] = 0.0;
+  result.metrics["handeye_rmse"] = rot_err;
+  result.metrics["handeye_t_rmse"] = t_err;
   result.transforms[parent][child] = T_base_camera;
   result.intrinsics_meta["parent_frame"] = parent;
   result.intrinsics_meta["child_frame"] = child;

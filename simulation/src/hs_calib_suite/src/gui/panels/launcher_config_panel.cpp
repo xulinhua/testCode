@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -499,11 +500,11 @@ LauncherConfigPanel::LauncherConfigPanel(QWidget *parent) : QWidget(parent) {
     edit_config_path_ = new QLineEdit(host);
     edit_config_path_->setReadOnly(true);
     edit_config_path_->setPlaceholderText(
-        QStringLiteral("包内靶标 YAML，例如 cam_intrinsics.yaml"));
+        QStringLiteral("包内 YAML，例如 eye_in_hand.yaml"));
     auto *reload = new QPushButton(QStringLiteral("重新加载"), host);
     reload->setObjectName(QStringLiteral("GhostButton"));
     reload->setToolTip(
-        QStringLiteral("从 YAML 读取方格/圆点阵列等靶标几何（不是相机内参）"));
+        QStringLiteral("从当前标定类型对应的 YAML 读取话题、坐标系、靶标等"));
     connect(reload, &QPushButton::clicked, this, &LauncherConfigPanel::reload_yaml_clicked);
     auto *cfg_row = new QWidget(host);
     auto *cfg_lay = new QHBoxLayout(cfg_row);
@@ -965,8 +966,9 @@ QStringList allowed_target_ids(const QString &calibrator_id) {
   if (calibrator_id == QStringLiteral("eye_in_hand") ||
       calibrator_id == QStringLiteral("eye_to_hand")) {
     return {
-        QStringLiteral("chessboard"), QStringLiteral("aruco"),
-        QStringLiteral("aruco_grid")};
+        QStringLiteral("chessboard"), QStringLiteral("charuco"),
+        QStringLiteral("aruco"), QStringLiteral("aruco_grid"),
+        QStringLiteral("aprilgrid")};
   }
   // cam_intrinsics / stereo_intrinsics / stereo_extrinsics / 默认：平面靶
   return {
@@ -1245,11 +1247,24 @@ void LauncherConfigPanel::set_calibrator_id(const QString &id) {
       edit_child_frame_->setText(QStringLiteral("right"));
     }
   }
-  if (he && prev != id && combo_intrinsics_source_ != nullptr &&
-      intrinsics_source_mode() == 0) {
-    const int yidx = combo_intrinsics_source_->findData(2);
-    if (yidx >= 0) {
-      combo_intrinsics_source_->setCurrentIndex(yidx);
+  if (he && prev != id) {
+    if (combo_intrinsics_source_ != nullptr && intrinsics_source_mode() == 0) {
+      const int yidx = combo_intrinsics_source_->findData(2);
+      if (yidx >= 0) {
+        combo_intrinsics_source_->setCurrentIndex(yidx);
+      }
+    }
+    if (spin_min_views_ != nullptr && spin_min_views_->value() > 20) {
+      spin_min_views_->setValue(8);
+    }
+    if (edit_parent_frame_ != nullptr && id == QStringLiteral("eye_in_hand")) {
+      edit_parent_frame_->setText(QStringLiteral("tool0"));
+    }
+    if (edit_parent_frame_ != nullptr && id == QStringLiteral("eye_to_hand")) {
+      edit_parent_frame_->setText(QStringLiteral("base"));
+    }
+    if (edit_child_frame_ != nullptr) {
+      edit_child_frame_->setText(QStringLiteral("camera_optical_frame"));
     }
   }
   if (intrinsic && prev != id && combo_intrinsics_source_ != nullptr) {
@@ -1312,6 +1327,241 @@ void LauncherConfigPanel::apply_tier4_profile_to_solver_flags(const QString &pro
   if (chk_thin_prism_ != nullptr) {
     chk_thin_prism_->setChecked(
         flag("enable_prism_model") || flag("thin_prism"));
+  }
+}
+
+namespace {
+
+void set_editable_combo_text(QComboBox *combo, const QString &text) {
+  if (combo == nullptr || text.trimmed().isEmpty()) {
+    return;
+  }
+  const QString t = text.trimmed();
+  const bool blocked = combo->blockSignals(true);
+  const int idx = combo->findText(t);
+  if (idx >= 0) {
+    combo->setCurrentIndex(idx);
+  } else {
+    combo->setEditText(t);
+  }
+  combo->blockSignals(blocked);
+}
+
+QString yaml_q(const std::map<std::string, std::string> &kv, const char *key) {
+  const auto it = kv.find(key);
+  if (it == kv.end()) {
+    return {};
+  }
+  return QString::fromStdString(it->second).trimmed();
+}
+
+int parse_source_mode(const QString &s) {
+  const QString t = s.toLower();
+  if (t == QStringLiteral("ros") || t == QStringLiteral("ros_topic") ||
+      t == QStringLiteral("topic") || t == QStringLiteral("online")) {
+    return static_cast<int>(SourceMode::RosTopic);
+  }
+  if (t == QStringLiteral("bag") || t == QStringLiteral("rosbag") ||
+      t == QStringLiteral("rosbag2")) {
+    return static_cast<int>(SourceMode::RosBag);
+  }
+  if (t == QStringLiteral("offline") || t == QStringLiteral("images") ||
+      t == QStringLiteral("dir")) {
+    return static_cast<int>(SourceMode::Offline);
+  }
+  return -1;
+}
+
+int parse_pose_source(const QString &s) {
+  const QString t = s.toLower();
+  if (t == QStringLiteral("tf")) {
+    return static_cast<int>(PoseSource::Tf);
+  }
+  if (t == QStringLiteral("csv")) {
+    return static_cast<int>(PoseSource::Csv);
+  }
+  return -1;
+}
+
+int parse_intrinsics_source(const QString &s) {
+  const QString t = s.toLower();
+  if (t == QStringLiteral("1") || t == QStringLiteral("camera_info") ||
+      t == QStringLiteral("info")) {
+    return 1;
+  }
+  if (t == QStringLiteral("2") || t == QStringLiteral("yaml") ||
+      t == QStringLiteral("file")) {
+    return 2;
+  }
+  if (t == QStringLiteral("0") || t == QStringLiteral("none") ||
+      t == QStringLiteral("unused")) {
+    return 0;
+  }
+  return -1;
+}
+
+void set_combo_data(QComboBox *combo, int data) {
+  if (combo == nullptr || data < 0) {
+    return;
+  }
+  const int idx = combo->findData(data);
+  if (idx >= 0) {
+    combo->setCurrentIndex(idx);
+  }
+}
+
+}  // namespace
+
+/// \brief 用扁平 YAML 字典填充数据源 / 标定设置控件
+void LauncherConfigPanel::apply_config_map(const std::map<std::string, std::string> &kv) {
+  if (kv.empty()) {
+    return;
+  }
+
+  const QString target = yaml_q(kv, "target");
+  if (!target.isEmpty() && combo_target_type_ != nullptr) {
+    const bool blocked = combo_target_type_->blockSignals(true);
+    int idx = combo_target_type_->findData(target);
+    if (idx < 0) {
+      idx = combo_target_type_->findText(target);
+    }
+    if (idx >= 0) {
+      combo_target_type_->setCurrentIndex(idx);
+    }
+    combo_target_type_->blockSignals(blocked);
+    update_board_param_visibility();
+  }
+
+  const QString dict = yaml_q(kv, "dictionary");
+  if (!dict.isEmpty() && combo_dictionary_ != nullptr) {
+    const int didx = combo_dictionary_->findText(dict);
+    if (didx >= 0) {
+      combo_dictionary_->setCurrentIndex(didx);
+    }
+  }
+
+  auto to_int = [&](const char *k, int fallback) {
+    const auto it = kv.find(k);
+    if (it == kv.end() || it->second.empty()) {
+      return fallback;
+    }
+    try {
+      return std::stoi(it->second);
+    } catch (...) {
+      return fallback;
+    }
+  };
+  auto to_dbl = [&](const char *k, double fallback) {
+    const auto it = kv.find(k);
+    if (it == kv.end() || it->second.empty()) {
+      return fallback;
+    }
+    try {
+      return std::stod(it->second);
+    } catch (...) {
+      return fallback;
+    }
+  };
+
+  const int sx = to_int("squares_x", squares_x());
+  const int sy = to_int("squares_y", squares_y());
+  const double sq = to_dbl("square_length", square_length());
+  const double mk = to_dbl("marker_length", marker_length());
+  if (kv.count("squares_x") || kv.count("squares_y") || kv.count("square_length") ||
+      kv.count("marker_length")) {
+    set_board_params(sx, sy, sq, mk);
+  }
+
+  const int src = parse_source_mode(yaml_q(kv, "source_mode"));
+  if (src >= 0 && combo_source_mode_ != nullptr) {
+    set_combo_data(combo_source_mode_, src);
+    refresh_source_mode_rows();
+  }
+
+  set_editable_combo_text(combo_image_topic_, yaml_q(kv, "image_topic"));
+  set_editable_combo_text(combo_left_image_topic_, yaml_q(kv, "left_image_topic"));
+  set_editable_combo_text(combo_right_image_topic_, yaml_q(kv, "right_image_topic"));
+  set_editable_combo_text(combo_bag_topic_, yaml_q(kv, "bag_topic"));
+  if (yaml_q(kv, "bag_topic").isEmpty() && !yaml_q(kv, "image_topic").isEmpty()) {
+    set_editable_combo_text(combo_bag_topic_, yaml_q(kv, "image_topic"));
+  }
+
+  const int intrins = parse_intrinsics_source(yaml_q(kv, "intrinsics_source"));
+  if (intrins >= 0 && combo_intrinsics_source_ != nullptr) {
+    set_combo_data(combo_intrinsics_source_, intrins);
+    refresh_intrinsics_source_rows();
+  }
+  const QString cam_info = yaml_q(kv, "camera_info_topic");
+  if (!cam_info.isEmpty()) {
+    if (intrins < 0 && combo_intrinsics_source_ != nullptr &&
+        yaml_q(kv, "camera_yaml").isEmpty()) {
+      set_combo_data(combo_intrinsics_source_, 1);
+      refresh_intrinsics_source_rows();
+    }
+    set_editable_combo_text(combo_camera_info_topic_, cam_info);
+  }
+  const QString cam_yaml = yaml_q(kv, "camera_yaml");
+  if (!cam_yaml.isEmpty()) {
+    if (edit_intrinsics_yaml_ != nullptr) {
+      edit_intrinsics_yaml_->setText(cam_yaml);
+    }
+    if (edit_camera_yaml_ != nullptr) {
+      edit_camera_yaml_->setText(cam_yaml);
+    }
+    if (intrins < 0 && combo_intrinsics_source_ != nullptr) {
+      set_combo_data(combo_intrinsics_source_, 2);
+      refresh_intrinsics_source_rows();
+    }
+  }
+  const QString left_yaml = yaml_q(kv, "left_camera_yaml");
+  if (!left_yaml.isEmpty() && edit_left_camera_yaml_ != nullptr) {
+    edit_left_camera_yaml_->setText(left_yaml);
+  }
+  const QString right_yaml = yaml_q(kv, "right_camera_yaml");
+  if (!right_yaml.isEmpty() && edit_right_camera_yaml_ != nullptr) {
+    edit_right_camera_yaml_->setText(right_yaml);
+  }
+
+  const int pose = parse_pose_source(yaml_q(kv, "pose_source"));
+  if (pose >= 0 && combo_pose_source_ != nullptr) {
+    set_combo_data(combo_pose_source_, pose);
+  }
+  const QString pose_csv = yaml_q(kv, "pose_csv");
+  if (!pose_csv.isEmpty() && edit_pose_csv_ != nullptr) {
+    edit_pose_csv_->setText(pose_csv);
+  }
+
+  auto set_line = [](QLineEdit *edit, const QString &v) {
+    if (edit != nullptr && !v.isEmpty()) {
+      edit->setText(v);
+    }
+  };
+  set_line(edit_base_frame_, yaml_q(kv, "base_frame"));
+  set_line(edit_gripper_frame_, yaml_q(kv, "gripper_frame"));
+  set_line(edit_parent_frame_, yaml_q(kv, "parent_frame"));
+  set_line(edit_child_frame_, yaml_q(kv, "child_frame"));
+  set_line(edit_image_frame_, yaml_q(kv, "image_frame"));
+  set_line(edit_camera_link_frame_, yaml_q(kv, "camera_link_frame"));
+  set_line(edit_image_dir_, yaml_q(kv, "image_dir"));
+  set_line(edit_bag_path_, yaml_q(kv, "bag_path"));
+  set_line(edit_export_path_, yaml_q(kv, "export_dir"));
+
+  const QString method = yaml_q(kv, "method");
+  if (!method.isEmpty() && combo_handeye_method_ != nullptr) {
+    const int midx = combo_handeye_method_->findText(method);
+    if (midx >= 0) {
+      combo_handeye_method_->setCurrentIndex(midx);
+    }
+  }
+
+  if (kv.count("min_views") && spin_min_views_ != nullptr) {
+    spin_min_views_->setValue(std::max(1, to_int("min_views", min_views())));
+  }
+  if (kv.count("min_confidence") && spin_min_confidence_ != nullptr) {
+    spin_min_confidence_->setValue(to_dbl("min_confidence", min_confidence()));
+  }
+  if (kv.count("min_diversity") && spin_min_diversity_ != nullptr) {
+    spin_min_diversity_->setValue(to_dbl("min_diversity", min_diversity()));
   }
 }
 
@@ -1424,6 +1674,20 @@ std::map<std::string, std::string> LauncherConfigPanel::to_config_map() const {
          }
          return combo_right_image_topic_->currentText().trimmed().toStdString();
        }()},
+      {"image_topic",
+       [&]() -> std::string {
+         if (!combo_image_topic_) {
+           return {};
+         }
+         return combo_image_topic_->currentText().trimmed().toStdString();
+       }()},
+      {"bag_topic",
+       [&]() -> std::string {
+         if (!combo_bag_topic_) {
+           return {};
+         }
+         return combo_bag_topic_->currentText().trimmed().toStdString();
+       }()},
       {"min_views", std::to_string(min_views())},
       {"min_confidence", std::to_string(min_confidence())},
       {"min_diversity", std::to_string(min_diversity())},
@@ -1450,7 +1714,7 @@ std::map<std::string, std::string> LauncherConfigPanel::to_config_map() const {
       {"image_frame", edit_image_frame_->text().trimmed().toStdString()},
       {"camera_link_frame", edit_camera_link_frame_->text().trimmed().toStdString()},
       {"camera_info_topic",
-       (intrinsics_source_mode() == 1 && combo_camera_info_topic_)
+       combo_camera_info_topic_
            ? combo_camera_info_topic_->currentText().trimmed().toStdString()
            : ""},
       {"intrinsics_source", std::to_string(intrinsics_source_mode())},
@@ -1468,6 +1732,24 @@ std::map<std::string, std::string> LauncherConfigPanel::to_config_map() const {
   };
   if (combo_handeye_method_ != nullptr) {
     m["method"] = combo_handeye_method_->currentText().toStdString();
+  }
+  if (combo_source_mode_ != nullptr) {
+    const int sm = combo_source_mode_->currentData().toInt();
+    if (sm == static_cast<int>(SourceMode::RosTopic)) {
+      m["source_mode"] = "ros_topic";
+    } else if (sm == static_cast<int>(SourceMode::RosBag)) {
+      m["source_mode"] = "rosbag";
+    } else {
+      m["source_mode"] = "offline";
+    }
+  }
+  if (combo_pose_source_ != nullptr) {
+    const int ps = combo_pose_source_->currentData().toInt();
+    if (ps == static_cast<int>(PoseSource::Tf)) {
+      m["pose_source"] = "tf";
+    } else if (ps == static_cast<int>(PoseSource::Csv)) {
+      m["pose_source"] = "csv";
+    }
   }
   if (target_type_id() == QStringLiteral("aprilgrid")) {
     m["tag_spacing"] = std::to_string(square_length());

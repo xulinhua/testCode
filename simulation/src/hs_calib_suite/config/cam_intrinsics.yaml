@@ -41,3 +41,9 @@ max_allowed_max_reprojection_error: 2.0
 max_allowed_rms_reprojection_error: 0.5
 # 统计图：qt=轻量摘要；matplotlib=完整 Tier4 三图（见 docs/TIER4_INTRINSICS_STATS.md）
 gui.stats_backend: qt
+
+# 数据源（GUI 选择本标定器时读入；可按现场改）
+source_mode: ros_topic          # offline | ros_topic | rosbag
+image_topic: /camera/color/image_raw
+bag_topic: /camera/color/image_raw
+camera_info_topic: /camera/color/camera_info

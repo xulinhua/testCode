@@ -81,7 +81,7 @@ CalibratorInfo EyeInHandCalibrator::calibrator_info() const {
   info.display_name = "眼在手上";
   info.category = "handeye";
   info.required_frames = {"base", "gripper", "camera"};
-  info.supported_targets = {"chessboard", "aruco", "aruco_grid"};
+  info.supported_targets = {"chessboard", "charuco", "aruco", "aruco_grid", "aprilgrid"};
   return info;
 }
 
@@ -164,6 +164,7 @@ CalibrationResult EyeInHandCalibrator::calibrate(
 
   // —— AX≈XB 旋转一致性评估 ——
   double rot_err = 0.0;
+  double t_err = 0.0;
   int pairs = 0;
   for (size_t i = 0; i + 1 < R_g2b.size(); ++i) {
     Eigen::Matrix4d A = Eigen::Matrix4d::Identity();
@@ -183,10 +184,12 @@ CalibrationResult EyeInHandCalibrator::calibrate(
     Eigen::Matrix4d AX = Am * T_gripper_camera;
     Eigen::Matrix4d XB = T_gripper_camera * Bm;
     rot_err += rotation_geodesic_deg(AX.block<3, 3>(0, 0), XB.block<3, 3>(0, 0));
+    t_err += (AX.block<3, 1>(0, 3) - XB.block<3, 1>(0, 3)).norm();
     ++pairs;
   }
   if (pairs > 0) {
     rot_err /= static_cast<double>(pairs);
+    t_err /= static_cast<double>(pairs);
   }
 
   result.success = true;
@@ -194,6 +197,7 @@ CalibrationResult EyeInHandCalibrator::calibrate(
   result.score = static_cast<float>(1.0 / (1.0 + rot_err));
   result.metrics["num_pairs"] = static_cast<double>(R_g2b.size());
   result.metrics["handeye_rmse"] = rot_err;
+  result.metrics["handeye_t_rmse"] = t_err;
   result.transforms[parent][child] = T_gripper_camera;
   result.intrinsics_meta["parent_frame"] = parent;
   result.intrinsics_meta["child_frame"] = child;

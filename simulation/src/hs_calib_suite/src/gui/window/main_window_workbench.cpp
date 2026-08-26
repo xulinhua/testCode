@@ -36,6 +36,7 @@
 #include <thread>
 #include <memory>
 #include <algorithm>
+#include <map>
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -549,10 +550,10 @@ static void fill_topic_combo(
   const int idx = combo->findText(previous);
   if (idx >= 0) {
     combo->setCurrentIndex(idx);
-  } else if (!topics.isEmpty()) {
-    combo->setCurrentIndex(0);
   } else if (!previous.isEmpty()) {
     combo->setEditText(previous);
+  } else if (!topics.isEmpty()) {
+    combo->setCurrentIndex(0);
   }
   combo->blockSignals(false);
 }
@@ -2363,49 +2364,88 @@ void MainWindow::on_review_bar_clicked(int view_index) {
   apply_review_view_filter();
 }
 
-/// \brief 从包内默认板配置填充控件
-void MainWindow::apply_board_config_from_package() {
+/// \brief 从 YAML 填充数据源/标定设置（话题、坐标系、靶标等）
+bool MainWindow::apply_yaml_config_file(const QString &path, QString *error_out) {
+  if (launcher_panel_ == nullptr) {
+    if (error_out) {
+      *error_out = QStringLiteral("配置面板未就绪");
+    }
+    return false;
+  }
+  if (path.trimmed().isEmpty()) {
+    if (error_out) {
+      *error_out = QStringLiteral("配置路径为空");
+    }
+    return false;
+  }
+  std::map<std::string, std::string> kv;
+  std::string err;
+  if (!core::load_simple_yaml_map(path.toStdString(), &kv, &err)) {
+    if (error_out) {
+      *error_out = QString::fromStdString(err.empty() ? "读取失败" : err);
+    }
+    return false;
+  }
+  launcher_panel_->apply_config_map(kv);
+  launcher_panel_->set_config_path(path);
+  if (session_ != nullptr) {
+    launcher_panel_->apply_to_session(session_.get());
+  }
+  return true;
+}
+
+/// \brief 按当前标定器加载包内默认 YAML
+void MainWindow::load_calibrator_default_config() {
   if (launcher_panel_ == nullptr) {
     return;
   }
-  const std::string path = core::resolve_package_config("cam_intrinsics.yaml");
+  const QString id = selected_calibrator_id_.isEmpty()
+      ? launcher_panel_->calibrator_id()
+      : selected_calibrator_id_;
+  const std::string fname = core::default_config_filename(id.toStdString());
+  const std::string path = core::resolve_package_config(fname);
   if (path.empty()) {
     return;
   }
-  core::BoardConfigYaml cfg;
-  if (!core::load_board_config_yaml(path, &cfg) || !cfg.valid) {
+  QString err;
+  if (!apply_yaml_config_file(QString::fromStdString(path), &err)) {
+    append_log(LogLevel::Warn, QStringLiteral("› 加载默认配置失败：%1").arg(err));
     return;
   }
-  launcher_panel_->set_board_params(cfg.squares_x, cfg.squares_y, cfg.square_length);
-  launcher_panel_->set_config_path(QString::fromStdString(path));
-  if (session_) {
-    session_->set_board_params(cfg.squares_x, cfg.squares_y, cfg.square_length);
-  }
+  sync_pending_ros_topics();
+  refresh_setup_source_ui();
+  refresh_setup_readiness();
 }
 
-/// \brief 重载默认板配置
+/// \brief 从包内默认配置填充控件
+void MainWindow::apply_board_config_from_package() {
+  load_calibrator_default_config();
+}
+
+/// \brief 重载当前标定类型对应的包内 YAML
 void MainWindow::on_reload_default_board_config() {
-  const std::string path = core::resolve_package_config("cam_intrinsics.yaml");
+  const QString id = selected_calibrator_id_.isEmpty() && launcher_panel_ != nullptr
+      ? launcher_panel_->calibrator_id()
+      : selected_calibrator_id_;
+  const std::string fname = core::default_config_filename(id.toStdString());
+  const std::string path = core::resolve_package_config(fname);
   if (path.empty()) {
-    append_log(LogLevel::Error, QStringLiteral("› 未找到包内 config/cam_intrinsics.yaml"));
-    return;
-  }
-  core::BoardConfigYaml cfg;
-  if (!core::load_board_config_yaml(path, &cfg) || !cfg.valid) {
     append_log(
         LogLevel::Error,
-        QStringLiteral("› 读取棋盘配置失败：%1")
-            .arg(QString::fromStdString(cfg.message)));
+        QStringLiteral("› 未找到包内 config/%1").arg(QString::fromStdString(fname)));
     return;
   }
-  apply_board_config_from_package();
+  QString err;
+  if (!apply_yaml_config_file(QString::fromStdString(path), &err)) {
+    append_log(LogLevel::Error, QStringLiteral("› 读取配置失败：%1").arg(err));
+    return;
+  }
+  sync_pending_ros_topics();
+  refresh_setup_source_ui();
   append_log(
       LogLevel::Info,
-      QStringLiteral("› 已加载靶标参数 %1 → %2×%3，方格/间距 %4 mm")
-          .arg(QString::fromStdString(path))
-          .arg(cfg.squares_x)
-          .arg(cfg.squares_y)
-          .arg(cfg.square_length * 1000.0, 0, 'f', 2));
+      QStringLiteral("› 已加载 %1（话题 / 坐标系 / 靶标）")
+          .arg(QString::fromStdString(path)));
   refresh_setup_readiness();
 }
 

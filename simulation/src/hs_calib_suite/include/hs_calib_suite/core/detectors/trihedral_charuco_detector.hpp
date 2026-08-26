@@ -29,12 +29,11 @@ namespace core {
 ///   │
 ///   ├─① detect_markers_robust   多尺度 + CLAHE；侧脸镜像时翻转补检
 ///   │
-///   ├─② 建 MarkerObs 池         每个码：图像中心 + 板局部中心 (obj)
+///   ├─② 建 MarkerObs 池         图像中心 + 板局部中心 + 单码 PnP 法向
 ///   │
-///   ├─③ 逐面剥离 (≤3 次)
-///   │     fit_board_in_indices  紧凑种子 → 板→图单应 H → 内点
-///   │     try_build_hyp         Charuco 角点 + PnP 法向
-///   │     共面 → absorb；正交 → 新面；近平行碎块 → 合并
+///   ├─③ 先按法向分簇（≤3），丢掉折缝模糊码
+///   │     每簇单独 H 内点 + Charuco 插值（掩膜 ROI，避开邻面）
+///   │     法向分不开时回退整图剥离
 ///   │
 ///   ├─④ assign_faces_by_normals 把 hyp 法向贴到模型 XY/XZ/YZ
 ///   │

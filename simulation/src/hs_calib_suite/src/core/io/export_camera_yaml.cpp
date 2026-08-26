@@ -432,6 +432,9 @@ bool export_extrinsics_yaml(
   if (result.metrics.count("handeye_rmse")) {
     ofs << "handeye_rmse: " << result.metrics.at("handeye_rmse") << "\n";
   }
+  if (result.metrics.count("handeye_t_rmse")) {
+    ofs << "handeye_t_rmse: " << result.metrics.at("handeye_t_rmse") << "\n";
+  }
   if (result.metrics.count("stereo_rms")) {
     ofs << "stereo_rms: " << result.metrics.at("stereo_rms") << "\n";
   }
@@ -493,6 +496,9 @@ std::string format_extrinsics_text(
   }
   if (result.metrics.count("handeye_rmse")) {
     oss << "handeye_rmse: " << result.metrics.at("handeye_rmse") << "\n";
+  }
+  if (result.metrics.count("handeye_t_rmse")) {
+    oss << "handeye_t_rmse: " << result.metrics.at("handeye_t_rmse") << "\n";
   }
   if (result.metrics.count("stereo_rms")) {
     oss << "stereo_rms: " << result.metrics.at("stereo_rms") << "\n";

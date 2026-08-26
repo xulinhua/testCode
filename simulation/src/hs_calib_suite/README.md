@@ -74,8 +74,8 @@ hs_calib_suite/
 | `stereo_intrinsics` | 同左（**成对**左右采集） | 左右分侧标定 + 可选 `stereoCalibrate`；6 步 UI（含校正验证）；`camera_left.yaml` + `camera_right.yaml` + 可选 `stereo_rectified.yaml` |
 | `stereo_extrinsics` | 同左（成对左右观测）                                            | 固定内参 → `stereoCalibrate` + 校正 → `stereo_extrinsics.yaml`              |
 | `trihedral_oneshot` | 直角三面**ChArUco**（推荐）/ 棋盘；正方形面 + 约 1 格白边 | 单帧：≥2 面，搜焦距 + PnP；多帧：`calibrateCamera`；三面可同码，几何聚类分面 |
-| `eye_in_hand`       | 棋盘 + 位姿                                                     | 末端相机：求解 gripper→camera                                                  |
-| `eye_to_hand`       | 棋盘 + 位姿                                                     | 固定相机：求解 base→camera                                                     |
+| `eye_in_hand`       | 棋盘 / ChArUco / ArUco / AprilGrid + 位姿                       | 末端相机：求解 gripper→camera；话题/帧写在 `config/eye_in_hand.yaml`           |
+| `eye_to_hand`       | 同上                                                            | 固定相机：求解 base→camera；话题/帧写在 `config/eye_to_hand.yaml`              |
 | `detect_lab_identify` | 自动试探 | 标定板类型识别：只判类型，不管尺寸；输出 Top-K |
 | `detect_lab`        | 同上 + 三面                                                     | 局部特征检测：非完整板尽量检出（Thorough/Fast）                               |
 | `detect_lab_full`   | 同上                                                            | 完整标定板检测：残缺帧直接失败                                                   |
@@ -163,8 +163,8 @@ ros2 run hs_calib_suite smoke_handeye
 ros2 run hs_calib_suite placeholder_calibrator
 ```
 
-GUI 可「文件 → 重新加载默认棋盘配置」从 `config/*.yaml` 刷新靶标参数。
-在线图像：订阅 `sensor_msgs/Image`（例如 Isaac 扩展发布的 `/calib_sim/camera/image_raw`）。
+GUI 可「文件 → 重新加载默认 YAML 配置」从 `config/*.yaml` 刷新话题、坐标系与靶标参数。
+在线图像：订阅 `sensor_msgs/Image`。默认话题写在各标定器 YAML（例如 `config/eye_in_hand.yaml` 的 `image_topic`），也可写在项目 `project.yaml`。
 
 ---
 

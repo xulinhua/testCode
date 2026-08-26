@@ -1,11 +1,40 @@
-# eye_in_hand 默认参数
+# hs_calib_suite — eye_in_hand（眼在手上）
+#
+# 话题 / 坐标系写在本文件即可，GUI 选择「眼在手上」或点「重新加载」时读入。
+# 现场按机器人/相机改下面几项，不必每次在界面手填。
+
+# —— 图像源 ——
+source_mode: ros_topic          # offline | ros_topic | rosbag
+image_topic: /camera/color/image_raw
+bag_topic: /camera/color/image_raw
+
+# —— 内参源（手眼必须有内参：YAML 或 CameraInfo）——
+intrinsics_source: yaml         # none | camera_info | yaml
+camera_info_topic: /camera/color/camera_info
+camera_yaml: ""
+
+# —— 机械臂位姿 ——
+pose_source: tf                 # csv | tf
+pose_csv: ""
 base_frame: base
 gripper_frame: tool0
-parent_frame: gripper
-child_frame: camera
-method: tsai
-camera_yaml: ""
+
+# —— 结果变换 T_parent_child = T_gripper_camera ——
+parent_frame: tool0
+child_frame: camera_optical_frame
+image_frame: camera_optical_frame
+camera_link_frame: camera_link
+
+# —— 求解 ——
+method: tsai                    # tsai | park | horaud | andreff | daniilidis
+min_views: 8
+min_confidence: 0.50
+min_diversity: 0.10
+
+# —— 靶标 ——
+target: chessboard              # chessboard | charuco | aruco | aruco_grid | aprilgrid
 squares_x: 9
 squares_y: 6
 square_length: 0.025
-target: chessboard
+marker_length: 0.018
+dictionary: DICT_4X4_50

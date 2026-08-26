@@ -11,6 +11,9 @@ base_frame: cell_A_base
 gripper_frame: flange
 image_frame: cell_A_camera_optical
 camera_link_frame: cell_A_camera_link
+image_topic: /cell_A/camera/color/image_raw
+camera_info_topic: /cell_A/camera/color/camera_info
+pose_source: tf
 recommended_calibrators:
   - cam_intrinsics
   - eye_to_hand

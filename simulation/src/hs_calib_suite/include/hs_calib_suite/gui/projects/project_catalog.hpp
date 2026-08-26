@@ -21,6 +21,9 @@ struct ProjectInfo {
   QString gripper_frame = QStringLiteral("tool0");
   QString image_frame = QStringLiteral("camera_optical_frame");
   QString camera_link_frame = QStringLiteral("camera_link");
+  QString image_topic;
+  QString camera_info_topic;
+  QString pose_source;  ///< csv | tf，空则沿用标定器 YAML
   QStringList recommended_calibrators;
   QString last_calibrator_id;
   QString default_image_subdir;

@@ -17,3 +17,9 @@ parent_frame: left
 child_frame: right
 left_camera_yaml: ""
 right_camera_yaml: ""
+
+# 数据源
+source_mode: ros_topic
+left_image_topic: /cam_left/color/image_raw
+right_image_topic: /cam_right/color/image_raw
+bag_topic: /cam_left/color/image_raw

@@ -216,6 +216,8 @@ private:
   void refresh_workbench_preview_viz();
   void on_reload_default_board_config();
   void apply_board_config_from_package();
+  bool apply_yaml_config_file(const QString &path, QString *error_out = nullptr);
+  void load_calibrator_default_config();
 
   // —— 首页标定器瓷砖 ——
   void refresh_home_calibrator_grid();

@@ -11,6 +11,9 @@ base_frame: base
 gripper_frame: tool0
 image_frame: camera_optical_frame
 camera_link_frame: camera_link
+image_topic: /camera/color/image_raw
+camera_info_topic: /camera/color/camera_info
+pose_source: tf
 recommended_calibrators:
   - cam_intrinsics
   - eye_in_hand

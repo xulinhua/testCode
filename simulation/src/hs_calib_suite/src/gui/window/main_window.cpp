@@ -397,9 +397,9 @@ void MainWindow::refresh_online_indicator() {
 /// \brief 更新顶部步骤条状态（双目内参 6 步，其余 5 步；DetectLab 不计入）
 void MainWindow::update_step_rail(PageId page) {
   static const char *titles_mono[] = {
-      "1  选择任务", "2  数据源设置", "3  标定设置", "4  采集求解", "5  复核导出"};
-  static const char *titles_stereo[] = {"1  选择任务", "2  数据源设置", "3  标定设置",
-                                        "4  采集求解", "5  校正验证", "6  复核导出"};
+      "选择任务", "数据源设置", "标定设置", "采集求解", "复核导出"};
+  static const char *titles_stereo[] = {"选择任务", "数据源设置", "标定设置",
+                                        "采集求解", "校正验证", "复核导出"};
   const bool stereo_flow = uses_stereo_rectify_flow();
   const int step_count = stereo_flow ? 6 : 5;
   const int active_step = step_index_for_page(page);
@@ -429,6 +429,8 @@ void MainWindow::update_step_rail(PageId page) {
     }
     step_labels_[i]->style()->unpolish(step_labels_[i]);
     step_labels_[i]->style()->polish(step_labels_[i]);
+    step_labels_[i]->setAlignment(Qt::AlignCenter);
+    step_labels_[i]->setContentsMargins(18, 4, 18, 4);
   }
 }
 
@@ -873,7 +875,7 @@ void MainWindow::go_to(PageId page) {
 /// \brief 创建菜单栏动作
 void MainWindow::setup_menu_bar() {
   auto *file_menu = menuBar()->addMenu(QStringLiteral("文件(&F)"));
-  auto *act_reload = file_menu->addAction(QStringLiteral("重新加载默认棋盘配置"));
+  auto *act_reload = file_menu->addAction(QStringLiteral("重新加载默认 YAML 配置"));
   connect(act_reload, &QAction::triggered, this, &MainWindow::on_reload_default_board_config);
   act_export_ = file_menu->addAction(QStringLiteral("导出结果文件夹…"));
   act_export_->setEnabled(false);
@@ -1102,15 +1104,19 @@ void MainWindow::setup_central_widget() {
   steps->setObjectName(QStringLiteral("StepRail"));
   auto *steps_layout = new QHBoxLayout(steps);
   steps_layout->setContentsMargins(20, 0, 20, 0);
+  steps_layout->setSpacing(8);
   for (int i = 0; i < 6; ++i) {
     step_labels_[i] = new QLabel(steps);
+    step_labels_[i]->setAlignment(Qt::AlignCenter);
+    step_labels_[i]->setContentsMargins(18, 4, 18, 4);
+    step_labels_[i]->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     step_labels_[i]->setCursor(Qt::PointingHandCursor);
     step_labels_[i]->setToolTip(QStringLiteral("点击切换到此步骤"));
     step_labels_[i]->installEventFilter(this);
-    steps_layout->addWidget(step_labels_[i]);
+    steps_layout->addWidget(step_labels_[i], 0, Qt::AlignVCenter);
     if (i < 5) {
       step_arrows_[i] = make_label(QStringLiteral("→"), QStringLiteral("Muted"), steps);
-      steps_layout->addWidget(step_arrows_[i]);
+      steps_layout->addWidget(step_arrows_[i], 0, Qt::AlignVCenter);
     }
   }
   steps_layout->addStretch(1);
